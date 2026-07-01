@@ -10,7 +10,9 @@ app.use(express.json());
 
 // ── CONFIGURACIÓN ODOO TEMPONOVO ─────────────────────────────────
 const ODOO_URL  = process.env.ODOO_URL  || 'https://temponovo.odoo.com';
-const ODOO_DB   = process.env.ODOO_DB   || '';
+// En Odoo SaaS (*.odoo.com) la base suele llamarse igual que el subdominio
+const DB_GUESS  = new URL(ODOO_URL).hostname.split('.')[0];
+const ODOO_DB   = process.env.ODOO_DB   || DB_GUESS;
 const ODOO_USER = process.env.ODOO_USER || '';
 const ODOO_PASS = process.env.ODOO_PASSWORD || '';
 
@@ -56,28 +58,39 @@ function getCliente(code) { return CLIENTES[(code || '').toUpperCase()] || null;
 // ── ODOO AUTH ────────────────────────────────────────────────────
 let cachedUID = null, lastAuthTime = 0;
 async function getUID() {
+  if (!ODOO_USER || !ODOO_PASS) {
+    throw new Error('Faltan credenciales de Odoo. Configura ODOO_USER y ODOO_PASSWORD (y ODOO_DB si aplica) en Vercel → Settings → Environment Variables, y vuelve a desplegar.');
+  }
   if (cachedUID && (Date.now() - lastAuthTime) < 3600000) return cachedUID;
   const client = xmlrpc.createSecureClient({ host: new URL(ODOO_URL).hostname, port: 443, path: '/xmlrpc/2/common' });
   return new Promise((resolve, reject) => {
     client.methodCall('authenticate', [ODOO_DB, ODOO_USER, ODOO_PASS, {}], (err, uid) => {
-      if (err) return reject(err);
+      if (err) return reject(new Error('No se pudo conectar a Odoo (' + ODOO_DB + '): ' + err.message));
+      if (!uid) return reject(new Error('Odoo rechazó las credenciales (usuario o contraseña/API key incorrectos, o base "' + ODOO_DB + '" equivocada).'));
       cachedUID = uid; lastAuthTime = Date.now();
       console.log('✅ UID Odoo Temponovo:', uid);
       resolve(uid);
     });
   });
 }
-function xmlrpcCall(model, method, args) {
+function xmlrpcCall(model, method, args, kwargs) {
   return getUID().then(uid => {
     const client = xmlrpc.createSecureClient({ host: new URL(ODOO_URL).hostname, port: 443, path: '/xmlrpc/2/object' });
     return new Promise((resolve, reject) => {
-      client.methodCall('execute_kw', [ODOO_DB, uid, ODOO_PASS, model, method, args],
+      client.methodCall('execute_kw', [ODOO_DB, uid, ODOO_PASS, model, method, args, kwargs || {}],
         (err, r) => err ? reject(err) : resolve(r));
     });
   });
 }
 
 // ── CACHÉ EN MEMORIA ─────────────────────────────────────────────
+// Acorta los tracebacks de Odoo al error real (última línea)
+function shortErr(e) {
+  const msg = (e && e.message) || String(e);
+  const lines = msg.split('\n').map(s => s.trim()).filter(Boolean);
+  return lines.length > 1 ? lines[lines.length - 1] : msg;
+}
+
 const cache = {};
 function cacheGet(k) { const e = cache[k]; if (!e) return null; if (Date.now() - e.ts > e.ttl) { delete cache[k]; return null; } return e.data; }
 function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
@@ -196,7 +209,7 @@ app.get('/api/productos', async (req, res) => {
 
     cacheSet('cat_' + code, result, 15 * 60 * 1000);
     res.json(result);
-  } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.delete('/api/productos/cache', (_req, res) => {
@@ -247,7 +260,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
     const skus = productos.map(p => p.sku);
     const prodRecs = await xmlrpcCall('product.product', 'search_read',
-      [[['default_code', 'in', skus], ['active', '=', true]], { fields: ['id', 'default_code'] }]);
+      [[['default_code', 'in', skus], ['active', '=', true]]], { fields: ['id', 'default_code'] });
     const skuToId = {};
     prodRecs.forEach(p => { skuToId[p.default_code] = p.id; });
     const orderLines = productos.filter(p => skuToId[p.sku])
@@ -260,7 +273,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     }]);
     await xmlrpcCall('sale.order', 'action_confirm', [[orderId]]);
     res.json({ ok: true, orderId, message: 'Pedido creado en Odoo' });
-  } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/api/pedidos', requireClient, async (req, res) => {
@@ -269,7 +282,7 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
     const ids = await xmlrpcCall('sale.order', 'search', [[
       ['partner_id', '=', req.partnerId],
       ['state', 'in', ['sale', 'done', 'cancel']]
-    ], { order: 'date_order desc', limit }]);
+    ]], { order: 'date_order desc', limit });
     if (!ids.length) return res.json([]);
     const orders = await xmlrpcCall('sale.order', 'read',
       [ids, ['name', 'date_order', 'state', 'amount_total', 'amount_untaxed', 'note']]);
@@ -277,7 +290,7 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       id: o.id, nombre: o.name, fecha: o.date_order, estado: o.state,
       total: parseFloat(o.amount_total || 0), neto: parseFloat(o.amount_untaxed || 0), nota: o.note || ''
     })));
-  } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 // ── PERFIL ───────────────────────────────────────────────────────
@@ -288,7 +301,17 @@ app.get('/api/me', (req, res) => {
   res.json({ name: c.name, partnerId: c.partnerId, multiplicador: c.multiplicador || 2, sucursales: c.sucursales || [] });
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  ts: new Date().toISOString(),
+  config: {
+    odooUrl: ODOO_URL,
+    odooDb: ODOO_DB,
+    userSet: !!ODOO_USER,
+    passwordSet: !!ODOO_PASS,
+    clientes: Object.keys(CLIENTES).length
+  }
+}));
 
 module.exports = app;
 
