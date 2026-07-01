@@ -3,6 +3,7 @@ const xmlrpc  = require('xmlrpc');
 const cors    = require('cors');
 const fs      = require('fs');
 const path    = require('path');
+const archiver = require('archiver');
 
 const app = express();
 app.use(cors());
@@ -248,6 +249,49 @@ app.get('/api/imagen/:id', async (req, res) => {
   } catch (e) {
     console.error('❌ /api/imagen/' + req.params.id, e.message);
     res.status(500).send(e.message);
+  }
+});
+
+// ── FOTOS EN ZIP (opcionalmente filtradas por familia) ───────────
+// GET /api/fotos?c=CODIGO&familia=Relojes
+app.get('/api/fotos', async (req, res) => {
+  try {
+    const code = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+    if (!getCliente(code)) return res.status(401).json({ error: 'No autorizado' });
+
+    const familia = (req.query.familia || '').trim().toLowerCase();
+    let prods = await fetchProductos();
+    if (familia) {
+      prods = prods.filter(p => {
+        const parts = (p.categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
+        return (parts[0] || '').toLowerCase() === familia;
+      });
+    }
+    if (!prods.length) return res.status(404).json({ error: 'Sin productos para esa familia' });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="temponovo-fotos${familia ? '-' + familia.replace(/[\s/]+/g, '-') : ''}.zip"`);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', e => { console.error('❌ zip', e.message); try { res.end(); } catch {} });
+    archive.pipe(res);
+
+    // Traer imágenes en tandas para no reventar memoria ni tiempos
+    const ids = prods.map(p => p.id);
+    const bySku = {}; prods.forEach(p => { bySku[p.id] = p.sku || String(p.id); });
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const imgs = await xmlrpcCall('product.product', 'read', [chunk, ['id', 'image_512']]);
+      imgs.forEach(r => {
+        if (!r.image_512) return;
+        const name = String(bySku[r.id]).replace(/[^a-zA-Z0-9_-]/g, '_') + '.png';
+        archive.append(Buffer.from(r.image_512, 'base64'), { name });
+      });
+    }
+    await archive.finalize();
+  } catch (e) {
+    console.error('❌ /api/fotos', e.message);
+    if (!res.headersSent) res.status(500).json({ error: shortErr(e) });
   }
 });
 

@@ -4,7 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>Temponovo · Vitrina</title>
-<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400;500&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600&family=Cormorant+Garamond:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 :root{
@@ -61,8 +62,6 @@ input,select,textarea{font-family:var(--sans);}
 .btn-salir{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--steel);background:none;border:none;padding:8px 4px 8px 8px;}
 
 /* Modo vitrina banner */
-.present-banner{display:none;background:var(--ink);color:var(--gold-soft);font-size:10px;letter-spacing:.25em;text-transform:uppercase;text-align:center;padding:7px 12px;position:sticky;top:56px;z-index:99;}
-body.present .present-banner{display:block;}
 
 .nav-bottom{position:fixed;bottom:0;left:0;right:0;background:var(--paper);border-top:1px solid var(--line);display:flex;z-index:100;height:60px;padding-bottom:env(safe-area-inset-bottom);}
 .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--steel);font-size:9px;letter-spacing:.15em;text-transform:uppercase;border:none;background:none;position:relative;}
@@ -70,8 +69,6 @@ body.present .present-banner{display:block;}
 .nav-item.active{color:var(--gold-ink);}
 .nav-badge{position:absolute;top:6px;right:calc(50% - 20px);background:var(--gold);color:#fff;border-radius:10px;min-width:17px;height:17px;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 4px;}
 .nav-badge.show{display:flex;}
-body.present .nav-bottom{display:none;}
-body.present .main{padding-bottom:20px;}
 
 .main{flex:1;padding-bottom:70px;}
 .section{display:none;}.section.active{display:block;}
@@ -81,7 +78,6 @@ body.present .main{padding-bottom:20px;}
 
 /* ── VITRINA ── */
 .vit-toolbar{padding:12px 14px 10px;display:flex;flex-direction:column;gap:10px;background:var(--paper);position:sticky;top:56px;z-index:50;border-bottom:1px solid var(--line);}
-body.present .vit-toolbar{top:87px;}
 .vit-search{background:var(--white);border:1px solid var(--line);border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:9px;}
 .vit-search svg{width:16px;height:16px;stroke:var(--steel);fill:none;stroke-width:1.6;flex-shrink:0;}
 .vit-search input{background:transparent;border:none;outline:none;font-size:14px;flex:1;color:var(--ink);}
@@ -102,7 +98,6 @@ body.present .vit-toolbar{top:87px;}
 .card-stock{position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%;}
 .card-stock.si{background:var(--green);}
 .card-stock.no{background:var(--red);}
-body.present .card-stock{display:none;}
 .card-body{padding:12px 13px 14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:4px;flex:1;}
 .card-name{font-family:var(--display);font-size:14.5px;line-height:1.35;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.7em;}
 .card-sku{font-family:var(--mono);font-size:10.5px;color:var(--steel);letter-spacing:.05em;}
@@ -128,10 +123,8 @@ body.present .card-stock{display:none;}
 .ficha-price .lbl{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel);margin-bottom:5px;}
 .ficha-price .val{font-family:var(--mono);font-size:17px;color:var(--ink);}
 .ficha-price.sug .val{color:var(--gold-ink);font-weight:500;}
-body.present .ficha-price.mayor{display:none;}
 .ficha-stockline{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:22px;color:var(--ink-soft);}
 .ficha-stockline .dot{width:9px;height:9px;border-radius:50%;}
-body.present .ficha-stockline{display:none;}
 .ficha-attrs{border-top:1px solid var(--line);margin-bottom:20px;}
 .attr-row{display:flex;justify-content:space-between;gap:16px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:14px;}
 .attr-row .k{color:var(--steel);letter-spacing:.05em;font-size:12px;text-transform:uppercase;padding-top:1px;}
@@ -145,8 +138,6 @@ body.present .ficha-stockline{display:none;}
 .big-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5;}
 .big-btn.dark{background:var(--ink);color:var(--gold-soft);}
 .big-btn.gold{background:transparent;color:var(--gold-ink);border:1px solid var(--gold);}
-body.present .ficha-actions .dark{display:none;}
-body.present .ficha-actions .qty-row{display:none;}
 
 /* ── PROBAR ── */
 .try-wrap{max-width:640px;margin:0 auto;padding:18px 14px 40px;}
@@ -224,6 +215,44 @@ body.present .ficha-actions .qty-row{display:none;}
 /* toast */
 #toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--gold-soft);padding:11px 22px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;z-index:400;opacity:0;transition:all .3s;pointer-events:none;border-radius:24px;white-space:nowrap;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+/* ── brand personalizada ── */
+#brand{display:flex;align-items:center;gap:8px;min-width:0;}
+#brand img{height:32px;max-width:150px;object-fit:contain;display:block;}
+#brand .bname{font-family:var(--display);font-size:16px;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pills-row.subs .pill{border-style:dashed;}
+.pills-row.subs{display:none;}
+.pills-row.subs.show{display:flex;}
+
+/* ── AJUSTES ── */
+.cfg-wrap{max-width:640px;margin:0 auto;padding:18px 14px 50px;}
+.cfg-block{background:var(--white);border:1px solid var(--line);padding:18px 16px;margin-bottom:14px;}
+.cfg-h{font-size:10px;letter-spacing:.25em;text-transform:uppercase;color:var(--gold-ink);margin-bottom:14px;}
+.cfg-row{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.cfg-row:last-child{margin-bottom:0;}
+.cfg-lbl{font-size:13px;color:var(--ink-soft);flex:1;}
+.cfg-input{border:1px solid var(--line);background:var(--paper);padding:10px 12px;font-size:14px;outline:none;width:100%;}
+.cfg-input:focus{border-color:var(--gold);}
+.cfg-num{width:90px;text-align:center;font-family:var(--mono);}
+.cfg-select{border:1px solid var(--line);background:var(--paper);padding:10px 12px;font-size:14px;outline:none;min-width:150px;}
+.swatches{display:flex;gap:9px;flex-wrap:wrap;align-items:center;}
+.swatch{width:34px;height:34px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;}
+.swatch.active{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper) inset;}
+.swatch.custom{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);position:relative;overflow:hidden;}
+.swatch.custom input{position:absolute;inset:-8px;opacity:0;cursor:pointer;}
+.logo-preview{height:44px;max-width:180px;object-fit:contain;border:1px dashed var(--line);padding:4px 10px;background:var(--paper);display:none;}
+.logo-preview.show{display:block;}
+.cfg-btn{height:42px;padding:0 18px;border:1px solid var(--line);background:var(--white);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft);display:inline-flex;align-items:center;gap:8px;}
+.cfg-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;}
+.cfg-btn.dark{background:var(--ink);color:var(--gold-soft);border-color:var(--ink);}
+.cfg-btn.danger{color:var(--red);border-color:var(--red-light);}
+.ov-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);margin-top:10px;}
+.ov-item{background:var(--paper);display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;}
+.ov-item .sku{font-family:var(--mono);font-size:12px;flex:1;}
+.ov-item .pr{font-family:var(--mono);color:var(--gold-ink);}
+.ov-item button{background:none;border:none;color:var(--steel);font-size:17px;padding:2px 6px;}
+.cfg-note{font-size:12px;color:var(--steel);line-height:1.6;margin-top:10px;}
+.dl-row{display:flex;gap:10px;flex-wrap:wrap;}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
 </style>
 </head>
@@ -245,11 +274,8 @@ body.present .ficha-actions .qty-row{display:none;}
 <!-- ═══════ APP ═══════ -->
 <div id="app">
   <header class="header">
-    <div class="wordmark">TEMPON<span class="dial" data-dial="13"></span>VO</div>
+    <div id="brand"><span class="wordmark">TEMPON<span class="dial" data-dial="13"></span>VO</span></div>
     <div class="header-right">
-      <button class="hbtn" id="btn-present" title="Modo vitrina — muestra solo precios de venta">
-        <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>
       <button class="hbtn" id="btn-cart-top" title="Ver pedido">
         <svg viewBox="0 0 24 24"><path d="M6 7h12l-1.2 12a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 7z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg>
         <span class="hbadge" id="badge-top">0</span>
@@ -257,7 +283,6 @@ body.present .ficha-actions .qty-row{display:none;}
       <button class="btn-salir" id="btn-salir">Salir</button>
     </div>
   </header>
-  <div class="present-banner">Modo vitrina · toca el ojo para volver</div>
 
   <main class="main">
 
@@ -266,9 +291,10 @@ body.present .ficha-actions .qty-row{display:none;}
       <div class="vit-toolbar">
         <div class="vit-search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="vit-search" type="text" placeholder="Buscar reloj, código, color…"/>
+          <input id="vit-search" type="text" placeholder="Buscar producto, código, color…"/>
         </div>
-        <div class="pills-row" id="vit-pills"></div>
+        <div class="pills-row" id="vit-fams"></div>
+        <div class="pills-row subs" id="vit-subs"></div>
       </div>
       <div id="vit-grid" class="vit-grid"></div>
       <div id="vit-loading" class="loading"><span class="dial" data-dial="34"></span><br/>Cargando colección</div>
@@ -349,6 +375,88 @@ body.present .ficha-actions .qty-row{display:none;}
       </div>
     </section>
 
+    <!-- AJUSTES -->
+    <section class="section" id="sec-ajustes">
+      <div class="cfg-wrap">
+        <h2 class="ped-title" style="margin-bottom:4px">Mi vitrina</h2>
+        <p class="ped-sub">Personaliza cómo ven tus clientas la vitrina. Todo se guarda en este teléfono.</p>
+
+        <div class="cfg-block">
+          <div class="cfg-h">Identidad</div>
+          <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+            <label class="ped-label">Nombre de tu vitrina</label>
+            <input class="cfg-input" id="cfg-nombre" placeholder="Ej: Relojería Carolina" maxlength="30"/>
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-lbl">Tu logo</span>
+            <img class="logo-preview" id="cfg-logo-prev" alt=""/>
+            <button class="cfg-btn" id="cfg-logo-btn">Subir</button>
+            <button class="cfg-btn danger" id="cfg-logo-del" style="display:none">Quitar</button>
+            <input type="file" id="cfg-logo-input" accept="image/*" style="display:none"/>
+          </div>
+        </div>
+
+        <div class="cfg-block">
+          <div class="cfg-h">Estilo</div>
+          <div class="cfg-row">
+            <span class="cfg-lbl">Color de acento</span>
+            <div class="swatches" id="cfg-swatches"></div>
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-lbl">Tipografía</span>
+            <select class="cfg-select" id="cfg-font">
+              <option value="clasica">Clásica (Marcellus)</option>
+              <option value="elegante">Elegante (Playfair)</option>
+              <option value="moderna">Moderna (Montserrat)</option>
+              <option value="editorial">Editorial (Cormorant)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="cfg-block">
+          <div class="cfg-h">Precios de venta</div>
+          <div class="cfg-row">
+            <span class="cfg-lbl">Multiplicador (precio sugerido = tu precio ×)</span>
+            <input class="cfg-input cfg-num" id="cfg-mult" type="number" step="0.1" min="1"/>
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-lbl">Redondeo</span>
+            <select class="cfg-select" id="cfg-round">
+              <option value="0">Sin redondeo</option>
+              <option value="990">Terminar en 990</option>
+              <option value="900">Terminar en 900</option>
+              <option value="1000">Miles exactos</option>
+            </select>
+          </div>
+          <div class="cfg-h" style="margin-top:18px">Precio fijo por producto</div>
+          <div class="cfg-row">
+            <input class="cfg-input" id="ov-sku" placeholder="Código" style="flex:1;font-family:var(--mono);text-transform:uppercase"/>
+            <input class="cfg-input cfg-num" id="ov-precio" type="number" min="0" placeholder="$"/>
+            <button class="cfg-btn dark" id="ov-add">Fijar</button>
+          </div>
+          <div class="ov-list" id="ov-list"></div>
+          <p class="cfg-note">El precio fijo manda sobre el multiplicador. Solo cambia lo que ve tu clienta, no lo que pagas a Temponovo.</p>
+        </div>
+
+        <div class="cfg-block">
+          <div class="cfg-h">Descargas</div>
+          <div class="dl-row">
+            <button class="cfg-btn" id="dl-excel">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+              Excel de stock
+            </button>
+            <button class="cfg-btn" id="dl-fotos">
+              <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14"/><path d="M4 15l4-4 4 4 3-3 5 5"/></svg>
+              Fotos (ZIP)
+            </button>
+          </div>
+          <p class="cfg-note">El Excel incluye código, familia, stock, tu precio y el precio de venta con tus ajustes. El ZIP respeta la familia seleccionada en la vitrina.</p>
+        </div>
+
+        <button class="cfg-btn danger" id="cfg-reset" style="width:100%;justify-content:center">Restablecer mi vitrina</button>
+      </div>
+    </section>
+
   </main>
 
   <nav class="nav-bottom">
@@ -368,6 +476,10 @@ body.present .ficha-actions .qty-row{display:none;}
     <button class="nav-item" data-sec="historial">
       <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
       Historial
+    </button>
+    <button class="nav-item" data-sec="ajustes">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M19.1 4.9 17 7m-10 10-2.1 2.1"/></svg>
+      Ajustes
     </button>
   </nav>
 </div>
@@ -467,12 +579,6 @@ document.querySelectorAll('.nav-item').forEach(btn=>{
 });
 $('btn-cart-top').onclick = ()=> document.querySelector('[data-sec="pedido"]').click();
 
-/* Modo vitrina */
-$('btn-present').onclick = ()=>{
-  document.body.classList.toggle('present');
-  $('btn-present').classList.toggle('gold');
-  toast(document.body.classList.contains('present') ? 'Modo vitrina activo' : 'Modo normal');
-};
 
 /* ═══════════ INIT ═══════════ */
 async function initApp(){
@@ -482,25 +588,98 @@ async function initApp(){
     $('ped-sucursal').innerHTML = ME.sucursales.map(s=>`<option>${s}</option>`).join('');
   }
   updateBadges();
+  applyCfg(); initAjustes();
   try {
     PRODUCTOS = await api('/productos');
     $('vit-loading').style.display='none';
-    renderPills(); renderGrid(); renderTryPicker();
+    renderFams(); renderGrid(); renderTryPicker();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+e.message;
   }
 }
 
+/* ═══════════ CONFIG "MI VITRINA" ═══════════ */
+const DEFAULT_CFG = { nombre:'', logo:'', color:'#ab8a52', font:'clasica', mult:null, round:'0', overrides:{} };
+let CFG = { ...DEFAULT_CFG, ...JSON.parse(localStorage.getItem('tn_cfg')||'{}') };
+function saveCfg(){ localStorage.setItem('tn_cfg', JSON.stringify(CFG)); }
+
+const FONTS = {
+  clasica:   { d:"'Marcellus',Georgia,serif",            s:"'Jost',sans-serif" },
+  elegante:  { d:"'Playfair Display',Georgia,serif",     s:"'Lato',sans-serif" },
+  moderna:   { d:"'Montserrat',sans-serif",              s:"'Montserrat',sans-serif" },
+  editorial: { d:"'Cormorant Garamond',Georgia,serif",   s:"'DM Sans',sans-serif" }
+};
+function shade(hex, f){ // f<1 oscurece, f>1 aclara hacia blanco
+  const n = parseInt(hex.slice(1),16);
+  let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  if(f<=1){ r*=f; g*=f; b*=f; } else { const t=f-1; r+= (255-r)*t; g+=(255-g)*t; b+=(255-b)*t; }
+  return '#'+[r,g,b].map(x=>Math.round(x).toString(16).padStart(2,'0')).join('');
+}
+function applyCfg(){
+  const rt = document.documentElement.style;
+  rt.setProperty('--gold', CFG.color);
+  rt.setProperty('--gold-ink', shade(CFG.color, .78));
+  rt.setProperty('--gold-soft', shade(CFG.color, 1.88));
+  const f = FONTS[CFG.font] || FONTS.clasica;
+  rt.setProperty('--display', f.d);
+  rt.setProperty('--sans', f.s);
+  // brand en header
+  const brand = $('brand');
+  if(CFG.logo){
+    brand.innerHTML = `<img src="${CFG.logo}" alt="${CFG.nombre||'Logo'}"/>`;
+  } else if(CFG.nombre){
+    brand.innerHTML = `<span class="bname">${CFG.nombre.replace(/</g,'&lt;')}</span>`;
+  } else {
+    brand.innerHTML = `<span class="wordmark">TEMPON<span class="dial" data-dial="13"></span>VO</span>`;
+    brand.querySelectorAll('[data-dial]').forEach(makeDial);
+  }
+}
+
+function sugerido(p){
+  const ov = CFG.overrides[p.sku];
+  if(ov > 0) return ov;
+  const m = parseFloat(CFG.mult) || ME?.multiplicador || 2;
+  let v = p.precio * m;
+  const r = CFG.round;
+  if(r==='1000') v = Math.max(1000, Math.round(v/1000)*1000);
+  else if(r==='990') v = Math.max(990, Math.round(v/1000)*1000 - 10);
+  else if(r==='900') v = Math.max(900, Math.round(v/1000)*1000 - 100);
+  return Math.round(v);
+}
+
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_CAT = '', FILTRO_TXT = '';
-function renderPills(){
-  const cats = [...new Set(PRODUCTOS.map(p=>p.categoria).filter(Boolean))].sort();
-  $('vit-pills').innerHTML = `<button class="pill active" data-cat="">Todos</button>` +
-    cats.map(c=>`<button class="pill" data-cat="${c.replace(/"/g,'&quot;')}">${c}</button>`).join('');
-  $('vit-pills').querySelectorAll('.pill').forEach(p=>{
-    p.onclick = ()=>{
-      $('vit-pills').querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
-      p.classList.add('active'); FILTRO_CAT = p.dataset.cat; renderGrid();
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '';
+function famSub(p){
+  const parts = (p.categoria||'').split('/').map(x=>x.trim()).filter(x=>x && x.toLowerCase()!=='all');
+  return { fam: parts[0]||'Otros', sub: parts.slice(1).join(' / ') };
+}
+function renderFams(){
+  const fams = [...new Set(PRODUCTOS.map(p=>famSub(p).fam))].sort();
+  $('vit-fams').innerHTML = `<button class="pill active" data-fam="">Todos</button>` +
+    fams.map(f=>`<button class="pill" data-fam="${f.replace(/"/g,'&quot;')}">${f}</button>`).join('');
+  $('vit-fams').querySelectorAll('.pill').forEach(el=>{
+    el.onclick = ()=>{
+      $('vit-fams').querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
+      el.classList.add('active');
+      FILTRO_FAM = el.dataset.fam; FILTRO_SUB = '';
+      renderSubs(); renderGrid();
+    };
+  });
+  renderSubs();
+}
+function renderSubs(){
+  const box = $('vit-subs');
+  if(!FILTRO_FAM){ box.classList.remove('show'); box.innerHTML=''; return; }
+  const subs = [...new Set(PRODUCTOS.filter(p=>famSub(p).fam===FILTRO_FAM).map(p=>famSub(p).sub).filter(Boolean))].sort();
+  if(!subs.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+  box.innerHTML = `<button class="pill active" data-sub="">Todas</button>` +
+    subs.map(su=>`<button class="pill" data-sub="${su.replace(/"/g,'&quot;')}">${su}</button>`).join('');
+  box.classList.add('show');
+  box.querySelectorAll('.pill').forEach(el=>{
+    el.onclick = ()=>{
+      box.querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
+      el.classList.add('active');
+      FILTRO_SUB = el.dataset.sub; renderGrid();
     };
   });
 }
@@ -508,7 +687,9 @@ $('vit-search').addEventListener('input', e=>{ FILTRO_TXT = e.target.value.toLow
 
 function filtrados(){
   return PRODUCTOS.filter(p=>{
-    if(FILTRO_CAT && p.categoria!==FILTRO_CAT) return false;
+    const fs = famSub(p);
+    if(FILTRO_FAM && fs.fam!==FILTRO_FAM) return false;
+    if(FILTRO_SUB && fs.sub!==FILTRO_SUB) return false;
     if(FILTRO_TXT){
       const hay = (p.nombre+' '+p.sku+' '+(p.atributos||[]).map(a=>a.val).join(' ')).toLowerCase();
       if(!hay.includes(FILTRO_TXT)) return false;
@@ -528,7 +709,7 @@ function renderGrid(){
       <div class="card-body">
         <div class="card-name">${p.nombre}</div>
         <div class="card-sku">${p.sku||'—'}</div>
-        <div class="card-price"><small>Precio sugerido</small>${fmt(p.precioSugerido)}</div>
+        <div class="card-price"><small>Precio</small>${fmt(sugerido(p))}</div>
       </div>
     </div>`).join('');
   $('vit-grid').querySelectorAll('.card').forEach(c=>{
@@ -549,7 +730,7 @@ function openFicha(id){
       <div class="ficha-sku">${p.sku||''}${p.barcode?' · '+p.barcode:''}</div>
       <div class="ficha-prices">
         <div class="ficha-price mayor"><div class="lbl">Tu precio</div><div class="val">${fmt(p.precio)}</div></div>
-        <div class="ficha-price sug"><div class="lbl">Precio sugerido</div><div class="val">${fmt(p.precioSugerido)}</div></div>
+        <div class="ficha-price sug"><div class="lbl">Precio de venta</div><div class="val">${fmt(sugerido(p))}</div></div>
       </div>
       <div class="ficha-stockline">
         <span class="dot" style="background:${p.stock>0?'var(--green)':'var(--red)'}"></span>
@@ -704,6 +885,122 @@ async function loadHistorial(){
         </div>
       </div>`).join('');
   } catch(e){ $('his-list').innerHTML = '<div class="empty">'+e.message+'</div>'; }
+}
+
+/* ═══════════ AJUSTES ═══════════ */
+const SWATCH_COLORS = ['#ab8a52','#c96f8e','#8e3b46','#3d5a80','#4a6b57','#191b1e'];
+function initAjustes(){
+  // identidad
+  $('cfg-nombre').value = CFG.nombre;
+  $('cfg-nombre').oninput = ()=>{ CFG.nombre = $('cfg-nombre').value.trim(); saveCfg(); applyCfg(); };
+  $('cfg-logo-btn').onclick = ()=> $('cfg-logo-input').click();
+  $('cfg-logo-input').onchange = e=>{
+    const f = e.target.files[0]; if(!f) return;
+    const img = new Image();
+    img.onload = ()=>{
+      const h = 80, w = Math.round(img.width * h / img.height);
+      const c = document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      CFG.logo = c.toDataURL('image/png');
+      saveCfg(); applyCfg(); refreshLogoUI();
+      toast('Logo cargado');
+    };
+    img.src = URL.createObjectURL(f);
+  };
+  $('cfg-logo-del').onclick = ()=>{ CFG.logo=''; saveCfg(); applyCfg(); refreshLogoUI(); };
+  refreshLogoUI();
+
+  // estilo
+  const sw = $('cfg-swatches');
+  sw.innerHTML = SWATCH_COLORS.map(c=>`<button class="swatch" data-c="${c}" style="background:${c}"></button>`).join('') +
+    `<label class="swatch custom" title="Otro color"><input type="color" id="cfg-color-free" value="${CFG.color}"/></label>`;
+  function markSwatch(){
+    sw.querySelectorAll('.swatch').forEach(b=>b.classList.toggle('active', b.dataset.c===CFG.color));
+  }
+  sw.querySelectorAll('.swatch[data-c]').forEach(b=>{
+    b.onclick = ()=>{ CFG.color = b.dataset.c; saveCfg(); applyCfg(); markSwatch(); };
+  });
+  document.getElementById('cfg-color-free').oninput = e=>{ CFG.color = e.target.value; saveCfg(); applyCfg(); markSwatch(); };
+  markSwatch();
+  $('cfg-font').value = CFG.font;
+  $('cfg-font').onchange = ()=>{ CFG.font = $('cfg-font').value; saveCfg(); applyCfg(); };
+
+  // precios
+  $('cfg-mult').value = CFG.mult || ME?.multiplicador || 2;
+  $('cfg-mult').onchange = ()=>{
+    const v = parseFloat($('cfg-mult').value);
+    CFG.mult = (v && v>=1) ? v : null;
+    saveCfg(); renderGrid(); toast('Precios actualizados');
+  };
+  $('cfg-round').value = CFG.round;
+  $('cfg-round').onchange = ()=>{ CFG.round = $('cfg-round').value; saveCfg(); renderGrid(); };
+
+  $('ov-add').onclick = ()=>{
+    const sku = $('ov-sku').value.trim().toUpperCase();
+    const pr  = parseInt($('ov-precio').value);
+    if(!sku || !(pr>0)) { toast('Código y precio requeridos'); return; }
+    if(!PRODUCTOS.find(p=>p.sku.toUpperCase()===sku)){ toast('Código no encontrado'); return; }
+    CFG.overrides[sku] = pr;
+    saveCfg(); renderOverrides(); renderGrid();
+    $('ov-sku').value=''; $('ov-precio').value='';
+  };
+  renderOverrides();
+
+  // descargas
+  $('dl-excel').onclick = exportExcel;
+  $('dl-fotos').onclick = ()=>{
+    const q = FILTRO_FAM ? '&familia='+encodeURIComponent(FILTRO_FAM) : '';
+    toast('Preparando ZIP…');
+    window.location = `${API}/fotos?c=${encodeURIComponent(CODE)}${q}`;
+  };
+
+  $('cfg-reset').onclick = ()=>{
+    if(!confirm('¿Restablecer logo, colores, tipografía y precios personalizados?')) return;
+    CFG = { ...DEFAULT_CFG, overrides:{} };
+    saveCfg(); applyCfg(); initAjustes(); renderGrid();
+    toast('Vitrina restablecida');
+  };
+}
+function refreshLogoUI(){
+  const prev = $('cfg-logo-prev');
+  prev.src = CFG.logo || '';
+  prev.classList.toggle('show', !!CFG.logo);
+  $('cfg-logo-del').style.display = CFG.logo ? 'inline-flex' : 'none';
+}
+function renderOverrides(){
+  const keys = Object.keys(CFG.overrides);
+  $('ov-list').innerHTML = keys.length ? keys.map(k=>`
+    <div class="ov-item">
+      <span class="sku">${k}</span>
+      <span class="pr">${fmt(CFG.overrides[k])}</span>
+      <button data-k="${k}">×</button>
+    </div>`).join('') : '';
+  $('ov-list').querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{ delete CFG.overrides[b.dataset.k]; saveCfg(); renderOverrides(); renderGrid(); };
+  });
+}
+
+function exportExcel(){
+  if(!PRODUCTOS.length){ toast('Catálogo vacío'); return; }
+  const rows = PRODUCTOS.map(p=>{
+    const fs = famSub(p);
+    return {
+      'Código': p.sku,
+      'Producto': p.nombre,
+      'Familia': fs.fam,
+      'Subfamilia': fs.sub,
+      'Stock': p.stock,
+      'Tu precio': p.precio,
+      'Precio de venta': sugerido(p),
+      'Detalles': (p.atributos||[]).map(a=>a.attr+': '+a.val).join(' · ')
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:14},{wch:40},{wch:22},{wch:22},{wch:8},{wch:12},{wch:14},{wch:40}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Stock');
+  XLSX.writeFile(wb, 'temponovo-stock.xlsx');
+  toast('Excel descargado');
 }
 
 /* ═══════════ PROBAR EN LA MUÑECA ═══════════ */
