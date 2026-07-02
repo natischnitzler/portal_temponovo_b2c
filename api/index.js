@@ -300,7 +300,7 @@ app.get('/api/fotos', async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 app.post('/api/pedido', requireClient, async (req, res) => {
   try {
-    const { productos, sucursal, nota } = req.body?.data || {};
+    const { productos, nombreVenta, direccion, nota, modoPago, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
     const skus = productos.map(p => p.sku);
     const prodRecs = await xmlrpcCall('product.product', 'search_read',
@@ -310,9 +310,17 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     const orderLines = productos.filter(p => skuToId[p.sku])
       .map(p => [0, 0, { product_id: skuToId[p.sku], product_uom_qty: p.quantity, name: p.sku }]);
     if (!orderLines.length) return res.status(400).json({ error: 'Ningún SKU reconocido' });
+    const noteParts = [
+      nombreVenta ? 'Venta: ' + nombreVenta : '',
+      direccion ? 'Despacho: ' + direccion : '',
+      modoPago ? 'Modo de pago: ' + modoPago : '',
+      metodoPago ? 'Método: ' + metodoPago : '',
+      nota || ''
+    ].filter(Boolean);
     const orderId = await xmlrpcCall('sale.order', 'create', [{
       partner_id: req.partnerId,
-      note: [sucursal, nota].filter(Boolean).join(' | '),
+      client_order_ref: nombreVenta || '',
+      note: noteParts.join(' | '),
       order_line: orderLines
     }]);
     await xmlrpcCall('sale.order', 'action_confirm', [[orderId]]);
@@ -322,17 +330,45 @@ app.post('/api/pedido', requireClient, async (req, res) => {
 
 app.get('/api/pedidos', requireClient, async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit || '50');
+    const limit = parseInt(req.query.limit || '100');
     const ids = await xmlrpcCall('sale.order', 'search', [[
       ['partner_id', '=', req.partnerId],
       ['state', 'in', ['sale', 'done', 'cancel']]
     ]], { order: 'date_order desc', limit });
     if (!ids.length) return res.json([]);
     const orders = await xmlrpcCall('sale.order', 'read',
-      [ids, ['name', 'date_order', 'state', 'amount_total', 'amount_untaxed', 'note']]);
+      [ids, ['name', 'date_order', 'state', 'amount_total', 'amount_untaxed', 'note', 'client_order_ref', 'order_line']]);
+
+    // Líneas para agrupar por familia en el gráfico
+    const lineIds = [...new Set(orders.flatMap(o => o.order_line || []))];
+    let lineMap = {};
+    if (lineIds.length) {
+      const lines = await xmlrpcCall('sale.order.line', 'read',
+        [lineIds, ['order_id', 'product_id', 'name', 'product_uom_qty', 'price_total']]);
+      // categoría de cada producto
+      const prodIds = [...new Set(lines.map(l => Array.isArray(l.product_id) ? l.product_id[0] : 0).filter(Boolean))];
+      let catMap = {};
+      if (prodIds.length) {
+        const prods = await xmlrpcCall('product.product', 'read', [prodIds, ['id', 'default_code', 'categ_id']]);
+        prods.forEach(p => { catMap[p.id] = { sku: p.default_code || '', cat: Array.isArray(p.categ_id) ? p.categ_id[1] : '' }; });
+      }
+      lines.forEach(l => {
+        const oid = Array.isArray(l.order_id) ? l.order_id[0] : l.order_id;
+        const pid = Array.isArray(l.product_id) ? l.product_id[0] : 0;
+        (lineMap[oid] = lineMap[oid] || []).push({
+          sku: catMap[pid]?.sku || l.name || '',
+          categoria: catMap[pid]?.cat || '',
+          cantidad: parseFloat(l.product_uom_qty || 0),
+          total: parseFloat(l.price_total || 0)
+        });
+      });
+    }
+
     res.json(orders.map(o => ({
       id: o.id, nombre: o.name, fecha: o.date_order, estado: o.state,
-      total: parseFloat(o.amount_total || 0), neto: parseFloat(o.amount_untaxed || 0), nota: o.note || ''
+      total: parseFloat(o.amount_total || 0), neto: parseFloat(o.amount_untaxed || 0),
+      nota: o.note || '', ref: o.client_order_ref || '',
+      lineas: lineMap[o.id] || []
     })));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
