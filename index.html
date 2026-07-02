@@ -6,6 +6,7 @@
 <title>Vitrina · Compra Fácil</title>
 <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400;500;600&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600&family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 :root{
@@ -308,6 +309,43 @@ body.costs #btn-eye svg{stroke-width:2;}
 
 #toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 22px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;z-index:400;opacity:0;transition:all .3s;pointer-events:none;border-radius:24px;white-space:nowrap;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+/* forma de cajas (3 estilos) */
+:root{--r:10px;}
+.card,.home-tile,.step,.stat,.chart-box,.his-item,.modo-card,.side-box,.cfg-block,.vr-table,.info-fin,.font-opt,.modo,.fld-in,.fld-ta,.cfg-input,.cfg-select,.big-btn,.try-btn,.cfg-btn,.vr-tbtn,.qty-btn,.login-btn,.info-path,.logo-preview,.fam-tile,.info-hero,.try-stage{border-radius:var(--r);}
+.chip{border-radius:calc(var(--r) + 8px);}
+
+/* mensaje de bienvenida en vitrina */
+.vit-welcome{max-width:1100px;margin:0 auto;padding:16px 14px 0;font-family:var(--f1);font-size:17px;line-height:1.5;color:var(--ink);}
+.vit-welcome:empty{display:none;}
+
+/* orden y filtro */
+.sort-row{display:flex;gap:8px;max-width:1100px;margin:0 auto;width:100%;padding:8px 14px 0;}
+.sort-sel{flex:1;border:1px solid var(--line);background:var(--white);padding:9px 12px;font-size:12.5px;outline:none;border-radius:var(--r);color:var(--ink-soft);}
+
+/* etiquetas en tarjetas */
+.card-img{position:relative;}
+.tagb{position:absolute;top:8px;left:8px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#fff;padding:4px 9px;border-radius:10px;z-index:2;font-weight:600;}
+
+/* config: listas de catálogo y etiquetas */
+.chk-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;width:100%;}
+.chk{display:flex;align-items:center;gap:9px;font-size:13.5px;padding:4px 2px;cursor:pointer;}
+.chk input{width:17px;height:17px;accent-color:var(--hdr);}
+.mini-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);margin-top:10px;border-radius:var(--r);overflow:hidden;}
+.mini-item{background:var(--paper);display:flex;align-items:center;gap:10px;padding:8px 11px;font-size:12.5px;}
+.mini-item .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mini-item button{background:none;border:none;color:var(--steel);font-size:16px;padding:2px 5px;}
+.tag-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.tag-colors{display:flex;gap:6px;}
+.tag-colors .swatch{width:26px;height:26px;}
+.pub-url{font-family:var(--mono);font-size:12px;word-break:break-all;background:var(--paper);border:1px dashed var(--line);padding:10px 12px;border-radius:var(--r);width:100%;}
+#qr-box{display:flex;justify-content:center;padding:14px 0 4px;}
+#qr-box img,#qr-box canvas{border:8px solid #fff;box-shadow:0 2px 14px rgba(0,0,0,.08);}
+
+/* vitrina pública */
+body.public .hbtn,body.public .btn-salir,body.public .nav-bottom{display:none!important;}
+body.public .main{padding-bottom:24px;}
+body.public .priv{display:none!important;}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
 </style>
 </head>
@@ -386,6 +424,7 @@ body.costs #btn-eye svg{stroke-width:2;}
 
     <!-- VITRINA -->
     <section class="section" id="sec-vitrina">
+      <div class="vit-welcome" id="vit-welcome"></div>
       <div class="fam-wrap">
         <button class="fam-arrow" id="fam-left">‹</button>
         <div class="fam-row" id="fam-row" style="padding-left:0;padding-right:0"></div>
@@ -397,6 +436,17 @@ body.costs #btn-eye svg{stroke-width:2;}
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input id="vit-search" type="text" placeholder="Busco un reloj azul… (búsqueda inteligente pronto)"/>
         </div>
+      </div>
+      <div class="sort-row">
+        <select class="sort-sel" id="vit-orden">
+          <option value="">Orden: recomendado</option>
+          <option value="pmin">Precio: menor a mayor</option>
+          <option value="pmax">Precio: mayor a menor</option>
+          <option value="az">Nombre A–Z</option>
+        </select>
+        <select class="sort-sel" id="vit-tag" style="display:none">
+          <option value="">Todas las etiquetas</option>
+        </select>
       </div>
       <div id="vit-grid" class="vit-grid" style="padding-top:4px"></div>
       <div id="vit-loading" class="loading">Cargando colección…</div>
@@ -589,6 +639,10 @@ body.costs #btn-eye svg{stroke-width:2;}
         <label class="fld-l">Slogan</label>
         <input class="cfg-input" id="cfg-slogan" placeholder="Ej: El tiempo, a tu manera" maxlength="50"/>
       </div>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <label class="fld-l">Mensaje de bienvenida (se ve en la vitrina)</label>
+        <textarea class="cfg-input" id="cfg-welcome" rows="2" maxlength="120" placeholder="Ej: ¡Hola! Estos son mis relojes favoritos de la temporada ✨"></textarea>
+      </div>
       <div class="cfg-row">
         <span class="cfg-lbl">Tu logo</span>
         <img class="logo-preview" id="cfg-logo-prev" alt=""/>
@@ -607,6 +661,14 @@ body.costs #btn-eye svg{stroke-width:2;}
       <div class="cfg-row">
         <span class="cfg-lbl">Color fondo</span>
         <div class="swatches" id="sw-fondo"></div>
+      </div>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <span class="cfg-lbl">Forma de cajas y botones</span>
+        <div class="modo-row" id="radius-opts">
+          <div class="modo" data-r="recto"><div class="mt" style="border:1.5px solid var(--ink);border-radius:0;width:34px;height:22px;margin:0 auto 6px"></div><div class="md">Recta</div></div>
+          <div class="modo" data-r="suave"><div class="mt" style="border:1.5px solid var(--ink);border-radius:7px;width:34px;height:22px;margin:0 auto 6px"></div><div class="md">Suave</div></div>
+          <div class="modo" data-r="redondo"><div class="mt" style="border:1.5px solid var(--ink);border-radius:14px;width:34px;height:22px;margin:0 auto 6px"></div><div class="md">Redonda</div></div>
+        </div>
       </div>
       <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
         <span class="cfg-lbl">Tipografía de títulos</span>
@@ -640,6 +702,54 @@ body.costs #btn-eye svg{stroke-width:2;}
       <div class="dl-row" id="ov-clear-row" style="display:none;margin-top:10px">
         <button class="cfg-btn danger" id="ov-clear">Quitar precios fijos</button>
       </div>
+    </div>
+
+    <div class="cfg-block">
+      <div class="cfg-h">Mi catálogo · qué mostrar</div>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <span class="cfg-lbl">Familias visibles en mi vitrina</span>
+        <div class="chk-list" id="cfg-fams"></div>
+      </div>
+      <div class="cfg-row" style="margin-top:6px">
+        <input class="cfg-input" id="hide-sku" placeholder="Código del producto a ocultar" list="sku-list" style="flex:1;font-family:var(--mono);text-transform:uppercase"/>
+        <button class="cfg-btn" id="hide-add">Ocultar</button>
+      </div>
+      <div class="mini-list" id="hidden-list" style="display:none"></div>
+      <p class="cfg-note">Lo oculto no aparece en tu vitrina ni en tu link público, pero sigue disponible en Venta Rápida.</p>
+    </div>
+
+    <div class="cfg-block">
+      <div class="cfg-h">Mis etiquetas</div>
+      <div class="cfg-row">
+        <input class="cfg-input" id="tag-nombre" placeholder="Ej: Más vendido 🔥" maxlength="20" style="flex:1"/>
+        <div class="tag-colors" id="tag-colors"></div>
+        <button class="cfg-btn dark" id="tag-crear">Crear</button>
+      </div>
+      <div class="mini-list" id="tag-list" style="display:none"></div>
+      <div class="cfg-row" style="margin-top:12px">
+        <input class="cfg-input" id="tag-sku" placeholder="Código del producto" list="sku-list" style="flex:1.3;font-family:var(--mono);text-transform:uppercase"/>
+        <select class="cfg-select" id="tag-sel" style="flex:1;min-width:110px"></select>
+        <button class="cfg-btn" id="tag-asignar">Poner</button>
+      </div>
+      <div class="mini-list" id="tagmap-list" style="display:none"></div>
+      <p class="cfg-note">La etiqueta sale sobre la foto del producto en tu vitrina y en tu link público.</p>
+    </div>
+
+    <div class="cfg-block">
+      <div class="cfg-h">Mi link público 🔗</div>
+      <p class="cfg-note" style="margin:0 0 10px">Comparte este link o el QR: tus clientas ven tu vitrina con tus precios, <b>sin</b> costos, sin pedidos y sin necesitar clave.</p>
+      <div class="pub-url" id="pub-url">…</div>
+      <div class="dl-row" style="margin-top:10px">
+        <button class="cfg-btn" id="pub-copy">
+          <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>
+          Copiar link
+        </button>
+        <button class="cfg-btn" id="pub-share">
+          <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.8 15.8 7.1M8.2 13.2l7.6 3.7"/></svg>
+          Compartir
+        </button>
+      </div>
+      <div id="qr-box"></div>
     </div>
 
     <div class="cfg-block">
@@ -707,6 +817,8 @@ body.costs #btn-eye svg{stroke-width:2;}
 <script>
 /* ═══════════ ESTADO ═══════════ */
 const API = '/api';
+const PUBLIC = location.pathname.startsWith('/v/');
+const SLUG = PUBLIC ? location.pathname.split('/')[2] : '';
 let CODE = localStorage.getItem('tn_code') || '';
 let ME = null;
 let PRODUCTOS = [];        // solo con stock (vitrina)
@@ -719,7 +831,10 @@ const $ = id => document.getElementById(id);
 const fmt = n => '$' + Math.round(n).toLocaleString('es-CL');
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
-function imgUrl(id,big){ return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}${big?'&s=g':''}`; }
+function imgUrl(id,big){
+  if(PUBLIC) return `${API}/public/${SLUG}/imagen/${id}${big?'?s=g':''}`;
+  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}${big?'&s=g':''}`;
+}
 
 async function api(path, opts={}){
   const r = await fetch(API+path, {...opts, headers:{'Content-Type':'application/json','x-client-code':CODE, ...(opts.headers||{})}});
@@ -729,9 +844,18 @@ async function api(path, opts={}){
 }
 
 /* ═══════════ CONFIG "MI VITRINA" ═══════════ */
-const DEFAULT_CFG = { nombre:'', slogan:'', logo:'', hdr:'#191b1e', fondo:'#faf9f6', f1:'Marcellus', f2:'Jost', mult:null, overrides:{} };
+const DEFAULT_CFG = { nombre:'', slogan:'', logo:'', hdr:'#191b1e', fondo:'#faf9f6', f1:'Marcellus', f2:'Jost',
+  radius:'suave', welcome:'', mult:null, overrides:{}, hiddenFams:[], hiddenSkus:[], tags:[], tagMap:{} };
 let CFG = { ...DEFAULT_CFG, ...JSON.parse(localStorage.getItem('tn_cfg')||'{}') };
-function saveCfg(){ localStorage.setItem('tn_cfg', JSON.stringify(CFG)); }
+let cfgPushT = null;
+function saveCfg(){
+  localStorage.setItem('tn_cfg', JSON.stringify(CFG));
+  if(PUBLIC) return;
+  clearTimeout(cfgPushT);
+  cfgPushT = setTimeout(()=>{
+    api('/config', { method:'POST', body: JSON.stringify({ data: CFG }) }).catch(()=>{});
+  }, 1200);
+}
 
 const F1_STACK = { 'Marcellus':"'Marcellus',Georgia,serif", 'Playfair Display':"'Playfair Display',Georgia,serif", 'Montserrat':"'Montserrat',sans-serif", 'Cormorant Garamond':"'Cormorant Garamond',Georgia,serif" };
 const F2_STACK = { 'Jost':"'Jost',sans-serif", 'Lato':"'Lato',sans-serif", 'DM Sans':"'DM Sans',sans-serif", 'Montserrat':"'Montserrat',sans-serif" };
@@ -748,6 +872,8 @@ function applyCfg(){
   rt.setProperty('--paper', CFG.fondo);
   rt.setProperty('--f1', F1_STACK[CFG.f1] || F1_STACK['Marcellus']);
   rt.setProperty('--f2', F2_STACK[CFG.f2] || F2_STACK['Jost']);
+  rt.setProperty('--r', {recto:'0px', suave:'10px', redondo:'18px'}[CFG.radius] || '10px');
+  $('vit-welcome').textContent = CFG.welcome || '';
   // brand en header
   const nombre = CFG.nombre || (ME?.name||'').split(' ')[0] || 'Mi Vitrina';
   $('brand').innerHTML =
@@ -758,6 +884,7 @@ function applyCfg(){
   $('home-slogan').textContent = CFG.slogan || 'Tú te dedicas a vender, nosotros hacemos el resto.';
 }
 function sugerido(p){
+  if(PUBLIC) return p.precioVenta || 0;
   const ov = CFG.overrides[p.sku];
   if(ov > 0) return Math.round(ov);
   const m = parseFloat(CFG.mult) || ME?.multiplicador || 2;
@@ -783,7 +910,37 @@ $('login-btn').onclick = async ()=>{
 };
 $('login-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-btn').click(); });
 $('btn-salir').onclick = ()=>{ localStorage.removeItem('tn_code'); location.reload(); };
-if(CODE){ tryLogin(CODE).catch(()=>{ localStorage.removeItem('tn_code'); CODE=''; }); }
+if(PUBLIC){
+  document.body.classList.add('public');
+  $('login-screen').style.display='none';
+  $('app').classList.add('open');
+  initPublic();
+} else if(CODE){ tryLogin(CODE).catch(()=>{ localStorage.removeItem('tn_code'); CODE=''; }); }
+
+async function initPublic(){
+  try {
+    const [cfg, prods] = await Promise.all([
+      fetch(`${API}/public/${SLUG}/config`).then(r=>r.json()),
+      fetch(`${API}/public/${SLUG}/productos`).then(async r=>{ const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); return d; })
+    ]);
+    CFG = { ...DEFAULT_CFG, ...cfg };
+    PRODUCTOS_ALL = prods; PRODUCTOS = prods;
+    applyCfg();
+    $('brand').innerHTML = (CFG.logo?`<img src="${CFG.logo}" alt=""/>`:'') +
+      `<span style="min-width:0"><span class="bname">${esc(CFG.nombre||'Vitrina')}</span>` +
+      (CFG.slogan?`<span class="bslogan">${esc(CFG.slogan)}</span>`:'') + `</span>`;
+    document.title = (CFG.nombre||'Vitrina') + ' · Vitrina';
+    $('vit-loading').style.display='none';
+    document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+    $('sec-vitrina').classList.add('active');
+    renderFams(); renderTagFilter(); renderGrid();
+    setTimeout(()=>{ try{updateFamArrows();}catch(e){} }, 50);
+  } catch(e){
+    $('vit-loading').innerHTML = 'Esta vitrina no está disponible.<br/>'+esc(e.message);
+    document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+    $('sec-vitrina').classList.add('active');
+  }
+}
 
 /* ═══════════ NAV ═══════════ */
 function go(sec){
@@ -809,6 +966,10 @@ $('btn-eye').onclick = ()=>{
 
 /* ═══════════ INIT ═══════════ */
 async function initApp(){
+  try {
+    const sc = await api('/config');
+    if(sc && Object.keys(sc).length){ CFG = { ...DEFAULT_CFG, ...sc }; localStorage.setItem('tn_cfg', JSON.stringify(CFG)); }
+  } catch(e){}
   applyCfg(); initCfgPanel(); ensureRows(12); updateBadges();
   try {
     PRODUCTOS_ALL = await api('/productos');
@@ -818,14 +979,33 @@ async function initApp(){
       `<option value="${esc(p.sku)}">${esc(p.nombre)}</option>` +
       (p.barcode? `<option value="${esc(p.barcode)}">${esc(p.sku)} · ${esc(p.nombre)}</option>` : '')
     ).join('');
-    renderFams(); renderGrid(); renderRows();
+    renderFams(); renderTagFilter(); renderGrid(); renderRows();
+    renderCatalogoCfg();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
   }
 }
 
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '';
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '';
+function visibles(){
+  if(PUBLIC) return PRODUCTOS;   // el servidor ya filtró
+  const hF = new Set(CFG.hiddenFams||[]);
+  const hS = new Set((CFG.hiddenSkus||[]).map(x=>x.toUpperCase()));
+  return PRODUCTOS.filter(p=> !hF.has(famSub(p).fam) && !hS.has((p.sku||'').toUpperCase()));
+}
+function tagOf(sku){
+  const id = (CFG.tagMap||{})[sku];
+  return (CFG.tags||[]).find(t=>t.id===id) || null;
+}
+function renderTagFilter(){
+  const sel = $('vit-tag');
+  const tags = CFG.tags||[];
+  sel.style.display = tags.length ? 'block' : 'none';
+  sel.innerHTML = `<option value="">Todas las etiquetas</option>` +
+    tags.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('');
+  sel.value = FILTRO_TAG;
+}
 function famSub(p){
   const parts = (p.categoria||'').split('/').map(x=>x.trim()).filter(x=>x && x.toLowerCase()!=='all');
   return { fam: parts[0]||'Otros', sub: parts.slice(1).join(' / ') };
@@ -843,7 +1023,7 @@ function famIcon(f){
   return '<rect x="4" y="7" width="16" height="13" rx="1.5"/><path d="M4 11h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>';
 }
 function renderFams(){
-  const fams = [...new Set(PRODUCTOS.map(p=>famSub(p).fam))].sort();
+  const fams = [...new Set(visibles().map(p=>famSub(p).fam))].sort();
   $('fam-row').innerHTML =
     `<div class="fam-tile all ${!FILTRO_FAM?'active':''}" data-fam="">
        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
@@ -876,7 +1056,7 @@ window.addEventListener('resize', ()=>{ try{updateFamArrows();}catch(e){} });
 function renderSubs(){
   const box = $('vit-subs');
   if(!FILTRO_FAM){ box.classList.remove('show'); box.innerHTML=''; return; }
-  const subs = [...new Set(PRODUCTOS.filter(p=>famSub(p).fam===FILTRO_FAM).map(p=>famSub(p).sub).filter(Boolean))].sort();
+  const subs = [...new Set(visibles().filter(p=>famSub(p).fam===FILTRO_FAM).map(p=>famSub(p).sub).filter(Boolean))].sort();
   if(!subs.length){ box.classList.remove('show'); box.innerHTML=''; return; }
   box.innerHTML = `<button class="pill active" data-sub="">Todas</button>` +
     subs.map(su=>`<button class="pill" data-sub="${esc(su)}">${esc(su)}</button>`).join('');
@@ -892,23 +1072,30 @@ function renderSubs(){
 $('vit-search').addEventListener('input', e=>{ FILTRO_TXT = e.target.value.toLowerCase(); renderGrid(); });
 
 function filtrados(){
-  return PRODUCTOS.filter(p=>{
+  let list = visibles().filter(p=>{
     const fs = famSub(p);
     if(FILTRO_FAM && fs.fam!==FILTRO_FAM) return false;
     if(FILTRO_SUB && fs.sub!==FILTRO_SUB) return false;
+    if(FILTRO_TAG && (CFG.tagMap||{})[p.sku]!==FILTRO_TAG) return false;
     if(FILTRO_TXT){
       const hay = (p.nombre+' '+p.sku+' '+(p.atributos||[]).map(a=>a.val).join(' ')).toLowerCase();
       if(!hay.includes(FILTRO_TXT)) return false;
     }
     return true;
   });
+  if(ORDEN==='pmin') list = [...list].sort((a,b)=>sugerido(a)-sugerido(b));
+  else if(ORDEN==='pmax') list = [...list].sort((a,b)=>sugerido(b)-sugerido(a));
+  else if(ORDEN==='az') list = [...list].sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  return list;
 }
+$('vit-orden').onchange = ()=>{ ORDEN = $('vit-orden').value; renderGrid(); };
+$('vit-tag').onchange = ()=>{ FILTRO_TAG = $('vit-tag').value; renderGrid(); };
 function renderGrid(){
   const list = filtrados();
   if(!list.length){ $('vit-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">No hay productos disponibles que coincidan.</div>`; return; }
   $('vit-grid').innerHTML = list.map(p=>`
     <div class="card" data-id="${p.id}">
-      <div class="card-img"><img loading="lazy" src="${imgUrl(p.id)}" alt="${esc(p.nombre)}"/></div>
+      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}<img loading="lazy" src="${imgUrl(p.id)}" alt="${esc(p.nombre)}"/></div>
       <div class="card-body">
         <div class="card-name">${esc(p.nombre)}</div>
         <div class="card-sku">${esc(p.sku)||'—'}</div>
@@ -932,17 +1119,17 @@ function openFicha(id){
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
       <div class="ficha-prices">
         <div class="ficha-price cost" style="flex-direction:column"><div class="lbl">Tu costo</div><div class="val">${fmt(p.precio)}</div></div>
-        <div class="ficha-price"><div class="lbl">Precio de venta</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
+        <div class="ficha-price"><div class="lbl">Precio${PUBLIC?'':' de venta'}</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
       </div>
-      <div class="ficha-stockline"><span class="dot"></span> Disponible · ${p.stock} un.</div>
+      <div class="ficha-stockline priv"><span class="dot"></span> Disponible · ${p.stock} un.</div>
       ${attrs?`<div class="ficha-attrs">${attrs}</div>`:''}
       ${p.descripcion?`<p class="ficha-desc">${esc(p.descripcion)}</p>`:''}
-      <div class="qty-row">
+      <div class="qty-row priv">
         <button class="qty-btn" id="f-menos">−</button>
         <span class="qty-val" id="f-qty">1</span>
         <button class="qty-btn" id="f-mas">+</button>
       </div>
-      <button class="big-btn dark" id="f-add">
+      <button class="big-btn dark priv" id="f-add">
         <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg>
         Agregar al carrito
       </button>
@@ -1248,6 +1435,17 @@ function initCfgPanel(){
   $('cfg-logo-del').onclick = ()=>{ CFG.logo=''; saveCfg(); applyCfg(); refreshLogoUI(); };
   refreshLogoUI();
 
+  $('cfg-welcome').value = CFG.welcome || '';
+  $('cfg-welcome').oninput = ()=>{ CFG.welcome = $('cfg-welcome').value.trim(); saveCfg(); applyCfg(); };
+
+  $('radius-opts').querySelectorAll('.modo').forEach(m=>{
+    m.classList.toggle('active', m.dataset.r === CFG.radius);
+    m.onclick = ()=>{
+      CFG.radius = m.dataset.r; saveCfg(); applyCfg();
+      $('radius-opts').querySelectorAll('.modo').forEach(x=>x.classList.toggle('active', x===m));
+    };
+  });
+
   swatchRow($('sw-header'), HDR_COLORS, 'hdr');
   swatchRow($('sw-fondo'),  BG_COLORS,  'fondo');
   fontOpts($('fo-f1'), Object.keys(F1_STACK), F1_STACK, 'f1', 'Título de ejemplo');
@@ -1314,13 +1512,133 @@ function initCfgPanel(){
     window.location = `${API}/fotos?c=${encodeURIComponent(CODE)}${q}`;
   };
 
+  renderCatalogoCfg(); renderTagsCfg(); renderPublicLink();
+
   $('cfg-reset').onclick = ()=>{
     if(!confirm('¿Restablecer logo, colores, tipografías y precios personalizados?')) return;
-    CFG = { ...DEFAULT_CFG, overrides:{} };
-    saveCfg(); applyCfg(); initCfgPanel(); renderGrid();
+    CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
+    saveCfg(); applyCfg(); initCfgPanel(); renderFams(); renderTagFilter(); renderGrid();
     toast('Vitrina restablecida');
   };
 }
+/* ── catálogo visible ── */
+function renderCatalogoCfg(){
+  const fams = [...new Set(PRODUCTOS.map(p=>famSub(p).fam))].sort();
+  const hF = new Set(CFG.hiddenFams||[]);
+  $('cfg-fams').innerHTML = fams.map(f=>`
+    <label class="chk"><input type="checkbox" data-f="${esc(f)}" ${hF.has(f)?'':'checked'}/> ${esc(f)}</label>`).join('')
+    || '<span class="cfg-note">Catálogo aún cargando…</span>';
+  $('cfg-fams').querySelectorAll('input').forEach(ch=>{
+    ch.onchange = ()=>{
+      const set = new Set(CFG.hiddenFams||[]);
+      ch.checked ? set.delete(ch.dataset.f) : set.add(ch.dataset.f);
+      CFG.hiddenFams = [...set];
+      saveCfg(); renderFams(); renderGrid();
+    };
+  });
+  renderHiddenList();
+  $('hide-add').onclick = ()=>{
+    let v = $('hide-sku').value.trim().toUpperCase();
+    const p = findProd(v); if(p) v = p.sku;
+    if(!v || !p){ toast('Código no encontrado'); return; }
+    if(!(CFG.hiddenSkus||[]).includes(v)) CFG.hiddenSkus = [...(CFG.hiddenSkus||[]), v];
+    $('hide-sku').value='';
+    saveCfg(); renderHiddenList(); renderGrid();
+  };
+}
+function renderHiddenList(){
+  const list = CFG.hiddenSkus||[];
+  const box = $('hidden-list');
+  box.style.display = list.length ? 'flex':'none';
+  box.innerHTML = list.map(sk=>{
+    const p = findProd(sk);
+    return `<div class="mini-item"><span class="grow"><b style="font-family:var(--mono)">${esc(sk)}</b> ${p?'· '+esc(p.nombre):''}</span><button data-k="${esc(sk)}">×</button></div>`;
+  }).join('');
+  box.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{
+      CFG.hiddenSkus = (CFG.hiddenSkus||[]).filter(x=>x!==b.dataset.k);
+      saveCfg(); renderHiddenList(); renderGrid();
+    };
+  });
+}
+
+/* ── etiquetas ── */
+const TAG_COLORS = ['#b3423a','#ab8a52','#3d5a80','#4a6b57','#8e4f8e','#191b1e'];
+let TAG_COLOR = TAG_COLORS[0];
+function renderTagsCfg(){
+  $('tag-colors').innerHTML = TAG_COLORS.map(c=>`<button class="swatch ${c===TAG_COLOR?'active':''}" data-c="${c}" style="background:${c}"></button>`).join('');
+  $('tag-colors').querySelectorAll('.swatch').forEach(b=>{
+    b.onclick = ()=>{ TAG_COLOR = b.dataset.c; $('tag-colors').querySelectorAll('.swatch').forEach(x=>x.classList.toggle('active', x===b)); };
+  });
+  $('tag-crear').onclick = ()=>{
+    const n = $('tag-nombre').value.trim();
+    if(!n){ toast('Escribe el nombre de la etiqueta'); return; }
+    CFG.tags = [...(CFG.tags||[]), { id:'t'+Date.now(), nombre:n, color:TAG_COLOR }];
+    $('tag-nombre').value='';
+    saveCfg(); renderTagList(); renderTagFilter();
+  };
+  renderTagList();
+  $('tag-asignar').onclick = ()=>{
+    let v = $('tag-sku').value.trim().toUpperCase();
+    const p = findProd(v); if(p) v = p.sku;
+    const tid = $('tag-sel').value;
+    if(!p){ toast('Código no encontrado'); return; }
+    if(!tid){ toast('Crea una etiqueta primero'); return; }
+    CFG.tagMap = { ...(CFG.tagMap||{}), [v]: tid };
+    $('tag-sku').value='';
+    saveCfg(); renderTagMapList(); renderGrid();
+  };
+  renderTagMapList();
+}
+function renderTagList(){
+  const tags = CFG.tags||[];
+  const box = $('tag-list');
+  box.style.display = tags.length?'flex':'none';
+  box.innerHTML = tags.map(t=>`<div class="mini-item"><span class="tag-dot" style="background:${t.color}"></span><span class="grow">${esc(t.nombre)}</span><button data-k="${t.id}">×</button></div>`).join('');
+  box.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{
+      CFG.tags = (CFG.tags||[]).filter(t=>t.id!==b.dataset.k);
+      Object.keys(CFG.tagMap||{}).forEach(sk=>{ if(CFG.tagMap[sk]===b.dataset.k) delete CFG.tagMap[sk]; });
+      if(FILTRO_TAG===b.dataset.k) FILTRO_TAG='';
+      saveCfg(); renderTagList(); renderTagMapList(); renderTagFilter(); renderGrid();
+    };
+  });
+  $('tag-sel').innerHTML = tags.length
+    ? tags.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('')
+    : '<option value="">— sin etiquetas —</option>';
+}
+function renderTagMapList(){
+  const map = CFG.tagMap||{};
+  const keys = Object.keys(map);
+  const box = $('tagmap-list');
+  box.style.display = keys.length?'flex':'none';
+  box.innerHTML = keys.map(sk=>{
+    const t = (CFG.tags||[]).find(x=>x.id===map[sk]);
+    if(!t) return '';
+    return `<div class="mini-item"><span class="tag-dot" style="background:${t.color}"></span><span class="grow"><b style="font-family:var(--mono)">${esc(sk)}</b> → ${esc(t.nombre)}</span><button data-k="${esc(sk)}">×</button></div>`;
+  }).join('');
+  box.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{ delete CFG.tagMap[b.dataset.k]; saveCfg(); renderTagMapList(); renderGrid(); };
+  });
+}
+
+/* ── link público + QR ── */
+function renderPublicLink(){
+  if(!ME?.publicSlug) return;
+  const url = location.origin + '/v/' + ME.publicSlug;
+  $('pub-url').textContent = url;
+  $('pub-copy').onclick = async ()=>{
+    try { await navigator.clipboard.writeText(url); toast('Link copiado'); }
+    catch(e){ prompt('Copia tu link:', url); }
+  };
+  $('pub-share').onclick = ()=>{
+    if(navigator.share) navigator.share({ title: CFG.nombre||'Mi vitrina', url }).catch(()=>{});
+    else $('pub-copy').click();
+  };
+  $('qr-box').innerHTML = '';
+  try { new QRCode($('qr-box'), { text:url, width:170, height:170, correctLevel: QRCode.CorrectLevel.M }); } catch(e){}
+}
+
 function fontOpts(el, names, stacks, key, sample){
   el.innerHTML = names.map(n=>`
     <button class="font-opt ${CFG[key]===n?'active':''}" data-f="${n}" style="font-family:${stacks[n]}">
