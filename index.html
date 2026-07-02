@@ -273,6 +273,39 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .slider-row input[type=range]{flex:1;accent-color:var(--hdr);}
 .try-hint{font-size:12px;color:var(--steel);text-align:center;line-height:1.6;}
 
+/* categorías con flechas y logos */
+.fam-wrap{position:relative;max-width:1100px;margin:0 auto;display:flex;align-items:center;}
+.fam-arrow{flex-shrink:0;width:34px;height:34px;border:1px solid var(--line);background:var(--white);border-radius:50%;font-size:17px;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;margin:10px 4px 0;z-index:2;}
+.fam-arrow:disabled{opacity:.3;}
+.fam-tile{width:104px;height:84px;flex-direction:column;align-items:center;justify-content:center;gap:8px;display:flex;}
+.fam-tile svg{width:30px;height:30px;stroke:var(--hdr);fill:none;stroke-width:1.4;}
+.fam-tile .fn2{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);text-align:center;line-height:1.3;padding:0 6px;}
+.fam-tile.active .fn2{color:var(--hdr);font-weight:600;}
+.fam-tile.all svg{stroke:var(--hdr-tx);}
+.fam-tile.all .fn2{color:var(--hdr-tx);}
+
+/* ojo de costos */
+.cost{display:none!important;}
+body.costs .cost{display:flex!important;}
+.card-cost{font-family:var(--mono);font-size:11px;color:var(--steel);}
+body.costs #btn-eye{opacity:1;color:var(--hdr-tx);}
+body.costs #btn-eye svg{stroke-width:2;}
+
+/* opciones de tipografía con vista previa */
+.font-opts{display:flex;flex-direction:column;gap:7px;width:100%;}
+.font-opt{border:1px solid var(--line);background:var(--paper);padding:10px 14px;text-align:left;font-size:16px;display:flex;justify-content:space-between;align-items:center;}
+.font-opt small{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);font-family:var(--f2);}
+.font-opt.active{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);background:var(--white);}
+
+/* info entretenida */
+.step .emoji{font-size:26px;line-height:1;min-width:34px;text-align:center;}
+.info-paths{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+.info-path{border:1px dashed var(--line);background:var(--paper);padding:10px;font-size:12px;color:var(--ink-soft);line-height:1.5;text-align:center;}
+.info-path b{display:block;font-size:12.5px;color:var(--ink);margin-bottom:3px;}
+.info-fin{background:var(--white);border:1px solid var(--line);padding:22px;text-align:center;margin-top:6px;}
+.info-fin .big{font-size:30px;margin-bottom:8px;}
+.info-fin p{font-size:14px;color:var(--ink-soft);line-height:1.7;}
+
 #toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 22px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;z-index:400;opacity:0;transition:all .3s;pointer-events:none;border-radius:24px;white-space:nowrap;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
@@ -297,6 +330,9 @@ h1,h2,h3,.t{font-family:var(--f1);}
 <div id="app">
   <header class="header">
     <div id="brand"></div>
+    <button class="hbtn" id="btn-eye" title="Ver mis costos" style="opacity:.55">
+      <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
     <button class="hbtn" id="btn-cfg" title="Configuración">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -350,15 +386,19 @@ h1,h2,h3,.t{font-family:var(--f1);}
 
     <!-- VITRINA -->
     <section class="section" id="sec-vitrina">
-      <div class="vit-toolbar">
+      <div class="fam-wrap">
+        <button class="fam-arrow" id="fam-left">‹</button>
+        <div class="fam-row" id="fam-row" style="padding-left:0;padding-right:0"></div>
+        <button class="fam-arrow" id="fam-right">›</button>
+      </div>
+      <div class="pills-row" id="vit-subs"></div>
+      <div class="vit-toolbar" style="position:static;border-bottom:none;padding-top:8px">
         <div class="vit-search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input id="vit-search" type="text" placeholder="Busco un reloj azul… (búsqueda inteligente pronto)"/>
         </div>
       </div>
-      <div class="fam-row" id="fam-row"></div>
-      <div class="pills-row" id="vit-subs"></div>
-      <div id="vit-grid" class="vit-grid"></div>
+      <div id="vit-grid" class="vit-grid" style="padding-top:4px"></div>
       <div id="vit-loading" class="loading">Cargando colección…</div>
     </section>
 
@@ -376,7 +416,8 @@ h1,h2,h3,.t{font-family:var(--f1);}
             <div class="vr-head"><span>#</span><span>Código / barra</span><span>Cant.</span><span>Producto</span><span style="text-align:right">Precio</span><span style="text-align:center">Stock</span></div>
             <div id="vr-rows"></div>
           </div>
-          <p class="vr-paste-hint">Tip: copia dos columnas en Excel (código y cantidad) y pégalas en la primera casilla — se llenan todas las filas de una.</p>
+          <p class="vr-paste-hint">Tip: copia dos columnas en Excel (código y cantidad) y pégalas en la primera casilla — se llenan todas las filas de una. También puedes escanear o escribir el código de barra.</p>
+          <datalist id="sku-list"></datalist>
         </div>
         <div class="vr-side">
           <div class="side-box">
@@ -431,35 +472,75 @@ h1,h2,h3,.t{font-family:var(--f1);}
     <section class="section" id="sec-info">
       <div class="wrap" style="padding-top:0">
         <div class="info-hero" style="margin-left:-14px;margin-right:-14px;">
-          <h2>¡Hola! Gracias por unirte al equipo</h2>
-          <p>Tú te dedicas a vender, nosotros hacemos el resto: stock, despacho y respaldo.</p>
+          <div style="font-size:34px;margin-bottom:10px">👋</div>
+          <h2>¡Bienvenida al equipo!</h2>
+          <p>Tú te dedicas a vender. Nosotros hacemos <b>todo</b> el resto: stock, despacho y respaldo.</p>
         </div>
-        <h2 class="page-t" style="font-size:19px">¿Cómo funciona?</h2>
+        <h2 class="page-t" style="font-size:19px">¿Cómo funciona? Así de fácil:</h2>
         <div style="height:10px"></div>
-        <div class="step"><div class="n">1</div><div><div class="st">Muestra la vitrina</div><div class="sd">Abre la vitrina con tu clienta: fotos grandes, precios de venta y hasta se puede probar el reloj en la muñeca.</div></div></div>
-        <div class="step"><div class="n">2</div><div><div class="st">Cierra la venta</div><div class="sd">Ingresa los códigos en Venta Rápida (o agrégalos desde la ficha), pon el nombre de la venta y la dirección de despacho.</div></div></div>
-        <div class="step"><div class="n">3</div><div><div class="st">Elige el modo de pago</div><div class="sd">Modo A o Modo B, como te acomode en cada venta.</div></div></div>
-        <div class="step"><div class="n">4</div><div><div class="st">Nosotros hacemos el resto</div><div class="sd">Preparamos y despachamos el pedido. Tú sigues vendiendo.</div></div></div>
 
-        <div class="modos-grid">
-          <div class="modo-card">
-            <span class="mc-tag">Modo A</span>
-            <h3>Tú cobras todo</h3>
-            <p>Tu clienta te paga a ti el precio de venta completo. Tú nos pagas el producto y te quedas con la diferencia — te depositamos tu comisión según lo acordado.</p>
-          </div>
-          <div class="modo-card">
-            <span class="mc-tag">Modo B</span>
-            <h3>Cada uno lo suyo</h3>
-            <p>Tu clienta paga el producto directo y aparte; tú cobras solo tu parte de la venta. Sin manejar el dinero del producto.</p>
+        <div class="step">
+          <div class="emoji">✨</div>
+          <div>
+            <div class="st">1 · Muestra y enamora</div>
+            <div class="sd">Abre la <b>Vitrina</b> con tu clienta: fotos grandes, precios con tu margen listo y hasta puede <b>probarse el reloj en la muñeca</b> con la cámara. Nadie se resiste.</div>
           </div>
         </div>
-        <p class="page-s">¿Dudas? Escríbenos y te ayudamos con tu primera venta.</p>
+
+        <div class="step">
+          <div class="emoji">🛍️</div>
+          <div>
+            <div class="st">2 · Arma el pedido como quieras</div>
+            <div class="sd">Hay dos caminos y los dos llegan al mismo carrito:</div>
+            <div class="info-paths">
+              <div class="info-path"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal vendiendo cara a cara.</div>
+              <div class="info-path"><b>Venta Rápida</b>Pegas los códigos (¡hasta desde Excel!) y listo. Ideal cuando ya sabes qué llevar.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="emoji">💳</div>
+          <div>
+            <div class="st">3 · Elige cómo se paga</div>
+            <div class="sd">En cada venta eliges el modo que más te acomode:</div>
+            <div class="modos-grid" style="margin:12px 0 0">
+              <div class="modo-card">
+                <span class="mc-tag">Modo A</span>
+                <h3>Tú cobras todo 💰</h3>
+                <p>Tu clienta te paga a ti el precio completo. Tú nos pagas el producto y <b>la diferencia es tuya</b> — te depositamos tu comisión según lo acordado.</p>
+              </div>
+              <div class="modo-card">
+                <span class="mc-tag">Modo B</span>
+                <h3>Cada uno lo suyo 🤝</h3>
+                <p>Tu clienta paga el producto directo y aparte; tú cobras <b>solo tu parte</b>. Cero manejo del dinero del producto, cero enredos.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="emoji">📦</div>
+          <div>
+            <div class="st">4 · Nosotros hacemos el resto</div>
+            <div class="sd">Preparamos el pedido y lo despachamos a la dirección que pusiste. Tú revisas todo en <b>Mis Ventas</b>… y sigues vendiendo.</div>
+          </div>
+        </div>
+
+        <div class="info-fin">
+          <div class="big">🚀</div>
+          <p><b>¿Lista para tu primera venta?</b><br/>Si te trabas en algo, escríbenos y te acompañamos paso a paso.</p>
+        </div>
       </div>
     </section>
 
   </main>
 
   <nav class="nav-bottom">
+    <button class="nav-item active" data-sec="inicio">
+      <svg viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1v-8z"/></svg>
+      Inicio
+    </button>
     <button class="nav-item" data-sec="ventas">
       <svg viewBox="0 0 24 24"><path d="M4 19V10m5.5 9V5M15 19v-7m5.5 7V8"/></svg>
       Mis Ventas
@@ -527,23 +608,13 @@ h1,h2,h3,.t{font-family:var(--f1);}
         <span class="cfg-lbl">Color fondo</span>
         <div class="swatches" id="sw-fondo"></div>
       </div>
-      <div class="cfg-row">
-        <span class="cfg-lbl">Tipografía títulos</span>
-        <select class="cfg-select" id="cfg-f1">
-          <option value="Marcellus">Marcellus</option>
-          <option value="Playfair Display">Playfair Display</option>
-          <option value="Montserrat">Montserrat</option>
-          <option value="Cormorant Garamond">Cormorant</option>
-        </select>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <span class="cfg-lbl">Tipografía de títulos</span>
+        <div class="font-opts" id="fo-f1"></div>
       </div>
-      <div class="cfg-row">
-        <span class="cfg-lbl">Tipografía texto</span>
-        <select class="cfg-select" id="cfg-f2">
-          <option value="Jost">Jost</option>
-          <option value="Lato">Lato</option>
-          <option value="DM Sans">DM Sans</option>
-          <option value="Montserrat">Montserrat</option>
-        </select>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <span class="cfg-lbl">Tipografía de texto</span>
+        <div class="font-opts" id="fo-f2"></div>
       </div>
     </div>
 
@@ -721,11 +792,20 @@ function go(sec){
   $('sec-'+sec).classList.add('active');
   if(sec==='ventas') loadVentas();
   if(sec==='rapida') renderRows();
+  if(sec==='vitrina'){ try{ updateFamArrows(); }catch(e){} }
   window.scrollTo(0,0);
 }
 document.querySelectorAll('.nav-item').forEach(btn=> btn.onclick = ()=> go(btn.dataset.sec));
 document.querySelectorAll('.home-tile').forEach(t=> t.onclick = ()=> go(t.dataset.go));
 $('btn-cart-top').onclick = ()=> go('rapida');
+$('brand').style.cursor = 'pointer';
+$('brand').onclick = ()=> go('inicio');
+if(localStorage.getItem('tn_eye')==='1') document.body.classList.add('costs');
+$('btn-eye').onclick = ()=>{
+  const on = document.body.classList.toggle('costs');
+  localStorage.setItem('tn_eye', on?'1':'0');
+  toast(on ? 'Mostrando tus costos' : 'Costos ocultos');
+};
 
 /* ═══════════ INIT ═══════════ */
 async function initApp(){
@@ -734,6 +814,10 @@ async function initApp(){
     PRODUCTOS_ALL = await api('/productos');
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);   // sin stock no se muestra
     $('vit-loading').style.display='none';
+    $('sku-list').innerHTML = PRODUCTOS_ALL.map(p=>
+      `<option value="${esc(p.sku)}">${esc(p.nombre)}</option>` +
+      (p.barcode? `<option value="${esc(p.barcode)}">${esc(p.sku)} · ${esc(p.nombre)}</option>` : '')
+    ).join('');
     renderFams(); renderGrid(); renderRows();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
@@ -746,16 +830,29 @@ function famSub(p){
   const parts = (p.categoria||'').split('/').map(x=>x.trim()).filter(x=>x && x.toLowerCase()!=='all');
   return { fam: parts[0]||'Otros', sub: parts.slice(1).join(' / ') };
 }
+const FAM_ICONS = [
+  [/reloj|watch/i, '<circle cx="12" cy="12" r="7"/><path d="M12 8.5V12l2.3 2.3"/><path d="M9.5 5.2 9 2h6l-.5 3.2M9.5 18.8 9 22h6l-.5-3.2"/>'],
+  [/calc/i, '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01M8.5 19h.01M12 19h.01M15.5 19h.01" stroke-width="2" stroke-linecap="round"/>'],
+  [/pila|bater/i, '<rect x="4" y="8" width="15" height="8" rx="1.5"/><path d="M19 10.5h2v3h-2M7.5 10.5v3"/>'],
+  [/correa|pulsera|banda/i, '<path d="M9 3h6v5a3 3 0 0 1-6 0V3zM9 21h6v-5a3 3 0 0 0-6 0v5z"/><circle cx="12" cy="12" r="2.5"/>'],
+  [/audif|audio|parlante/i, '<path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>'],
+  [/lente|gafa|sol/i, '<circle cx="7.5" cy="14" r="3.5"/><circle cx="16.5" cy="14" r="3.5"/><path d="M11 14h2M4 14 3 8h4M20 14l1-6h-4"/>'],
+];
+function famIcon(f){
+  for(const [re, svg] of FAM_ICONS) if(re.test(f)) return svg;
+  return '<rect x="4" y="7" width="16" height="13" rx="1.5"/><path d="M4 11h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>';
+}
 function renderFams(){
-  const map = {};
-  PRODUCTOS.forEach(p=>{ const f = famSub(p).fam; if(!map[f]) map[f] = p.id; });
-  const fams = Object.keys(map).sort();
+  const fams = [...new Set(PRODUCTOS.map(p=>famSub(p).fam))].sort();
   $('fam-row').innerHTML =
-    `<div class="fam-tile all ${!FILTRO_FAM?'active':''}" data-fam=""><div class="fn">Todos</div></div>` +
+    `<div class="fam-tile all ${!FILTRO_FAM?'active':''}" data-fam="">
+       <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>
+       <div class="fn2">Todos</div>
+     </div>` +
     fams.map(f=>`
       <div class="fam-tile ${FILTRO_FAM===f?'active':''}" data-fam="${esc(f)}">
-        <img loading="lazy" src="${imgUrl(map[f])}" alt=""/>
-        <div class="fn">${esc(f)}</div>
+        <svg viewBox="0 0 24 24">${famIcon(f)}</svg>
+        <div class="fn2">${esc(f)}</div>
       </div>`).join('');
   $('fam-row').querySelectorAll('.fam-tile').forEach(el=>{
     el.onclick = ()=>{
@@ -764,8 +861,18 @@ function renderFams(){
       renderSubs(); renderGrid();
     };
   });
-  renderSubs();
+  renderSubs(); updateFamArrows();
 }
+function updateFamArrows(){
+  const row = $('fam-row');
+  const need = row.scrollWidth > row.clientWidth + 8;
+  $('fam-left').style.display = need ? 'flex':'none';
+  $('fam-right').style.display = need ? 'flex':'none';
+}
+$('fam-left').onclick  = ()=> $('fam-row').scrollBy({left:-240, behavior:'smooth'});
+$('fam-right').onclick = ()=> $('fam-row').scrollBy({left: 240, behavior:'smooth'});
+window.addEventListener('resize', ()=>{ try{updateFamArrows();}catch(e){} });
+
 function renderSubs(){
   const box = $('vit-subs');
   if(!FILTRO_FAM){ box.classList.remove('show'); box.innerHTML=''; return; }
@@ -806,6 +913,7 @@ function renderGrid(){
         <div class="card-name">${esc(p.nombre)}</div>
         <div class="card-sku">${esc(p.sku)||'—'}</div>
         <div class="card-price">${fmt(sugerido(p))}</div>
+        <div class="card-cost cost">Costo ${fmt(p.precio)}</div>
       </div>
     </div>`).join('');
   $('vit-grid').querySelectorAll('.card').forEach(c=> c.onclick = ()=> openFicha(parseInt(c.dataset.id)));
@@ -823,7 +931,7 @@ function openFicha(id){
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
       <div class="ficha-prices">
-        <div class="ficha-price"><div class="lbl">Tu precio</div><div class="val">${fmt(p.precio)}</div></div>
+        <div class="ficha-price cost" style="flex-direction:column"><div class="lbl">Tu costo</div><div class="val">${fmt(p.precio)}</div></div>
         <div class="ficha-price"><div class="lbl">Precio de venta</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
       </div>
       <div class="ficha-stockline"><span class="dot"></span> Disponible · ${p.stock} un.</div>
@@ -836,7 +944,7 @@ function openFicha(id){
       </div>
       <button class="big-btn dark" id="f-add">
         <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg>
-        Agregar a venta rápida
+        Agregar al carrito
       </button>
       <button class="big-btn line" id="f-try">
         <svg viewBox="0 0 24 24"><path d="M7 21c0-4 1-7 1-10a4 4 0 0 1 8 0c0 3 1 6 1 10"/><circle cx="12" cy="9" r="3"/></svg>
@@ -845,7 +953,7 @@ function openFicha(id){
     </div>`;
   $('f-menos').onclick = ()=>{ if(FICHA_QTY>1){FICHA_QTY--; $('f-qty').textContent=FICHA_QTY;} };
   $('f-mas').onclick = ()=>{ FICHA_QTY++; $('f-qty').textContent=FICHA_QTY; };
-  $('f-add').onclick = ()=>{ addRow(p.sku, FICHA_QTY); closeFicha(); toast('Agregado a venta rápida'); };
+  $('f-add').onclick = ()=>{ addRow(p.sku, FICHA_QTY); closeFicha(); toast('Agregado al carrito'); };
   $('f-try').onclick = ()=>{ closeFicha(); openTry(p); };
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
@@ -887,7 +995,7 @@ function renderRows(){
     return `
     <div class="vr-row">
       <span class="vr-n">${i+1}</span>
-      <input class="vr-sku" data-i="${i}" value="${esc(r.sku)}" placeholder="SKU o código barra" autocomplete="off"/>
+      <input class="vr-sku" data-i="${i}" value="${esc(r.sku)}" placeholder="SKU o código barra" list="sku-list" autocomplete="off"/>
       <input class="vr-qty" data-i="${i}" type="number" min="1" value="${r.qty||1}"/>
       <span class="vr-prod ${filled&&!p?'bad':''}">${filled ? (p? esc(p.nombre) : 'No encontrado') : ''}</span>
       <span class="vr-price">${p? fmt(p.precio) : ''}</span>
@@ -915,7 +1023,10 @@ function renderRows(){
       toast(added + ' filas pegadas');
     });
     inp.addEventListener('change', ()=>{
-      ROWS[parseInt(inp.dataset.i)].sku = inp.value.trim().toUpperCase();
+      let v = inp.value.trim().toUpperCase();
+      const p = findProd(v);
+      if(p && p.sku) v = p.sku;      // si escribió el código de barra, guardar el SKU
+      ROWS[parseInt(inp.dataset.i)].sku = v;
       saveRows(); renderRows();
     });
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
@@ -1139,8 +1250,8 @@ function initCfgPanel(){
 
   swatchRow($('sw-header'), HDR_COLORS, 'hdr');
   swatchRow($('sw-fondo'),  BG_COLORS,  'fondo');
-  $('cfg-f1').value = CFG.f1; $('cfg-f1').onchange = ()=>{ CFG.f1=$('cfg-f1').value; saveCfg(); applyCfg(); };
-  $('cfg-f2').value = CFG.f2; $('cfg-f2').onchange = ()=>{ CFG.f2=$('cfg-f2').value; saveCfg(); applyCfg(); };
+  fontOpts($('fo-f1'), Object.keys(F1_STACK), F1_STACK, 'f1', 'Título de ejemplo');
+  fontOpts($('fo-f2'), Object.keys(F2_STACK), F2_STACK, 'f2', 'Texto de ejemplo para leer');
 
   $('cfg-mult').value = CFG.mult || ME?.multiplicador || 2;
   $('cfg-mult').onchange = ()=>{
@@ -1209,6 +1320,18 @@ function initCfgPanel(){
     saveCfg(); applyCfg(); initCfgPanel(); renderGrid();
     toast('Vitrina restablecida');
   };
+}
+function fontOpts(el, names, stacks, key, sample){
+  el.innerHTML = names.map(n=>`
+    <button class="font-opt ${CFG[key]===n?'active':''}" data-f="${n}" style="font-family:${stacks[n]}">
+      ${sample}<small>${n}</small>
+    </button>`).join('');
+  el.querySelectorAll('.font-opt').forEach(b=>{
+    b.onclick = ()=>{
+      CFG[key] = b.dataset.f; saveCfg(); applyCfg();
+      el.querySelectorAll('.font-opt').forEach(x=>x.classList.toggle('active', x===b));
+    };
+  });
 }
 function refreshLogoUI(){
   const prev = $('cfg-logo-prev');
