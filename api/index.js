@@ -5,6 +5,7 @@ const fs      = require('fs');
 const path    = require('path');
 const archiver = require('archiver');
 const crypto  = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -339,7 +340,7 @@ app.get('/api/fotos', async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 app.post('/api/pedido', requireClient, async (req, res) => {
   try {
-    const { productos, nombreVenta, direccion, nota, modoPago, metodoPago } = req.body?.data || {};
+    const { productos, nombreVenta, direccion, telefono, email, nota, modoPago, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
     const skus = productos.map(p => p.sku);
     const prodRecs = await xmlrpcCall('product.product', 'search_read',
@@ -351,6 +352,8 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     if (!orderLines.length) return res.status(400).json({ error: 'Ningún SKU reconocido' });
     const noteParts = [
       nombreVenta ? 'Venta: ' + nombreVenta : '',
+      telefono ? 'Teléfono: ' + telefono : '',
+      email ? 'Email: ' + email : '',
       direccion ? 'Despacho: ' + direccion : '',
       modoPago ? 'Modo de pago: ' + modoPago : '',
       metodoPago ? 'Método: ' + metodoPago : '',
@@ -485,6 +488,57 @@ app.get('/api/public/:slug/imagen/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
     res.send(Buffer.from(b64, 'base64'));
   } catch (e) { res.status(500).send(shortErr(e)); }
+});
+
+// ── QUIERO VENDER — formulario público → correo ─────────────────
+// Config en Vercel: CONTACT_EMAIL (destino), SMTP_HOST, SMTP_PORT,
+// SMTP_USER, SMTP_PASS  (ej: Gmail con contraseña de aplicación)
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
+const mailer = process.env.SMTP_HOST ? nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: (process.env.SMTP_PORT || '587') === '465',
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+}) : null;
+
+const contactHits = {};
+app.post('/api/contacto', async (req, res) => {
+  try {
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const now = Date.now();
+    contactHits[ip] = (contactHits[ip] || []).filter(t => now - t < 3600000);
+    if (contactHits[ip].length >= 5) return res.status(429).json({ error: 'Demasiados envíos, intenta más tarde' });
+
+    const { nombre, telefono, email, ciudad, mensaje, web } = req.body?.data || {};
+    if (web) return res.json({ ok: true });   // honeypot
+    if (!nombre || !telefono) return res.status(400).json({ error: 'Nombre y teléfono son obligatorios' });
+    contactHits[ip].push(now);
+
+    const texto = [
+      'Nueva solicitud desde la Vitrina — ¿Quieres vender con nosotros?',
+      '',
+      'Nombre:   ' + nombre,
+      'WhatsApp: ' + telefono,
+      'Email:    ' + (email || '—'),
+      'Ciudad:   ' + (ciudad || '—'),
+      '',
+      'Mensaje:',
+      mensaje || '—'
+    ].join('\n');
+
+    if (!mailer || !CONTACT_EMAIL) {
+      console.warn('⚠ SMTP no configurado. Contacto recibido:', texto);
+      return res.json({ ok: true, fallback: true });
+    }
+    await mailer.sendMail({
+      from: `"Vitrina" <${process.env.SMTP_USER}>`,
+      to: CONTACT_EMAIL,
+      replyTo: email || undefined,
+      subject: '✨ Nueva vendedora interesada: ' + nombre,
+      text: texto
+    });
+    res.json({ ok: true });
+  } catch (e) { console.error('❌ /api/contacto', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 // ── PERFIL ───────────────────────────────────────────────────────
