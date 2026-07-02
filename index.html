@@ -318,12 +318,20 @@ body.costs #btn-eye svg{stroke-width:2;}
 .vit-welcome{max-width:1100px;margin:0 auto;padding:16px 14px 0;font-family:var(--f1);font-size:17px;line-height:1.5;color:var(--ink);}
 .vit-welcome:empty{display:none;}
 
-/* buscador + orden en una línea, estilo tienda web */
-.search-line{display:flex;gap:10px;max-width:820px;margin:0 auto;width:100%;align-items:center;}
-.vit-search{flex:1;max-width:480px;}
-.sort-sel{border:1px solid var(--line);background:var(--white);padding:10px 12px;font-size:12px;letter-spacing:.04em;outline:none;border-radius:var(--r);color:var(--ink-soft);width:auto;cursor:pointer;}
-.tag-chips{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;max-width:820px;margin:0 auto;width:100%;padding:10px 14px 0;}
-.tag-chips:empty{display:none;}
+/* toolbar estilo tienda: buscador + ordenar + filtrar, alineados con categorías */
+.search-line{display:flex;gap:10px;max-width:1100px;margin:0 auto;width:100%;align-items:center;padding:0 14px;}
+.vit-search{flex:1;}
+.sort-sel{border:1px solid var(--line);background:var(--white);padding:10px 12px;font-size:12px;letter-spacing:.04em;outline:none;border-radius:var(--r);color:var(--ink-soft);width:auto;cursor:pointer;flex-shrink:0;}
+.filter-btn{border:1px solid var(--line);background:var(--white);padding:10px 14px;font-size:12px;letter-spacing:.04em;border-radius:var(--r);color:var(--ink-soft);display:flex;align-items:center;gap:7px;flex-shrink:0;position:relative;}
+.filter-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.filter-btn.on{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);color:var(--ink);}
+.filter-panel{display:none;max-width:1100px;margin:10px auto 0;width:calc(100% - 28px);background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:14px;}
+.filter-panel.open{display:block;}
+.fp-t{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel);margin:0 0 8px;}
+.fp-group{margin-bottom:12px;}
+.fp-group:last-child{margin-bottom:0;}
+.tag-chips{display:flex;gap:7px;flex-wrap:wrap;}
+.tag-chips:empty:after{content:'Crea etiquetas en Configuración ⚙';font-size:11.5px;color:var(--steel);}
 .fchip{padding:6px 14px;border-radius:18px;font-size:11px;letter-spacing:.06em;border:1px solid var(--line);background:var(--white);color:var(--ink-soft);display:flex;align-items:center;gap:7px;cursor:pointer;}
 .fchip .tag-dot{width:9px;height:9px;}
 .fchip.active{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);color:var(--ink);}
@@ -369,8 +377,9 @@ body.costs #btn-eye svg{stroke-width:2;}
 #qr-box img,#qr-box canvas{border:8px solid #fff;box-shadow:0 2px 14px rgba(0,0,0,.08);}
 
 /* quiero vender con nosotros */
-.join-cta{margin-top:26px;background:none;border:1px dashed var(--line);width:100%;padding:14px 12px;font-size:12.5px;color:var(--ink-soft);letter-spacing:.04em;border-radius:var(--r);}
-.join-cta b{color:var(--ink);}
+.join-cta{margin-top:30px;background:var(--hdr);border:none;width:100%;padding:18px 14px;font-size:14.5px;color:var(--hdr-tx);letter-spacing:.03em;border-radius:var(--r);line-height:1.5;box-shadow:0 8px 22px rgba(0,0,0,.14);}
+.join-cta b{color:var(--hdr-tx);border-bottom:1.5px solid currentColor;}
+.join-cta small{display:block;font-size:11px;opacity:.75;margin-top:4px;letter-spacing:.12em;text-transform:uppercase;}
 .join-wrap{padding:20px 18px 34px;max-width:520px;margin:0 auto;}
 .join-hero{text-align:center;margin-bottom:20px;}
 .join-hero .big{font-size:34px;margin-bottom:8px;}
@@ -400,7 +409,7 @@ body.public .priv{display:none!important;}
     <button id="login-btn" class="login-btn">Entrar</button>
     <div id="login-error" class="login-error"></div>
     <div class="login-foot">Distribución autorizada</div>
-    <button class="join-cta" id="join-open">✨ ¿Quieres <b>vender con nosotros</b>? Conoce cómo →</button>
+    <button class="join-cta" id="join-open">✨ ¿Quieres <b>vender con nosotros</b>?<small>Toca aquí y conoce cómo partir hoy →</small></button>
   </div>
 </div>
 
@@ -471,7 +480,7 @@ body.public .priv{display:none!important;}
         <button class="fam-arrow" id="fam-right">›</button>
       </div>
       <div class="pills-row" id="vit-subs"></div>
-      <div class="vit-toolbar" style="position:static;border-bottom:none;padding-top:8px">
+      <div class="vit-toolbar" style="position:static;border-bottom:none;padding-top:10px">
         <div class="search-line">
           <div class="vit-search">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -483,9 +492,22 @@ body.public .priv{display:none!important;}
             <option value="pmax">Precio ↓</option>
             <option value="az">A–Z</option>
           </select>
+          <button class="filter-btn" id="filter-btn">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            Filtrar
+          </button>
+        </div>
+        <div class="filter-panel" id="filter-panel">
+          <div class="fp-group">
+            <p class="fp-t">Mis etiquetas</p>
+            <div class="tag-chips" id="tag-chips"></div>
+          </div>
+          <div class="fp-group">
+            <p class="fp-t">Precio</p>
+            <div class="tag-chips" id="price-chips"></div>
+          </div>
         </div>
       </div>
-      <div class="tag-chips" id="tag-chips"></div>
       <div id="vit-grid" class="vit-grid" style="padding-top:4px"></div>
       <div id="vit-loading" class="loading">Cargando colección…</div>
     </section>
@@ -576,25 +598,34 @@ body.public .priv{display:none!important;}
           <h2 id="info-hi">¡Bienvenida al equipo!</h2>
           <p>Tú te dedicas a vender. Nosotros hacemos <b>todo</b> el resto: stock, despacho y logística.</p>
         </div>
-        <h2 class="page-t" style="font-size:19px">¿Cómo funciona? Así de fácil:</h2>
+        <h2 class="page-t" style="font-size:19px">¿Cómo funciona? Paso a paso:</h2>
         <div style="height:10px"></div>
+
+        <div class="step">
+          <div class="emoji">🎨</div>
+          <div>
+            <div class="st">1 · Diséñala como tu negocio</div>
+            <div class="sd">En <b>Configuración ⚙</b> pones tu logo, tu nombre, tus colores, tu letra y <b>tus precios de venta</b> (multiplicador o precio fijo por producto). Tip: el ojo 👁 de arriba muestra u oculta <b>tus costos</b> — ocúltalos antes de pasarle el teléfono a tu clienta.</div>
+            <button class="cfg-btn dark" id="info-go-cfg" style="margin-top:10px">Ir a configuración ⚙</button>
+          </div>
+        </div>
 
         <div class="step">
           <div class="emoji">✨</div>
           <div>
-            <div class="st">1 · Muestra y enamora</div>
-            <div class="sd">Abre la <b>Vitrina</b> con tu clienta: fotos grandes, precios con tu margen listo y hasta puede <b>probarse el reloj en la muñeca</b> con la cámara. Nadie se resiste.</div>
+            <div class="st">2 · Muestra y enamora</div>
+            <div class="sd">Abre la <b>Vitrina</b> con tu clienta: fotos grandes, tus precios listos y hasta puede <b>probarse el reloj en la muñeca</b> con la cámara.</div>
           </div>
         </div>
 
         <div class="step">
           <div class="emoji">🛍️</div>
           <div>
-            <div class="st">2 · Arma el pedido como quieras</div>
-            <div class="sd">Hay dos caminos y los dos llegan al mismo carrito:</div>
+            <div class="st">3 · Arma el pedido como quieras</div>
+            <div class="sd">Dos caminos, un mismo carrito:</div>
             <div class="info-paths">
-              <div class="info-path"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal vendiendo cara a cara.</div>
-              <div class="info-path"><b>Venta Rápida</b>Pegas los códigos (¡hasta desde Excel!) y listo. Ideal cuando ya sabes qué llevar.</div>
+              <div class="info-path"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal cara a cara.</div>
+              <div class="info-path"><b>Venta Rápida</b>Pegas los códigos (¡hasta desde Excel!) y listo.</div>
             </div>
           </div>
         </div>
@@ -602,7 +633,7 @@ body.public .priv{display:none!important;}
         <div class="step">
           <div class="emoji">💳</div>
           <div>
-            <div class="st">3 · Elige cómo se paga</div>
+            <div class="st">4 · Elige cómo se paga</div>
             <div class="sd">En cada venta eliges el modo que más te acomode:</div>
             <div class="modos-grid" style="margin:12px 0 0">
               <div class="modo-card">
@@ -613,16 +644,30 @@ body.public .priv{display:none!important;}
               <div class="modo-card">
                 <span class="mc-tag">Modo B</span>
                 <h3>Cada uno lo suyo 🤝</h3>
-                <p>Tu clienta paga el producto directo y aparte; tú cobras <b>solo tu parte</b>. Cero manejo del dinero del producto, cero enredos.</p>
+                <p>Tu clienta paga el producto directo y aparte; tú cobras <b>solo tu parte</b>. Cero manejo del dinero del producto.</p>
               </div>
             </div>
           </div>
         </div>
 
         <div class="step">
+          <div class="emoji">🔗</div>
+          <div style="min-width:0;flex:1">
+            <div class="st">5 · Comparte tu tienda</div>
+            <div class="sd">Tu vitrina tiene un <b>link público</b>: tus clientas la ven con tu marca y tus precios, sin claves y sin ver tus costos. Compártelo por WhatsApp o imprime el QR.</div>
+            <div class="pub-url" id="info-pub-url" style="margin-top:10px">…</div>
+            <div class="dl-row" style="margin-top:10px">
+              <button class="cfg-btn" id="info-pub-copy">Copiar link</button>
+              <button class="cfg-btn" id="info-pub-share">Compartir</button>
+            </div>
+            <div id="info-qr-box" style="display:flex;justify-content:center;padding:14px 0 4px"></div>
+          </div>
+        </div>
+
+        <div class="step">
           <div class="emoji">📦</div>
           <div>
-            <div class="st">4 · Nosotros hacemos el resto</div>
+            <div class="st">6 · Nosotros hacemos el resto</div>
             <div class="sd">Preparamos el pedido y lo despachamos a la dirección que pusiste. Tú revisas todo en <b>Mis Ventas</b>… y sigues vendiendo.</div>
           </div>
         </div>
@@ -1083,7 +1128,7 @@ async function initPublic(){
     $('vit-loading').style.display='none';
     document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
     $('sec-vitrina').classList.add('active');
-    renderFams(); renderTagFilter(); renderGrid();
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderGrid();
     setTimeout(()=>{ try{updateFamArrows();}catch(e){} }, 50);
   } catch(e){
     $('vit-loading').innerHTML = 'Esta vitrina no está disponible.<br/>'+esc(e.message);
@@ -1129,7 +1174,7 @@ async function initApp(){
       `<option value="${esc(p.sku)}">${esc(p.nombre)}</option>` +
       (p.barcode? `<option value="${esc(p.barcode)}">${esc(p.sku)} · ${esc(p.nombre)}</option>` : '')
     ).join('');
-    renderFams(); renderTagFilter(); renderGrid(); renderRows();
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderGrid(); renderRows();
     renderCatalogoCfg();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
@@ -1137,7 +1182,27 @@ async function initApp(){
 }
 
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '';
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '';
+const PRICE_RANGES = [
+  { id:'p1', label:'Hasta $10.000',    min:0,      max:10000 },
+  { id:'p2', label:'$10.000–$30.000',  min:10000,  max:30000 },
+  { id:'p3', label:'$30.000–$60.000',  min:30000,  max:60000 },
+  { id:'p4', label:'Más de $60.000',   min:60000,  max:Infinity }
+];
+$('filter-btn').onclick = ()=>{ $('filter-panel').classList.toggle('open'); };
+function updateFilterBtn(){
+  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO));
+}
+function renderPriceFilter(){
+  $('price-chips').innerHTML = PRICE_RANGES.map(r=>`
+    <button class="fchip ${FILTRO_PRECIO===r.id?'active':''}" data-p="${r.id}">${r.label}</button>`).join('');
+  $('price-chips').querySelectorAll('.fchip').forEach(ch=>{
+    ch.onclick = ()=>{
+      FILTRO_PRECIO = (FILTRO_PRECIO===ch.dataset.p) ? '' : ch.dataset.p;
+      renderPriceFilter(); updateFilterBtn(); renderGrid();
+    };
+  });
+}
 function visibles(){
   if(PUBLIC) return PRODUCTOS;   // el servidor ya filtró
   const hF = new Set(CFG.hiddenFams||[]);
@@ -1159,7 +1224,7 @@ function renderTagFilter(){
   box.querySelectorAll('.fchip').forEach(ch=>{
     ch.onclick = ()=>{
       FILTRO_TAG = (FILTRO_TAG===ch.dataset.t) ? '' : ch.dataset.t;
-      renderTagFilter(); renderGrid();
+      renderTagFilter(); updateFilterBtn(); renderGrid();
     };
   });
 }
@@ -1234,6 +1299,11 @@ function filtrados(){
     if(FILTRO_FAM && fs.fam!==FILTRO_FAM) return false;
     if(FILTRO_SUB && fs.sub!==FILTRO_SUB) return false;
     if(FILTRO_TAG && (CFG.tagMap||{})[p.sku]!==FILTRO_TAG) return false;
+    if(FILTRO_PRECIO){
+      const r = PRICE_RANGES.find(x=>x.id===FILTRO_PRECIO);
+      const v = sugerido(p);
+      if(r && (v < r.min || v >= r.max)) return false;
+    }
     if(FILTRO_TXT){
       const hay = (p.nombre+' '+p.sku+' '+(p.atributos||[]).map(a=>a.val).join(' ')).toLowerCase();
       if(!hay.includes(FILTRO_TXT)) return false;
@@ -1482,6 +1552,27 @@ $('vr-enviar').onclick = async ()=>{
 /* ═══════════ MIS VENTAS ═══════════ */
 const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 const CHART_COLORS = ['#5b7fa6','#b08d4f','#7d9b76','#b3707e','#8a8f98'];
+function demoPedidos(){
+  const now = new Date();
+  const cats = ['Relojes Casio','Calculadoras Casio','Correas'];
+  const out = [];
+  const plan = [1,2,2,3,4,5]; // ventas por mes, creciendo
+  for(let i=5;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 5);
+    for(let k=0;k<plan[5-i];k++){
+      const cat = cats[(i+k)%cats.length];
+      const tot = 14990 + ((i*3+k)%5)*9000;
+      out.push({
+        id:'d'+i+k, nombre:'S000'+(90-i*9-k), ref:'Venta de ejemplo '+(k+1),
+        fecha: new Date(d.getFullYear(), d.getMonth(), 4+k*6).toISOString(),
+        estado: k===0&&i===2 ? 'done':'sale',
+        total: tot, neto: Math.round(tot/1.19), nota:'',
+        lineas: [{ sku:'DEMO-'+(100+i*10+k), categoria:cat, cantidad:1+(k%2), total:tot }]
+      });
+    }
+  }
+  return out.reverse();
+}
 async function loadVentas(){
   const box = $('ventas-body');
   if(!PEDIDOS){
@@ -1489,8 +1580,13 @@ async function loadVentas(){
     try { PEDIDOS = await api('/pedidos'); }
     catch(e){ box.innerHTML = '<div class="empty">'+esc(e.message)+'</div>'; return; }
   }
-  const ventas = PEDIDOS.filter(o=>o.estado!=='cancel');
-  if(!ventas.length){ box.innerHTML = '<div class="empty">Todavía no registras ventas.<br/>¡Tu primera está a un par de toques en Venta Rápida!</div>'; return; }
+  let DEMO = false;
+  let pedidos = PEDIDOS;
+  if(!PEDIDOS.filter(o=>o.estado!=='cancel').length){
+    DEMO = true;
+    pedidos = demoPedidos();
+  }
+  const ventas = pedidos.filter(o=>o.estado!=='cancel');
 
   const now = new Date();
   const mesKey = d => d.slice(0,7);
@@ -1548,7 +1644,7 @@ async function loadVentas(){
 
   const cls = { sale:'b-sale', done:'b-done', cancel:'b-cancel' };
   const lbl = { sale:'Confirmado', done:'Entregado', cancel:'Anulado' };
-  const detalle = PEDIDOS.map(o=>`
+  const detalle = pedidos.map(o=>`
     <div class="his-item" data-id="${o.id}">
       <div class="his-top">
         <div>
@@ -1567,6 +1663,7 @@ async function loadVentas(){
     </div>`).join('');
 
   box.innerHTML = `
+    ${DEMO ? '<div class="ok-box" style="display:block;margin:0 0 14px;background:#fdf6e3;color:#8a6d3d">🧪 Esto es un <b>ejemplo</b> de cómo se verán tus ventas. Cuando hagas la primera, aparecerá aquí de verdad.</div>' : ''}
     <div class="stat-row">
       <div class="stat"><div class="v">${delMes.length}</div><div class="l">Ventas<br/>este mes</div></div>
       <div class="stat"><div class="v">${fmt(totalMes)}</div><div class="l">Comprado<br/>este mes</div></div>
@@ -1847,21 +1944,28 @@ function renderTagMapList(){
   });
 }
 
-/* ── link público + QR ── */
+/* ── link público + QR (en configuración y en información) ── */
 function renderPublicLink(){
   if(!ME?.publicSlug) return;
   const url = location.origin + '/v/' + ME.publicSlug;
-  $('pub-url').textContent = url;
-  $('pub-copy').onclick = async ()=>{
+  const copy = async ()=>{
     try { await navigator.clipboard.writeText(url); toast('Link copiado'); }
     catch(e){ prompt('Copia tu link:', url); }
   };
-  $('pub-share').onclick = ()=>{
+  const share = ()=>{
     if(navigator.share) navigator.share({ title: CFG.nombre||'Mi vitrina', url }).catch(()=>{});
-    else $('pub-copy').click();
+    else copy();
   };
-  $('qr-box').innerHTML = '';
-  try { new QRCode($('qr-box'), { text:url, width:170, height:170, correctLevel: QRCode.CorrectLevel.M }); } catch(e){}
+  [['pub-url','pub-copy','pub-share','qr-box'],['info-pub-url','info-pub-copy','info-pub-share','info-qr-box']].forEach(([u,c,sh,q])=>{
+    if(!$(u)) return;
+    $(u).textContent = url;
+    $(c).onclick = copy;
+    $(sh).onclick = share;
+    $(q).innerHTML = '';
+    try { new QRCode($(q), { text:url, width:150, height:150, correctLevel: QRCode.CorrectLevel.M }); } catch(e){}
+  });
+  const goCfg = $('info-go-cfg');
+  if(goCfg) goCfg.onclick = openCfg;
 }
 
 function fontOpts(el, names, stacks, key){
