@@ -4,6 +4,7 @@ const cors    = require('cors');
 const fs      = require('fs');
 const path    = require('path');
 const archiver = require('archiver');
+const crypto  = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -105,6 +106,56 @@ function requireClient(req, res, next) {
   next();
 }
 
+// ── LINK PÚBLICO + CONFIG EN ODOO ────────────────────────────────
+function slugOf(code) {
+  return crypto.createHash('sha256').update('tnv:' + code.toUpperCase()).digest('hex').slice(0, 10);
+}
+function clienteBySlug(slug) {
+  for (const [code, c] of Object.entries(CLIENTES)) if (slugOf(code) === slug) return { code, ...c };
+  return null;
+}
+async function readCfg(code, partnerId) {
+  const hit = cacheGet('cfg_' + code); if (hit !== null) return hit;
+  const name = 'vitrina-cfg-' + code;
+  const ids = await xmlrpcCall('ir.attachment', 'search',
+    [[['name', '=', name], ['res_model', '=', 'res.partner'], ['res_id', '=', partnerId]]], { limit: 1 });
+  let cfg = {};
+  if (ids.length) {
+    const rec = await xmlrpcCall('ir.attachment', 'read', [ids, ['datas']]);
+    try { cfg = JSON.parse(Buffer.from(rec[0].datas, 'base64').toString('utf8')) || {}; } catch {}
+  }
+  cacheSet('cfg_' + code, cfg, 5 * 60 * 1000);
+  return cfg;
+}
+async function writeCfg(code, partnerId, cfg) {
+  const name = 'vitrina-cfg-' + code;
+  const datas = Buffer.from(JSON.stringify(cfg)).toString('base64');
+  const ids = await xmlrpcCall('ir.attachment', 'search',
+    [[['name', '=', name], ['res_model', '=', 'res.partner'], ['res_id', '=', partnerId]]], { limit: 1 });
+  if (ids.length) await xmlrpcCall('ir.attachment', 'write', [ids, { datas }]);
+  else await xmlrpcCall('ir.attachment', 'create', [{
+    name, res_model: 'res.partner', res_id: partnerId, type: 'binary', datas, mimetype: 'application/json'
+  }]);
+  cacheSet('cfg_' + code, cfg, 5 * 60 * 1000);
+}
+function famOf(categoria) {
+  const parts = (categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
+  return parts[0] || 'Otros';
+}
+async function productosCliente(cliente) {
+  let prods = await fetchProductos();
+  const plId = await getPricelistId(cliente.partnerId);
+  if (plId && prods.length) {
+    try {
+      const ids = prods.map(p => p.id);
+      const precios = await xmlrpcCall('product.pricelist', 'get_products_price',
+        [[plId], ids, ids.map(() => 1), new Date().toISOString().slice(0, 10)]);
+      prods = prods.map(p => ({ ...p, precio: parseFloat(precios[p.id] || p.precio) }));
+    } catch (e) { console.warn('⚠ pricelist:', e.message); }
+  }
+  return prods;
+}
+
 // ── PRICELIST DEL CLIENTE ────────────────────────────────────────
 async function getPricelistId(partnerId) {
   const cached = cacheGet('pl_' + partnerId); if (cached !== null) return cached;
@@ -189,19 +240,7 @@ app.get('/api/productos', async (req, res) => {
 
     const cached = cacheGet('cat_' + code); if (cached) return res.json(cached);
 
-    let prods = await fetchProductos();
-
-    // Precio según pricelist del cliente
-    const plId = await getPricelistId(cliente.partnerId);
-    if (plId && prods.length) {
-      try {
-        const ids = prods.map(p => p.id);
-        const precios = await xmlrpcCall('product.pricelist', 'get_products_price',
-          [[plId], ids, ids.map(() => 1), new Date().toISOString().slice(0, 10)]);
-        prods = prods.map(p => ({ ...p, precio: parseFloat(precios[p.id] || p.precio) }));
-      } catch (e) { console.warn('⚠ pricelist:', e.message); }
-    }
-
+    const prods = await productosCliente(cliente);
     const mult = cliente.multiplicador || 2;
     const result = prods.map(p => ({
       ...p,
@@ -373,12 +412,87 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
+// ── CONFIG DE LA CLIENTA (persistente, multi-dispositivo) ───────
+app.get('/api/config', requireClient, async (req, res) => {
+  try {
+    const code = (req.headers['x-client-code'] || '').toUpperCase();
+    res.json(await readCfg(code, req.partnerId));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.post('/api/config', requireClient, async (req, res) => {
+  try {
+    const cfg = req.body?.data || {};
+    if (JSON.stringify(cfg).length > 300000) return res.status(413).json({ error: 'Configuración demasiado grande (logo muy pesado)' });
+    const code = (req.headers['x-client-code'] || '').toUpperCase();
+    await writeCfg(code, req.partnerId, cfg);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── VITRINA PÚBLICA (link compartible, solo lectura) ────────────
+app.get('/api/public/:slug/config', async (req, res) => {
+  try {
+    const c = clienteBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
+    const cfg = await readCfg(c.code, c.partnerId);
+    // Solo lo visual — nunca multiplicador ni datos internos
+    const { nombre, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap } = cfg;
+    res.json({ nombre: nombre || c.name, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.get('/api/public/:slug/productos', async (req, res) => {
+  try {
+    const c = clienteBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
+    const hit = cacheGet('pub_' + req.params.slug); if (hit) return res.json(hit);
+    const cfg = await readCfg(c.code, c.partnerId);
+    const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
+    const ov = cfg.overrides || {};
+    const hFams = new Set(cfg.hiddenFams || []);
+    const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
+    const prods = await productosCliente(c);
+    const result = prods
+      .filter(p => p.stock > 0)
+      .filter(p => !hFams.has(famOf(p.categoria)))
+      .filter(p => !hSkus.has((p.sku || '').toUpperCase()))
+      .map(p => ({
+        id: p.id, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
+        categoria: p.categoria, atributos: p.atributos,
+        precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+      }));
+    cacheSet('pub_' + req.params.slug, result, 10 * 60 * 1000);
+    res.json(result);
+  } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.get('/api/public/:slug/imagen/:id', async (req, res) => {
+  try {
+    const c = clienteBySlug(req.params.slug);
+    if (!c) return res.status(404).send('No encontrada');
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send('ID inválido');
+    const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
+    const key = 'img_' + field + '_' + id;
+    let b64 = cacheGet(key);
+    if (!b64) {
+      const prods = await xmlrpcCall('product.product', 'read', [[id], [field]]);
+      b64 = prods && prods[0] ? prods[0][field] : null;
+      if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+    }
+    if (!b64) return res.status(404).send('Sin imagen');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
+    res.send(Buffer.from(b64, 'base64'));
+  } catch (e) { res.status(500).send(shortErr(e)); }
+});
+
 // ── PERFIL ───────────────────────────────────────────────────────
 app.get('/api/me', (req, res) => {
   const code = (req.headers['x-client-code'] || '').toUpperCase();
   const c = getCliente(code);
   if (!c) return res.status(401).json({ error: 'Cliente no reconocido' });
-  res.json({ name: c.name, partnerId: c.partnerId, multiplicador: c.multiplicador || 2, sucursales: c.sucursales || [] });
+  res.json({ name: c.name, partnerId: c.partnerId, multiplicador: c.multiplicador || 2, sucursales: c.sucursales || [], publicSlug: slugOf(code) });
 });
 
 app.get('/health', (_req, res) => res.json({
