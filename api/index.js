@@ -5,7 +5,9 @@ const fs      = require('fs');
 const path    = require('path');
 const archiver = require('archiver');
 const crypto  = require('crypto');
-const nodemailer = require('nodemailer');
+// nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
+let nodemailer = null;
+try { nodemailer = require('nodemailer'); } catch (e) { console.warn('⚠ nodemailer no instalado — el formulario de contacto quedará solo en logs'); }
 
 const app = express();
 app.use(cors());
@@ -494,7 +496,7 @@ app.get('/api/public/:slug/imagen/:id', async (req, res) => {
 // Config en Vercel: CONTACT_EMAIL (destino), SMTP_HOST, SMTP_PORT,
 // SMTP_USER, SMTP_PASS  (ej: Gmail con contraseña de aplicación)
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
-const mailer = process.env.SMTP_HOST ? nodemailer.createTransport({
+const mailer = (nodemailer && process.env.SMTP_HOST) ? nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || '587'),
   secure: (process.env.SMTP_PORT || '587') === '465',
