@@ -519,8 +519,20 @@ body.public .priv{display:none!important;}
               <input class="fld-in" id="vr-nombre" placeholder="Ej: Sra. María — reloj dorado"/>
             </div>
             <div class="fld">
+              <label class="fld-l">Teléfono de contacto</label>
+              <input class="fld-in" id="vr-fono" inputmode="tel" placeholder="+56 9 …"/>
+            </div>
+            <div class="fld">
+              <label class="fld-l">Correo electrónico</label>
+              <input class="fld-in" id="vr-email" type="email" placeholder="clienta@correo.cl"/>
+            </div>
+            <div class="fld">
               <label class="fld-l">Dirección de despacho</label>
-              <input class="fld-in" id="vr-direccion" placeholder="Calle, número, comuna"/>
+              <div class="sug-wrap">
+                <input class="fld-in" id="vr-direccion" placeholder="Escribe y elige del mapa…" autocomplete="off"/>
+                <div class="sug-box" id="dir-sug"></div>
+              </div>
+              <p class="proto-note" id="dir-ok" style="display:none">📍 Dirección verificada en el mapa</p>
             </div>
             <div class="fld">
               <label class="fld-l">Notas del pedido</label>
@@ -1405,6 +1417,39 @@ document.querySelectorAll('.chip').forEach(c=>{
   };
 });
 
+/* dirección con autocompletado de mapas (OpenStreetMap/Photon, sesgo Chile) */
+let dirT = null, DIR_OK = false;
+$('vr-direccion').addEventListener('input', ()=>{
+  DIR_OK = false; $('dir-ok').style.display='none';
+  clearTimeout(dirT);
+  const q = $('vr-direccion').value.trim();
+  const box = $('dir-sug');
+  if(q.length<4){ box.classList.remove('open'); return; }
+  dirT = setTimeout(async ()=>{
+    try {
+      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=es&limit=5&lat=-33.45&lon=-70.66`);
+      const d = await r.json();
+      const items = (d.features||[]).map(f=>{
+        const p = f.properties||{};
+        const l1 = [p.name || p.street, p.housenumber].filter(Boolean).join(' ');
+        const l2 = [p.district, p.city || p.county, p.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+        return { label: [l1, l2].filter(Boolean).join(', ') };
+      }).filter(x=>x.label);
+      if(!items.length){ box.classList.remove('open'); return; }
+      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
+      box.classList.add('open');
+      box.querySelectorAll('.sug-item').forEach(el=>{
+        el.onclick = ()=>{
+          $('vr-direccion').value = el.dataset.d;
+          DIR_OK = true; $('dir-ok').style.display='block';
+          box.classList.remove('open');
+        };
+      });
+    } catch(e){ box.classList.remove('open'); }
+  }, 350);
+});
+document.addEventListener('click', e=>{ if(!e.target.closest('#sec-rapida .sug-wrap')) $('dir-sug').classList.remove('open'); });
+
 $('vr-enviar').onclick = async ()=>{
   $('vr-ok').style.display='none'; $('vr-err').style.display='none';
   const ls = lineasValidas();
@@ -1414,13 +1459,16 @@ $('vr-enviar').onclick = async ()=>{
     const r = await api('/pedido', { method:'POST', body: JSON.stringify({ data:{
       productos: ls.map(l=>({sku:l.sku, quantity:l.quantity})),
       nombreVenta: $('vr-nombre').value.trim(),
-      direccion: $('vr-direccion').value.trim(),
+      telefono: $('vr-fono').value.trim(),
+      email: $('vr-email').value.trim(),
+      direccion: $('vr-direccion').value.trim() + (DIR_OK ? ' ✓maps' : ''),
       nota: $('vr-nota').value.trim(),
       modoPago: 'Modo ' + MODO_PAGO,
       metodoPago: METODO_PAGO + ' (por confirmar)'
     }})});
     ROWS = []; ensureRows(12); saveRows(); renderRows();
     $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-nota').value='';
+    $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
     $('vr-ok').textContent = '✓ ¡Venta enviada! N° interno ' + r.orderId + '. Preparamos el despacho y te avisamos.';
     $('vr-ok').style.display='block';
     PEDIDOS = null; // refrescar mis ventas
