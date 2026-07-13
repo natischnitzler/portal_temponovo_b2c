@@ -54,7 +54,6 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .hbtn svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.5;}
 .hbadge{position:absolute;top:1px;right:0;background:var(--red);color:#fff;border-radius:9px;min-width:16px;height:16px;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 4px;}
 .hbadge.show{display:flex;}
-.btn-salir{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--hdr-tx);opacity:.7;background:none;border:none;padding:8px 2px 8px 6px;}
 
 .main{flex:1;padding-bottom:74px;}
 .section{display:none;}.section.active{display:block;}
@@ -303,7 +302,8 @@ body.costs #btn-eye svg{stroke-width:2;}
 /* info entretenida */
 .step .emoji{font-size:26px;line-height:1;min-width:34px;text-align:center;}
 .info-paths{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
-.info-path{border:1px dashed var(--line);background:var(--paper);padding:10px;font-size:12px;color:var(--ink-soft);line-height:1.5;text-align:center;}
+.info-path{border:1px dashed var(--line);background:var(--paper);padding:10px;font-size:12px;color:var(--ink-soft);line-height:1.5;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;}
+.info-path:hover{border-color:var(--hdr);border-style:solid;background:var(--white);}
 .info-path b{display:block;font-size:12.5px;color:var(--ink);margin-bottom:3px;}
 .info-fin{background:var(--white);border:1px solid var(--line);padding:22px;text-align:center;margin-top:6px;}
 .info-fin .big{font-size:30px;margin-bottom:8px;}
@@ -379,7 +379,7 @@ body.costs #btn-eye svg{stroke-width:2;}
 #qr-box img,#qr-box canvas{border:8px solid #fff;box-shadow:0 2px 14px rgba(0,0,0,.08);}
 
 /* vitrina pública */
-body.public .hbtn,body.public .btn-salir,body.public .nav-bottom{display:none!important;}
+body.public .hbtn,body.public .nav-bottom{display:none!important;}
 body.public .main{padding-bottom:24px;}
 body.public .priv{display:none!important;}
 
@@ -415,7 +415,9 @@ body.public .priv{display:none!important;}
       <svg viewBox="0 0 24 24"><path d="M6 7h12l-1.2 12a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 7z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg>
       <span class="hbadge" id="badge-top">0</span>
     </button>
-    <button class="btn-salir" id="btn-info-top">Información</button>
+    <button class="hbtn" id="btn-info-top" title="Información">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/></svg>
+    </button>
   </header>
 
   <main class="main">
@@ -564,7 +566,7 @@ body.public .priv{display:none!important;}
           <div class="emoji">🎨</div>
           <div>
             <div class="st">1 · Diséñala como tu negocio</div>
-            <div class="sd">En <b>Configuración ⚙</b> pones tu logo, tu nombre, tus colores, tu letra y <b>tus precios de venta</b> (multiplicador o precio fijo por producto). Tip: el ojo 👁 de arriba muestra u oculta <b>tus costos</b> — ocúltalos antes de pasarle el teléfono a tu clienta.</div>
+            <div class="sd">En <b>Configuración ⚙</b> pones tu logo, tu nombre, tus colores, tu letra, <b>tus precios de venta</b> (multiplicador o precio fijo por producto) y <b>tus etiquetas</b> — pon "Más vendido", "Nuevo" o tus propias categorías sobre los productos. Tip: el ojo 👁 de arriba muestra u oculta <b>tus costos</b> — ocúltalos antes de pasarle el teléfono a tu clienta.</div>
             <button class="cfg-btn dark" id="info-go-cfg" style="margin-top:10px">Ir a configuración ⚙</button>
           </div>
         </div>
@@ -583,8 +585,8 @@ body.public .priv{display:none!important;}
             <div class="st">3 · Arma el pedido como quieras</div>
             <div class="sd">Dos caminos, un mismo carrito:</div>
             <div class="info-paths">
-              <div class="info-path"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal cara a cara.</div>
-              <div class="info-path"><b>Venta Rápida</b>Pegas los códigos (¡hasta desde Excel!) y listo.</div>
+              <div class="info-path" id="info-go-vitrina"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal cara a cara.</div>
+              <div class="info-path" id="info-go-rapida"><b>Venta Rápida</b>Toca el 🛒 carrito arriba y pega los códigos (¡hasta desde Excel!).</div>
             </div>
           </div>
         </div>
@@ -762,6 +764,19 @@ body.public .priv{display:none!important;}
       </div>
       <div class="mini-list" id="tagmap-list" style="display:none"></div>
       <p class="cfg-note">La etiqueta sale sobre la foto del producto en tu vitrina y en tu link público.</p>
+      <div class="cfg-h" style="margin-top:16px">Excel de etiquetas</div>
+      <div class="dl-row">
+        <button class="cfg-btn" id="dl-tags">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+          Descargar base
+        </button>
+        <button class="cfg-btn dark" id="up-tags">
+          <svg viewBox="0 0 24 24"><path d="M12 21V9m0 0-4 4m4-4 4 4"/><path d="M5 3h14"/></svg>
+          Subir etiquetas
+        </button>
+        <input type="file" id="up-tags-input" accept=".xlsx,.xls,.csv" style="display:none"/>
+      </div>
+      <p class="cfg-note">Descarga la base con todos tus códigos, escribe el nombre exacto de la etiqueta junto a cada producto (déjalo vacío para no etiquetarlo) y súbela.</p>
     </div>
 
     <div class="cfg-block">
@@ -1007,6 +1022,8 @@ $('btn-cart-top').onclick = ()=> go('rapida');
 $('btn-info-top').onclick = ()=> go('info');
 $('info-go-ventas').onclick = ()=> go('ventas');
 $('info-go-salir').onclick = salir;
+$('info-go-vitrina').onclick = ()=> go('vitrina');
+$('info-go-rapida').onclick = ()=> go('rapida');
 $('brand').style.cursor = 'pointer';
 $('brand').onclick = ()=> go('vitrina');
 if(localStorage.getItem('tn_eye')==='1') document.body.classList.add('costs');
@@ -1764,6 +1781,47 @@ function renderTagsCfg(){
     saveCfg(); renderTagMapList(); renderGrid();
   };
   renderTagMapList();
+
+  $('dl-tags').onclick = ()=>{
+    if(!PRODUCTOS_ALL.length){ toast('Catálogo aún cargando'); return; }
+    const rows = PRODUCTOS_ALL.map(p=>({
+      'Código': p.sku,
+      'Producto': p.nombre,
+      'Etiqueta': tagOf(p.sku)?.nombre || ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols']=[{wch:16},{wch:44},{wch:22}];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Etiquetas');
+    const tagsSheet = XLSX.utils.json_to_sheet((CFG.tags||[]).map(t=>({'Nombres disponibles':t.nombre})));
+    XLSX.utils.book_append_sheet(wb, tagsSheet, 'Tus etiquetas');
+    XLSX.writeFile(wb, 'mis-etiquetas.xlsx');
+  };
+  $('up-tags').onclick = ()=> $('up-tags-input').click();
+  $('up-tags-input').onchange = async e=>{
+    const f = e.target.files[0]; if(!f) return;
+    try {
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
+      let n = 0, skipped = 0;
+      rows.forEach(r=>{
+        const keys = Object.keys(r);
+        const kSku = keys.find(k=>/c[oó]d/i.test(k)) || keys[0];
+        const kTag = keys.find(k=>/etiqueta/i.test(k)) || keys[keys.length-1];
+        const sku = String(r[kSku]||'').trim().toUpperCase();
+        const nombreTag = String(r[kTag]||'').trim();
+        if(!sku || !PRODUCTOS_ALL.find(p=>(p.sku||'').toUpperCase()===sku)) return;
+        if(!nombreTag){ if((CFG.tagMap||{})[sku]){ delete CFG.tagMap[sku]; n++; } return; }
+        const tag = (CFG.tags||[]).find(t=>t.nombre.toLowerCase()===nombreTag.toLowerCase());
+        if(!tag){ skipped++; return; }
+        CFG.tagMap = { ...(CFG.tagMap||{}), [sku]: tag.id };
+        n++;
+      });
+      saveCfg(); renderTagMapList(); renderGrid();
+      toast(n + ' actualizados' + (skipped ? ', ' + skipped + ' con etiqueta no reconocida' : ''));
+    } catch(err){ toast('No se pudo leer el archivo'); }
+    e.target.value = '';
+  };
 }
 function renderTagList(){
   const tags = CFG.tags||[];
