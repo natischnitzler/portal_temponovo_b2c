@@ -1083,6 +1083,12 @@ function visibles(){
   const hS = new Set((CFG.hiddenSkus||[]).map(x=>x.toUpperCase()));
   return PRODUCTOS.filter(p=> !hF.has(famSub(p).fam) && !hS.has((p.sku||'').toUpperCase()));
 }
+// Igual que visibles(), pero sobre TODO el catálogo (incluye sin stock) — para Excel de precios/etiquetas
+function vendibles(){
+  const hF = new Set(CFG.hiddenFams||[]);
+  const hS = new Set((CFG.hiddenSkus||[]).map(x=>x.toUpperCase()));
+  return PRODUCTOS_ALL.filter(p=> !hF.has(famSub(p).fam) && !hS.has((p.sku||'').toUpperCase()));
+}
 function tagOf(sku){
   const id = (CFG.tagMap||{})[sku];
   return (CFG.tags||[]).find(t=>t.id===id) || null;
@@ -1207,6 +1213,10 @@ function renderGrid(){
 }
 
 /* ═══════════ FICHA ═══════════ */
+function esReloj(p){
+  const fam = famSub(p).fam || '';
+  return /reloj|watch/i.test(fam) && !/mural/i.test(fam);
+}
 function openFicha(id){
   const p = PRODUCTOS.find(x=>x.id===id); if(!p) return;
   FICHA_PROD = p; FICHA_QTY = 1;
@@ -1233,15 +1243,15 @@ function openFicha(id){
         <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg>
         Agregar al carrito
       </button>
-      <button class="big-btn line" id="f-try">
+      ${esReloj(p) ? `<button class="big-btn line" id="f-try">
         <svg viewBox="0 0 24 24"><path d="M7 21c0-4 1-7 1-10a4 4 0 0 1 8 0c0 3 1 6 1 10"/><circle cx="12" cy="9" r="3"/></svg>
         Probar en la muñeca
-      </button>
+      </button>` : ''}
     </div>`;
   $('f-menos').onclick = ()=>{ if(FICHA_QTY>1){FICHA_QTY--; $('f-qty').textContent=FICHA_QTY;} };
   $('f-mas').onclick = ()=>{ FICHA_QTY++; $('f-qty').textContent=FICHA_QTY; };
   $('f-add').onclick = ()=>{ addRow(p.sku, FICHA_QTY); closeFicha(); toast('Agregado al carrito'); };
-  $('f-try').onclick = ()=>{ closeFicha(); openTry(p); };
+  if(esReloj(p)) $('f-try').onclick = ()=>{ closeFicha(); openTry(p); };
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }
@@ -1619,7 +1629,9 @@ function initCfgPanel(){
 
   $('dl-base').onclick = ()=>{
     if(!PRODUCTOS_ALL.length){ toast('Catálogo aún cargando'); return; }
-    const rows = PRODUCTOS_ALL.map(p=>({ 'Código':p.sku, 'Producto':p.nombre, 'Precio venta':sugerido(p) }));
+    const list = vendibles();
+    if(!list.length){ toast('No tienes categorías elegidas para vender'); return; }
+    const rows = list.map(p=>({ 'Código':p.sku, 'Producto':p.nombre, 'Precio venta':sugerido(p) }));
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols']=[{wch:16},{wch:44},{wch:14}];
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Precios');
@@ -1784,7 +1796,9 @@ function renderTagsCfg(){
 
   $('dl-tags').onclick = ()=>{
     if(!PRODUCTOS_ALL.length){ toast('Catálogo aún cargando'); return; }
-    const rows = PRODUCTOS_ALL.map(p=>({
+    const list = vendibles();
+    if(!list.length){ toast('No tienes categorías elegidas para vender'); return; }
+    const rows = list.map(p=>({
       'Código': p.sku,
       'Producto': p.nombre,
       'Etiqueta': tagOf(p.sku)?.nombre || ''
