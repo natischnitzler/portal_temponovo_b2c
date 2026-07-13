@@ -264,6 +264,7 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .try-stage .placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#ddd;text-align:center;padding:24px;}
 .try-stage .placeholder p{font-size:13px;line-height:1.7;opacity:.8;max-width:260px;}
 .watch-layer{position:absolute;left:0;top:0;transform-origin:center;will-change:transform;filter:drop-shadow(0 6px 14px rgba(0,0,0,.35));}
+.watch-layer.smooth{transition:transform .15s linear, opacity .25s ease;}
 .watch-layer img{width:100%;height:100%;object-fit:contain;pointer-events:none;mix-blend-mode:multiply;}
 .try-stage.cam .watch-layer img{mix-blend-mode:normal;}
 .try-controls{display:flex;flex-direction:column;gap:12px;}
@@ -2050,10 +2051,12 @@ function setStatus(txt, warn){
 
 /* ── ubica el reloj sobre la muñeca a partir de los puntos de la mano ── */
 function mediaSize(el){ return { w: el.videoWidth||el.naturalWidth||0, h: el.videoHeight||el.naturalHeight||0 }; }
-function applyHandTracking(pred, el){
+let TRACK = { cx:0, cy:0, size:150, rot:0, inited:false };
+function resetTrack(){ TRACK.inited = false; }
+function applyHandTracking(pred, el, snap){
   const rect = stage.getBoundingClientRect();
   const { w:vw, h:vh } = mediaSize(el);
-  if(!vw || !vh) return;
+  if(!vw || !vh || !rect.width || !rect.height) return;
   const scale = Math.max(rect.width/vw, rect.height/vh);
   const offX = (rect.width - vw*scale)/2, offY = (rect.height - vh*scale)/2;
   const toStage = ([x,y]) => ({ x: x*scale+offX, y: y*scale+offY });
@@ -2068,21 +2071,42 @@ function applyHandTracking(pred, el){
   dir = { x: dir.x/handLen, y: dir.y/handLen };
   const handWidth = Math.hypot(indexMCP.x-pinkyMCP.x, indexMCP.y-pinkyMCP.y);
 
-  const center = { x: wrist.x + dir.x*handLen*0.55, y: wrist.y + dir.y*handLen*0.55 };
-  const size = Math.max(60, Math.min(360, handWidth*1.5));
-  const rot  = Math.atan2(dir.x, -dir.y) * 180/Math.PI;
+  let size = Math.max(60, Math.min(300, handWidth*1.25));
+  // sube un poco desde la muñeca hacia el antebrazo, sin pasarse
+  let cx = wrist.x + dir.x*handLen*0.4;
+  let cy = wrist.y + dir.y*handLen*0.4;
+  // nunca dejar que se salga del cuadro visible
+  cx = Math.max(size*0.35, Math.min(rect.width  - size*0.35, cx));
+  cy = Math.max(size*0.35, Math.min(rect.height - size*0.35, cy));
+  const rot = Math.atan2(dir.x, -dir.y) * 180/Math.PI;
 
-  W.size = size; W.rot = rot;
-  W.x = center.x - size/2; W.y = center.y - size/2;
+  if(!TRACK.inited || snap){
+    TRACK = { cx, cy, size, rot, inited:true };
+  } else {
+    const a = 0.35; // suavizado: mezcla valor nuevo con el anterior para evitar saltos
+    TRACK.cx   += (cx-TRACK.cx)*a;
+    TRACK.cy   += (cy-TRACK.cy)*a;
+    TRACK.size += (size-TRACK.size)*a;
+    // el ángulo puede saltar de -180 a 180; corrige el camino más corto antes de mezclar
+    let dRot = rot - TRACK.rot;
+    while(dRot > 180) dRot -= 360;
+    while(dRot < -180) dRot += 360;
+    TRACK.rot += dRot*a;
+  }
+
+  W.size = TRACK.size; W.rot = TRACK.rot;
+  W.x = TRACK.cx - TRACK.size/2; W.y = TRACK.cy - TRACK.size/2;
   applyW();
-  $('size-range').value = Math.round(size);
-  $('rot-range').value = Math.round(Math.max(-90, Math.min(90, rot)));
+  $('size-range').value = Math.round(W.size);
+  $('rot-range').value = Math.round(Math.max(-90, Math.min(90, W.rot)));
 }
 
 /* ── seguimiento en vivo (cámara) ── */
 let trackTimer = null, lastHandSeen = 0;
 async function startTracking(){
   stopTracking();
+  resetTrack();
+  layer.classList.add('smooth');
   setStatus('Cargando IA de seguimiento…');
   try { await ensureHandModel(); }
   catch(e){ setStatus('No se pudo cargar el seguimiento — usa Manual', true); setTimeout(()=>setStatus(''), 2600); return; }
@@ -2104,11 +2128,12 @@ async function startTracking(){
         }
       } catch(err){ /* frame transitorio, se reintenta */ }
     }
-    trackTimer = setTimeout(loop, 180);
+    trackTimer = setTimeout(loop, 150);
   };
   loop();
 }
-function stopTracking(){ clearTimeout(trackTimer); trackTimer=null; setStatus(''); layer.style.opacity = 1; }
+function stopTracking(){ clearTimeout(trackTimer); trackTimer=null; setStatus(''); layer.style.opacity = 1; layer.classList.remove('smooth'); }
+
 
 $('btn-cam').onclick = async ()=>{
   stopCam();
@@ -2137,7 +2162,8 @@ $('photo-input').onchange = e=>{
       await ensureHandModel();
       const preds = await handModel.estimateHands(img, true);
       if(preds && preds.length){
-        applyHandTracking(preds[0], img);
+        resetTrack();
+        applyHandTracking(preds[0], img, true);
         setStatus('✓ Muñeca detectada — puedes ajustarlo a mano');
       } else {
         setStatus('No se detectó la muñeca — ajústalo con Manual', true);
