@@ -70,6 +70,8 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .nav-item.active{color:var(--hdr);}
 .nav-badge{position:absolute;top:6px;right:calc(50% - 22px);background:var(--red);color:#fff;border-radius:10px;min-width:17px;height:17px;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 4px;}
 .nav-badge.show{display:flex;}
+.nav-bottom-single .nav-item{font-size:13px;letter-spacing:.16em;gap:6px;}
+.nav-bottom-single .nav-item svg{width:26px;height:26px;}
 
 /* ── INICIO ── */
 .home-hi{font-family:var(--f1);font-size:26px;margin:14px 0 2px;}
@@ -427,43 +429,12 @@ body.public .priv{display:none!important;}
       <svg viewBox="0 0 24 24"><path d="M6 7h12l-1.2 12a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 7z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg>
       <span class="hbadge" id="badge-top">0</span>
     </button>
-    <button class="btn-salir" id="btn-salir">Salir</button>
+    <button class="btn-salir" id="btn-info-top">Información</button>
   </header>
 
   <main class="main">
 
-    <!-- INICIO -->
-    <section class="section active" id="sec-inicio">
-      <div class="wrap">
-        <h2 class="home-hi" id="home-hi">Hola</h2>
-        <div class="home-slogan" id="home-slogan">Tú te dedicas a vender, nosotros hacemos el resto.</div>
-        <div class="home-grid">
-          <div class="home-tile" data-go="ventas">
-            <svg viewBox="0 0 24 24"><path d="M4 19V10m5.5 9V5M15 19v-7m5.5 7V8"/></svg>
-            <div class="tt">Mis Ventas</div>
-            <div class="td">Resumen, gráfico y detalle</div>
-          </div>
-          <div class="home-tile" data-go="vitrina">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M9 9v11"/></svg>
-            <div class="tt">Vitrina</div>
-            <div class="td">Catálogo para mostrar</div>
-          </div>
-          <div class="home-tile" data-go="rapida">
-            <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg>
-            <div class="tt">Venta Rápida</div>
-            <div class="td">Pega códigos y listo</div>
-          </div>
-          <div class="home-tile" data-go="info">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-            <div class="tt">Información</div>
-            <div class="td">Cómo funciona y pagos</div>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- MIS VENTAS -->
-    <section class="section" id="sec-ventas">
       <div class="wrap">
         <h2 class="page-t">Mis Ventas</h2>
         <p class="page-s">Tu resumen del mes y el detalle de cada venta.</p>
@@ -472,7 +443,7 @@ body.public .priv{display:none!important;}
     </section>
 
     <!-- VITRINA -->
-    <section class="section" id="sec-vitrina">
+    <section class="section active" id="sec-vitrina">
       <div class="vit-welcome" id="vit-welcome"></div>
       <div class="fam-wrap">
         <button class="fam-arrow" id="fam-left">‹</button>
@@ -557,21 +528,12 @@ body.public .priv{display:none!important;}
               <p class="proto-note" id="dir-ok" style="display:none">📍 Dirección verificada en el mapa</p>
             </div>
             <div class="fld">
-              <label class="fld-l">Notas del pedido</label>
-              <textarea class="fld-ta" id="vr-nota" placeholder="Opcional…"></textarea>
+              <label class="fld-l">Comuna</label>
+              <input class="fld-in" id="vr-comuna" placeholder="Se completa al elegir la dirección del mapa…" autocomplete="off"/>
             </div>
             <div class="fld">
-              <label class="fld-l">Modo de pago</label>
-              <div class="modo-row">
-                <div class="modo active" data-modo="A">
-                  <div class="mt">Modo A</div>
-                  <div class="md">Tu clienta te paga todo y te depositamos tu comisión</div>
-                </div>
-                <div class="modo" data-modo="B">
-                  <div class="mt">Modo B</div>
-                  <div class="md">Tu clienta paga el producto aparte, tú cobras tu parte</div>
-                </div>
-              </div>
+              <label class="fld-l">Notas del pedido</label>
+              <textarea class="fld-ta" id="vr-nota" placeholder="Opcional…"></textarea>
             </div>
             <div class="fld">
               <label class="fld-l">Método de pago</label>
@@ -597,6 +559,16 @@ body.public .priv{display:none!important;}
           <div style="font-size:34px;margin-bottom:10px">👋</div>
           <h2 id="info-hi">¡Bienvenida al equipo!</h2>
           <p>Tú te dedicas a vender. Nosotros hacemos <b>todo</b> el resto: stock, despacho y logística.</p>
+        </div>
+        <div class="info-quick-row" style="display:flex;gap:10px;margin:16px 0 26px">
+          <button class="cfg-btn dark" id="info-go-ventas" style="flex:1;justify-content:center;height:46px">
+            <svg viewBox="0 0 24 24"><path d="M4 19V10m5.5 9V5M15 19v-7m5.5 7V8"/></svg>
+            Mis Ventas
+          </button>
+          <button class="cfg-btn" id="info-go-salir" style="flex:1;justify-content:center;height:46px">
+            <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+            Salir
+          </button>
         </div>
         <h2 class="page-t" style="font-size:19px">¿Cómo funciona? Paso a paso:</h2>
         <div style="height:10px"></div>
@@ -631,29 +603,9 @@ body.public .priv{display:none!important;}
         </div>
 
         <div class="step">
-          <div class="emoji">💳</div>
-          <div>
-            <div class="st">4 · Elige cómo se paga</div>
-            <div class="sd">En cada venta eliges el modo que más te acomode:</div>
-            <div class="modos-grid" style="margin:12px 0 0">
-              <div class="modo-card">
-                <span class="mc-tag">Modo A</span>
-                <h3>Tú cobras todo 💰</h3>
-                <p>Tu clienta te paga a ti el precio completo. Tú nos pagas el producto y <b>la diferencia es tuya</b> — te depositamos tu comisión según lo acordado.</p>
-              </div>
-              <div class="modo-card">
-                <span class="mc-tag">Modo B</span>
-                <h3>Cada uno lo suyo 🤝</h3>
-                <p>Tu clienta paga el producto directo y aparte; tú cobras <b>solo tu parte</b>. Cero manejo del dinero del producto.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="step">
           <div class="emoji">🔗</div>
           <div style="min-width:0;flex:1">
-            <div class="st">5 · Comparte tu tienda</div>
+            <div class="st">4 · Comparte tu tienda</div>
             <div class="sd">Tu vitrina tiene un <b>link público</b>: tus clientas la ven con tu marca y tus precios, sin claves y sin ver tus costos. Compártelo por WhatsApp o imprime el QR.</div>
             <div class="pub-url" id="info-pub-url" style="margin-top:10px">…</div>
             <div class="dl-row" style="margin-top:10px">
@@ -667,7 +619,7 @@ body.public .priv{display:none!important;}
         <div class="step">
           <div class="emoji">📦</div>
           <div>
-            <div class="st">6 · Nosotros hacemos el resto</div>
+            <div class="st">5 · Nosotros hacemos el resto</div>
             <div class="sd">Preparamos el pedido y lo despachamos a la dirección que pusiste. Tú revisas todo en <b>Mis Ventas</b>… y sigues vendiendo.</div>
           </div>
         </div>
@@ -681,27 +633,10 @@ body.public .priv{display:none!important;}
 
   </main>
 
-  <nav class="nav-bottom">
-    <button class="nav-item active" data-sec="inicio">
-      <svg viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1v-8z"/></svg>
-      Inicio
-    </button>
-    <button class="nav-item" data-sec="ventas">
-      <svg viewBox="0 0 24 24"><path d="M4 19V10m5.5 9V5M15 19v-7m5.5 7V8"/></svg>
-      Mis Ventas
-    </button>
-    <button class="nav-item" data-sec="vitrina">
+  <nav class="nav-bottom nav-bottom-single">
+    <button class="nav-item active" data-sec="vitrina">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M9 9v11"/></svg>
       Vitrina
-    </button>
-    <button class="nav-item" data-sec="rapida">
-      <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg>
-      Venta Rápida
-      <span class="nav-badge" id="badge-nav">0</span>
-    </button>
-    <button class="nav-item" data-sec="info">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-      Información
     </button>
   </nav>
 </div>
@@ -1040,9 +975,7 @@ function applyCfg(){
     (CFG.logo ? `<img src="${CFG.logo}" alt=""/>` : '') +
     `<span style="min-width:0"><span class="bname">${esc(CFG.nombre || 'Vitrina')}</span>` +
     (CFG.slogan ? `<span class="bslogan">${esc(CFG.slogan)}</span>` : '') + `</span>`;
-  $('home-hi').textContent = 'Hola, ' + (ME?.name || '');
   const infoHi = $('info-hi'); if(infoHi) infoHi.textContent = '¡Bienvenida al equipo' + (ME?.name ? ', ' + ME.name : '') + '!';
-  $('home-slogan').textContent = CFG.slogan || 'Tú te dedicas a vender, nosotros hacemos el resto.';
 }
 function sugerido(p){
   if(PUBLIC) return p.precioVenta || 0;
@@ -1070,7 +1003,7 @@ $('login-btn').onclick = async ()=>{
   $('login-btn').disabled = false;
 };
 $('login-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-btn').click(); });
-$('btn-salir').onclick = ()=>{ localStorage.removeItem('tn_code'); location.reload(); };
+function salir(){ localStorage.removeItem('tn_code'); location.reload(); }
 
 /* ── quiero vender con nosotros ── */
 $('join-open').onclick = ()=>{ $('join-back').classList.add('open'); $('join-sheet').classList.add('open'); document.body.style.overflow='hidden'; };
@@ -1148,10 +1081,12 @@ function go(sec){
   window.scrollTo(0,0);
 }
 document.querySelectorAll('.nav-item').forEach(btn=> btn.onclick = ()=> go(btn.dataset.sec));
-document.querySelectorAll('.home-tile').forEach(t=> t.onclick = ()=> go(t.dataset.go));
 $('btn-cart-top').onclick = ()=> go('rapida');
+$('btn-info-top').onclick = ()=> go('info');
+$('info-go-ventas').onclick = ()=> go('ventas');
+$('info-go-salir').onclick = salir;
 $('brand').style.cursor = 'pointer';
-$('brand').onclick = ()=> go('inicio');
+$('brand').onclick = ()=> go('vitrina');
 if(localStorage.getItem('tn_eye')==='1') document.body.classList.add('costs');
 $('btn-eye').onclick = ()=>{
   const on = document.body.classList.toggle('costs');
@@ -1473,13 +1408,7 @@ function renderResumen(){
 $('vr-mas').onclick = ()=>{ ensureRows(ROWS.length+10); saveRows(); renderRows(); };
 $('vr-limpiar').onclick = ()=>{ ROWS = []; ensureRows(12); saveRows(); renderRows(); };
 
-let MODO_PAGO = 'A', METODO_PAGO = 'Transferencia';
-document.querySelectorAll('.modo').forEach(m=>{
-  m.onclick = ()=>{
-    document.querySelectorAll('.modo').forEach(x=>x.classList.remove('active'));
-    m.classList.add('active'); MODO_PAGO = m.dataset.modo;
-  };
-});
+let METODO_PAGO = 'Transferencia';
 document.querySelectorAll('.chip').forEach(c=>{
   c.onclick = ()=>{
     document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
@@ -1502,15 +1431,17 @@ $('vr-direccion').addEventListener('input', ()=>{
       const items = (d.features||[]).map(f=>{
         const p = f.properties||{};
         const l1 = [p.name || p.street, p.housenumber].filter(Boolean).join(' ');
+        const comuna = p.district || p.city || p.county || '';
         const l2 = [p.district, p.city || p.county, p.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
-        return { label: [l1, l2].filter(Boolean).join(', ') };
+        return { label: [l1, l2].filter(Boolean).join(', '), comuna };
       }).filter(x=>x.label);
       if(!items.length){ box.classList.remove('open'); return; }
-      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
+      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}" data-c="${esc(it.comuna)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
       box.classList.add('open');
       box.querySelectorAll('.sug-item').forEach(el=>{
         el.onclick = ()=>{
           $('vr-direccion').value = el.dataset.d;
+          if(el.dataset.c) $('vr-comuna').value = el.dataset.c;
           DIR_OK = true; $('dir-ok').style.display='block';
           box.classList.remove('open');
         };
@@ -1532,12 +1463,12 @@ $('vr-enviar').onclick = async ()=>{
       telefono: $('vr-fono').value.trim(),
       email: $('vr-email').value.trim(),
       direccion: $('vr-direccion').value.trim() + (DIR_OK ? ' ✓maps' : ''),
+      comuna: $('vr-comuna').value.trim(),
       nota: $('vr-nota').value.trim(),
-      modoPago: 'Modo ' + MODO_PAGO,
       metodoPago: METODO_PAGO + ' (por confirmar)'
     }})});
     ROWS = []; ensureRows(12); saveRows(); renderRows();
-    $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-nota').value='';
+    $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-comuna').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
     $('vr-ok').textContent = '✓ ¡Venta enviada! N° interno ' + r.orderId + '. Preparamos el despacho y te avisamos.';
     $('vr-ok').style.display='block';
