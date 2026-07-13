@@ -268,6 +268,11 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .try-stage.cam .watch-layer img{mix-blend-mode:normal;}
 .try-controls{display:flex;flex-direction:column;gap:12px;}
 .try-row{display:flex;gap:10px;}
+.try-btn.active{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);color:var(--ink);background:var(--white);}
+.try-status{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(25,27,30,.75);color:#fff;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;z-index:3;white-space:nowrap;display:none;align-items:center;gap:6px;}
+.try-status .dot{width:7px;height:7px;border-radius:50%;background:#7fd88a;flex-shrink:0;}
+.try-status.warn .dot{background:#e0a94b;}
+#manual-controls{display:flex;flex-direction:column;gap:12px;}
 .try-btn{flex:1;height:46px;border:1px solid var(--line);background:var(--white);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:8px;}
 .try-btn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;}
 .try-btn.dark{background:var(--hdr);color:var(--hdr-tx);border-color:var(--hdr);}
@@ -834,8 +839,13 @@ body.public .priv{display:none!important;}
       <video id="try-video" playsinline autoplay muted style="display:none"></video>
       <img class="bg" id="try-photo" style="display:none" alt=""/>
       <div class="watch-layer" id="watch-layer" style="display:none"><img id="watch-img" alt="Producto"/></div>
+      <div class="try-status" id="try-status"><span class="dot"></span><span id="try-status-txt"></span></div>
     </div>
     <div class="try-controls">
+      <div class="try-row">
+        <button class="try-btn active" id="mode-auto">🪄 Automático</button>
+        <button class="try-btn" id="mode-manual">✋ Manual</button>
+      </div>
       <div class="try-row">
         <button class="try-btn" id="btn-cam">
           <svg viewBox="0 0 24 24"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
@@ -847,15 +857,17 @@ body.public .priv{display:none!important;}
         </button>
         <input type="file" id="photo-input" accept="image/*" style="display:none"/>
       </div>
-      <div class="slider-row">Tamaño <input type="range" id="size-range" min="60" max="360" value="150"/></div>
-      <div class="slider-row">Girar <input type="range" id="rot-range" min="-90" max="90" value="0"/></div>
+      <div id="manual-controls" style="display:none">
+        <div class="slider-row">Tamaño <input type="range" id="size-range" min="60" max="360" value="150"/></div>
+        <div class="slider-row">Girar <input type="range" id="rot-range" min="-90" max="90" value="0"/></div>
+      </div>
       <div class="try-row">
         <button class="try-btn dark" id="btn-capture">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
           Capturar imagen
         </button>
       </div>
-      <p class="try-hint">Arrastra con un dedo · pellizca para agrandar o girar</p>
+      <p class="try-hint" id="try-hint">Apunta la cámara a tu mano y muñeca — el reloj se ajusta solo.</p>
     </div>
   </div>
 </div>
@@ -1931,14 +1943,17 @@ function refreshOvUI(){
 const stage = $('try-stage'), layer = $('watch-layer'), watchImg = $('watch-img');
 let W = { x: 90, y: 140, size: 150, rot: 0 };
 let camStream = null, tryMode = null;
+let AUTO_TRY = true;
 
 function openTry(p){
   TRY_PROD = p;
   watchImg.src = imgUrl(p.id, true);
   layer.style.display = 'block';
+  layer.style.opacity = 1;
   $('try-name').textContent = p.nombre;
   $('try-overlay').classList.add('open');
   document.body.style.overflow='hidden';
+  setTryMode(true);
   applyW();
 }
 $('try-close').onclick = ()=>{
@@ -1957,10 +1972,27 @@ applyW();
 $('size-range').oninput = e=>{ W.size = parseInt(e.target.value); applyW(); };
 $('rot-range').oninput  = e=>{ W.rot  = parseInt(e.target.value); applyW(); };
 
+/* ── modo automático (IA) vs manual ── */
+function setTryMode(auto){
+  AUTO_TRY = auto;
+  $('mode-auto').classList.toggle('active', auto);
+  $('mode-manual').classList.toggle('active', !auto);
+  $('manual-controls').style.display = auto ? 'none' : 'flex';
+  $('try-hint').textContent = auto
+    ? 'Apunta la cámara a tu mano y muñeca — el reloj se ajusta solo.'
+    : 'Arrastra con un dedo · pellizca para agrandar o girar';
+  if(auto){ if(tryMode==='cam') startTracking(); }
+  else { stopTracking(); }
+}
+$('mode-auto').onclick = ()=> setTryMode(true);
+$('mode-manual').onclick = ()=> setTryMode(false);
+
+/* ── seguimiento manual (arrastrar / pellizcar) — se desactiva mientras la IA sigue la cámara ── */
 const pointers = new Map();
 let dragStart = null;
 stage.addEventListener('pointerdown', e=>{
   if(layer.style.display==='none') return;
+  if(AUTO_TRY && tryMode==='cam') return;   // la IA está a cargo
   stage.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
   if(pointers.size===1) dragStart = { wx:W.x, wy:W.y, px:e.clientX, py:e.clientY };
@@ -1989,6 +2021,95 @@ stage.addEventListener('pointermove', e=>{
 });
 ['pointerup','pointercancel'].forEach(ev=> stage.addEventListener(ev, e=>{ pointers.delete(e.pointerId); dragStart=null; }));
 
+/* ── carga perezosa del modelo de IA (TensorFlow.js + handpose) ── */
+let handModel = null, handModelLoading = null;
+function loadScript(src){
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = ()=>reject(new Error('No se pudo cargar '+src));
+    document.head.appendChild(s);
+  });
+}
+function ensureHandModel(){
+  if(handModel) return Promise.resolve(handModel);
+  if(handModelLoading) return handModelLoading;
+  handModelLoading = (async ()=>{
+    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js');
+    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose@0.0.7/dist/handpose.js');
+    handModel = await handpose.load();
+    return handModel;
+  })();
+  return handModelLoading;
+}
+function setStatus(txt, warn){
+  const box = $('try-status');
+  box.style.display = txt ? 'flex' : 'none';
+  box.classList.toggle('warn', !!warn);
+  $('try-status-txt').textContent = txt || '';
+}
+
+/* ── ubica el reloj sobre la muñeca a partir de los puntos de la mano ── */
+function mediaSize(el){ return { w: el.videoWidth||el.naturalWidth||0, h: el.videoHeight||el.naturalHeight||0 }; }
+function applyHandTracking(pred, el){
+  const rect = stage.getBoundingClientRect();
+  const { w:vw, h:vh } = mediaSize(el);
+  if(!vw || !vh) return;
+  const scale = Math.max(rect.width/vw, rect.height/vh);
+  const offX = (rect.width - vw*scale)/2, offY = (rect.height - vh*scale)/2;
+  const toStage = ([x,y]) => ({ x: x*scale+offX, y: y*scale+offY });
+
+  const wrist     = toStage(pred.landmarks[0]);
+  const middleMCP = toStage(pred.landmarks[9]);
+  const indexMCP  = toStage(pred.landmarks[5]);
+  const pinkyMCP  = toStage(pred.landmarks[17]);
+
+  let dir = { x: wrist.x-middleMCP.x, y: wrist.y-middleMCP.y };
+  const handLen = Math.hypot(dir.x, dir.y) || 1;
+  dir = { x: dir.x/handLen, y: dir.y/handLen };
+  const handWidth = Math.hypot(indexMCP.x-pinkyMCP.x, indexMCP.y-pinkyMCP.y);
+
+  const center = { x: wrist.x + dir.x*handLen*0.55, y: wrist.y + dir.y*handLen*0.55 };
+  const size = Math.max(60, Math.min(360, handWidth*1.5));
+  const rot  = Math.atan2(dir.x, -dir.y) * 180/Math.PI;
+
+  W.size = size; W.rot = rot;
+  W.x = center.x - size/2; W.y = center.y - size/2;
+  applyW();
+  $('size-range').value = Math.round(size);
+  $('rot-range').value = Math.round(Math.max(-90, Math.min(90, rot)));
+}
+
+/* ── seguimiento en vivo (cámara) ── */
+let trackTimer = null, lastHandSeen = 0;
+async function startTracking(){
+  stopTracking();
+  setStatus('Cargando IA de seguimiento…');
+  try { await ensureHandModel(); }
+  catch(e){ setStatus('No se pudo cargar el seguimiento — usa Manual', true); setTimeout(()=>setStatus(''), 2600); return; }
+  lastHandSeen = 0;
+  const loop = async ()=>{
+    if(!(AUTO_TRY && tryMode==='cam' && stage.classList.contains('cam'))) return;
+    const video = $('try-video');
+    if(video.readyState>=2 && video.videoWidth){
+      try {
+        const preds = await handModel.estimateHands(video, true);
+        if(preds && preds.length){
+          applyHandTracking(preds[0], video);
+          lastHandSeen = Date.now();
+          setStatus('✓ Muñeca detectada');
+          layer.style.opacity = 1;
+        } else if(Date.now()-lastHandSeen > 600){
+          setStatus('Muestra tu mano y muñeca a la cámara', true);
+          layer.style.opacity = .35;
+        }
+      } catch(err){ /* frame transitorio, se reintenta */ }
+    }
+    trackTimer = setTimeout(loop, 180);
+  };
+  loop();
+}
+function stopTracking(){ clearTimeout(trackTimer); trackTimer=null; setStatus(''); layer.style.opacity = 1; }
+
 $('btn-cam').onclick = async ()=>{
   stopCam();
   try {
@@ -1999,16 +2120,33 @@ $('btn-cam').onclick = async ()=>{
     $('try-placeholder').style.display='none';
     stage.classList.add('cam');
     tryMode = 'cam';
+    if(AUTO_TRY) startTracking();
   } catch(e){ toast('No se pudo abrir la cámara'); }
 };
-function stopCam(){ if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; } $('try-video').style.display='none'; }
+function stopCam(){ if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; } $('try-video').style.display='none'; stopTracking(); }
 
 $('btn-photo').onclick = ()=> $('photo-input').click();
 $('photo-input').onchange = e=>{
   const f = e.target.files[0]; if(!f) return;
   stopCam(); stage.classList.remove('cam');
-  $('try-photo').src = URL.createObjectURL(f);
-  $('try-photo').style.display='block';
+  const img = $('try-photo');
+  img.onload = async ()=>{
+    if(!AUTO_TRY) return;
+    setStatus('Buscando tu muñeca en la foto…');
+    try {
+      await ensureHandModel();
+      const preds = await handModel.estimateHands(img, true);
+      if(preds && preds.length){
+        applyHandTracking(preds[0], img);
+        setStatus('✓ Muñeca detectada — puedes ajustarlo a mano');
+      } else {
+        setStatus('No se detectó la muñeca — ajústalo con Manual', true);
+      }
+    } catch(err){ setStatus('No se pudo detectar — ajústalo con Manual', true); }
+    setTimeout(()=>setStatus(''), 2600);
+  };
+  img.src = URL.createObjectURL(f);
+  img.style.display='block';
   $('try-placeholder').style.display='none';
   tryMode = 'photo';
 };
