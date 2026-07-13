@@ -378,19 +378,6 @@ body.costs #btn-eye svg{stroke-width:2;}
 #qr-box{display:flex;justify-content:center;padding:14px 0 4px;}
 #qr-box img,#qr-box canvas{border:8px solid #fff;box-shadow:0 2px 14px rgba(0,0,0,.08);}
 
-/* quiero vender con nosotros */
-.join-cta{margin-top:30px;background:var(--hdr);border:none;width:100%;padding:18px 14px;font-size:14.5px;color:var(--hdr-tx);letter-spacing:.03em;border-radius:var(--r);line-height:1.5;box-shadow:0 8px 22px rgba(0,0,0,.14);}
-.join-cta b{color:var(--hdr-tx);border-bottom:1.5px solid currentColor;}
-.join-cta small{display:block;font-size:11px;opacity:.75;margin-top:4px;letter-spacing:.12em;text-transform:uppercase;}
-.join-wrap{padding:20px 18px 34px;max-width:520px;margin:0 auto;}
-.join-hero{text-align:center;margin-bottom:20px;}
-.join-hero .big{font-size:34px;margin-bottom:8px;}
-.join-hero h3{font-family:var(--f1);font-size:21px;margin-bottom:8px;}
-.join-hero p{font-size:13.5px;color:var(--ink-soft);line-height:1.7;}
-.join-points{display:flex;flex-direction:column;gap:8px;margin-bottom:20px;}
-.join-point{display:flex;gap:10px;align-items:flex-start;background:var(--white);border:1px solid var(--line);padding:11px 13px;border-radius:var(--r);font-size:13px;color:var(--ink-soft);line-height:1.55;}
-.join-point .e{font-size:18px;line-height:1.2;}
-
 /* vitrina pública */
 body.public .hbtn,body.public .btn-salir,body.public .nav-bottom{display:none!important;}
 body.public .main{padding-bottom:24px;}
@@ -411,7 +398,6 @@ body.public .priv{display:none!important;}
     <button id="login-btn" class="login-btn">Entrar</button>
     <div id="login-error" class="login-error"></div>
     <div class="login-foot">Distribución autorizada</div>
-    <button class="join-cta" id="join-open">✨ ¿Quieres <b>vender con nosotros</b>?<small>Toca aquí y conoce cómo partir hoy →</small></button>
   </div>
 </div>
 
@@ -434,7 +420,8 @@ body.public .priv{display:none!important;}
 
   <main class="main">
 
-
+    <!-- MIS VENTAS -->
+    <section class="section" id="sec-ventas">
       <div class="wrap">
         <h2 class="page-t">Mis Ventas</h2>
         <p class="page-s">Tu resumen del mes y el detalle de cada venta.</p>
@@ -858,38 +845,6 @@ body.public .priv{display:none!important;}
   </div>
 </div>
 
-<!-- QUIERO VENDER -->
-<div class="sheet-back" id="join-back"></div>
-<div class="sheet" id="join-sheet">
-  <div class="sheet-head">
-    <span class="sheet-title">Vende con nosotros</span>
-    <button class="sheet-close" id="join-close">×</button>
-  </div>
-  <div class="sheet-body">
-    <div class="join-wrap">
-      <div class="join-hero">
-        <div class="big">💼✨</div>
-        <h3>Gana vendiendo, sin invertir en stock</h3>
-        <p>Si atiendes clientas todos los días — manicure, peluquería, tienda, ferias — ya tienes lo más difícil: <b>la confianza de tu público</b>. Nosotros ponemos el resto.</p>
-      </div>
-      <div class="join-points">
-        <div class="join-point"><span class="e">📱</span><span><b>Tu propia vitrina digital</b> con tu logo, tus colores y tus precios, lista para mostrar desde el teléfono.</span></div>
-        <div class="join-point"><span class="e">📦</span><span><b>Sin comprar stock:</b> vendes primero, nosotros despachamos. Tú eliges cómo cobrar en cada venta.</span></div>
-        <div class="join-point"><span class="e">💰</span><span><b>Tu margen lo defines tú.</b> Ves tus ventas, tu ganancia y tu historial en un solo lugar.</span></div>
-      </div>
-      <div class="fld"><label class="fld-l">Tu nombre *</label><input class="fld-in" id="j-nombre" maxlength="60"/></div>
-      <div class="fld"><label class="fld-l">WhatsApp *</label><input class="fld-in" id="j-fono" inputmode="tel" placeholder="+56 9 …" maxlength="20"/></div>
-      <div class="fld"><label class="fld-l">Email</label><input class="fld-in" id="j-email" type="email" maxlength="80"/></div>
-      <div class="fld"><label class="fld-l">Ciudad / comuna</label><input class="fld-in" id="j-ciudad" maxlength="60"/></div>
-      <div class="fld"><label class="fld-l">Cuéntanos de ti</label><textarea class="fld-ta" id="j-msg" maxlength="400" placeholder="¿A qué te dedicas? ¿Dónde atiendes a tus clientas?"></textarea></div>
-      <input id="j-web" style="display:none" tabindex="-1" autocomplete="off"/>
-      <button class="big-btn dark" id="j-enviar" style="margin-top:16px">Quiero vender ✨</button>
-      <div class="ok-box" id="j-ok"></div>
-      <div class="err-box" id="j-err"></div>
-    </div>
-  </div>
-</div>
-
 <div id="toast"></div>
 <script>
 /* ═══════════ ESTADO ═══════════ */
@@ -1005,39 +960,6 @@ $('login-btn').onclick = async ()=>{
 $('login-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-btn').click(); });
 function salir(){ localStorage.removeItem('tn_code'); location.reload(); }
 
-/* ── quiero vender con nosotros ── */
-$('join-open').onclick = ()=>{ $('join-back').classList.add('open'); $('join-sheet').classList.add('open'); document.body.style.overflow='hidden'; };
-function closeJoin(){ $('join-back').classList.remove('open'); $('join-sheet').classList.remove('open'); document.body.style.overflow=''; }
-$('join-close').onclick = closeJoin;
-$('join-back').onclick = closeJoin;
-$('j-enviar').onclick = async ()=>{
-  $('j-ok').style.display='none'; $('j-err').style.display='none';
-  const data = {
-    nombre: $('j-nombre').value.trim(),
-    telefono: $('j-fono').value.trim(),
-    email: $('j-email').value.trim(),
-    ciudad: $('j-ciudad').value.trim(),
-    mensaje: $('j-msg').value.trim(),
-    web: $('j-web').value
-  };
-  if(!data.nombre || !data.telefono){
-    $('j-err').textContent = 'Tu nombre y WhatsApp son obligatorios para poder contactarte.';
-    $('j-err').style.display='block'; return;
-  }
-  $('j-enviar').disabled = true; $('j-enviar').textContent='Enviando…';
-  try {
-    const r = await fetch(API+'/contacto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ data }) });
-    const d = await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(d.error||'Error '+r.status);
-    ['j-nombre','j-fono','j-email','j-ciudad','j-msg'].forEach(id=>$(id).value='');
-    $('j-ok').textContent = '✓ ¡Recibido! Te contactaremos por WhatsApp muy pronto para partir juntas.';
-    $('j-ok').style.display='block';
-  } catch(e){
-    $('j-err').textContent = 'No se pudo enviar: ' + e.message;
-    $('j-err').style.display='block';
-  }
-  $('j-enviar').disabled = false; $('j-enviar').textContent='Quiero vender ✨';
-};
 if(PUBLIC){
   document.body.classList.add('public');
   $('login-screen').style.display='none';
