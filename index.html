@@ -1948,6 +1948,7 @@ let AUTO_TRY = true;
 
 function openTry(p){
   TRY_PROD = p;
+  W = { x: 90, y: 140, size: 150, rot: 0 };
   watchImg.src = imgUrl(p.id, true);
   layer.style.display = 'block';
   layer.style.opacity = 1;
@@ -1966,6 +1967,10 @@ $('try-close').onclick = ()=>{
   stage.classList.remove('cam');
 };
 function applyW(){
+  if(!Number.isFinite(W.size) || W.size<=0) W.size = 150;
+  if(!Number.isFinite(W.x)) W.x = 90;
+  if(!Number.isFinite(W.y)) W.y = 140;
+  if(!Number.isFinite(W.rot)) W.rot = 0;
   layer.style.width = W.size+'px'; layer.style.height = W.size+'px';
   layer.style.transform = `translate(${W.x}px,${W.y}px) rotate(${W.rot}deg)`;
 }
@@ -2079,6 +2084,9 @@ function applyHandTracking(pred, el, snap){
   cx = Math.max(size*0.35, Math.min(rect.width  - size*0.35, cx));
   cy = Math.max(size*0.35, Math.min(rect.height - size*0.35, cy));
   const rot = Math.atan2(dir.x, -dir.y) * 180/Math.PI;
+
+  // si algún dato salió inválido (mano fuera de cuadro, cálculo raro), no tocar nada — se reintenta el próximo cuadro
+  if(![size, cx, cy, rot].every(Number.isFinite)) return;
 
   if(!TRACK.inited || snap){
     TRACK = { cx, cy, size, rot, inited:true };
