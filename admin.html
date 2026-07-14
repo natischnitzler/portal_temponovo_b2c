@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Admin · Temponovo Vitrina</title>
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --f1:'Marcellus',Georgia,serif;
+  --f2:'Jost',sans-serif;
+  --mono:'IBM Plex Mono',monospace;
+  --ink:#191b1e; --ink-soft:#3c3f44; --paper:#faf9f6; --white:#fff; --line:#e7e4dc; --steel:#9a9a94;
+  --hdr:#191b1e; --hdr-tx:#faf9f6;
+  --green:#2e7d32; --green-light:#e8f3e9;
+  --red:#b3423a; --red-light:#faeae8;
+  --amber:#8a6d3d; --amber-light:#fdf6e3;
+}
+body{font-family:var(--f2);background:var(--paper);color:var(--ink);min-height:100vh;font-size:14.5px;}
+h1,h2,h3{font-family:var(--f1);}
+button{font-family:var(--f2);cursor:pointer;}
+input,select,textarea{font-family:var(--f2);}
+
+/* login */
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+.login-box{width:100%;max-width:340px;text-align:center;}
+.login-title{font-family:var(--f1);font-size:30px;letter-spacing:.18em;margin-bottom:6px;}
+.login-sub{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);margin-bottom:44px;}
+.login-input{width:100%;height:48px;border:1px solid var(--line);padding:0 14px;font-size:15px;outline:none;background:var(--white);border-radius:8px;}
+.login-input:focus{border-color:var(--hdr);}
+.login-btn{width:100%;height:48px;background:var(--hdr);color:var(--hdr-tx);border:none;font-size:11px;letter-spacing:.2em;text-transform:uppercase;margin-top:16px;border-radius:8px;}
+.login-btn:disabled{opacity:.4;}
+.login-error{font-size:12.5px;color:var(--red);margin-top:12px;min-height:16px;}
+
+/* app shell */
+#app{display:none;min-height:100vh;}
+#app.open{display:flex;}
+.sidebar{width:220px;flex-shrink:0;background:var(--hdr);color:var(--hdr-tx);display:flex;flex-direction:column;padding:22px 0;}
+.sidebar-title{font-family:var(--f1);font-size:19px;letter-spacing:.1em;padding:0 22px 26px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:12px 22px;font-size:13px;letter-spacing:.04em;color:var(--hdr-tx);opacity:.68;border:none;background:none;text-align:left;width:100%;}
+.nav-item.active{opacity:1;background:rgba(255,255,255,.08);border-left:3px solid var(--hdr-tx);padding-left:19px;}
+.sidebar-foot{margin-top:auto;padding:0 22px;}
+.btn-logout{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--hdr-tx);opacity:.65;background:none;border:none;padding:8px 0;}
+.main{flex:1;overflow-y:auto;height:100vh;}
+.wrap{max-width:1080px;margin:0 auto;padding:32px 28px 60px;}
+.page-t{font-size:22px;margin-bottom:4px;}
+.page-s{font-size:13px;color:var(--steel);margin-bottom:24px;line-height:1.6;}
+.section{display:none;}.section.active{display:block;}
+
+/* pieces */
+.card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:16px;}
+.card-h{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel);margin-bottom:14px;}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+.fld{flex:1;min-width:140px;}
+.fld-l{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);display:block;margin-bottom:6px;}
+.fld-in,.fld-select{width:100%;height:42px;border:1px solid var(--line);padding:0 12px;font-size:13.5px;outline:none;border-radius:7px;background:var(--paper);}
+.fld-in:focus,.fld-select:focus{border-color:var(--hdr);}
+.btn{height:42px;padding:0 18px;border:1px solid var(--line);background:var(--white);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);border-radius:7px;white-space:nowrap;}
+.btn.dark{background:var(--hdr);color:var(--hdr-tx);border-color:var(--hdr);}
+.btn.danger{color:var(--red);border-color:#eccfcb;}
+.btn:disabled{opacity:.45;}
+.btn-sm{height:32px;padding:0 12px;font-size:10.5px;}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);padding:8px 10px;border-bottom:1px solid var(--line);}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+.mono{font-family:var(--mono);}
+.badge{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;border-radius:11px;display:inline-block;}
+.b-ok{background:var(--green-light);color:var(--green);}
+.b-warn{background:var(--amber-light);color:var(--amber);}
+.b-off{background:var(--red-light);color:var(--red);}
+.empty{text-align:center;padding:34px 12px;color:var(--steel);font-size:13px;}
+.chip-list{display:flex;gap:6px;flex-wrap:wrap;}
+.chk{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--paper);cursor:pointer;}
+.chk input{accent-color:var(--hdr);}
+.chk.on{border-color:var(--hdr);background:var(--white);}
+.note{font-size:12px;color:var(--steel);line-height:1.6;margin-top:8px;}
+.msg{padding:12px 14px;border-radius:8px;font-size:12.5px;margin-top:10px;display:none;line-height:1.6;}
+.msg.ok{display:block;background:var(--green-light);color:var(--green);}
+.msg.err{display:block;background:var(--red-light);color:var(--red);}
+.sel-empresa{max-width:280px;}
+.claves-box{background:var(--paper);border:1px dashed var(--line);border-radius:8px;padding:12px 14px;margin-top:12px;max-height:260px;overflow-y:auto;}
+.clave-row{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--line);}
+.clave-row:last-child{border-bottom:none;}
+.toggle{width:38px;height:22px;border-radius:12px;background:var(--line);position:relative;border:none;flex-shrink:0;}
+.toggle.on{background:var(--green);}
+.toggle .dot{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s;}
+.toggle.on .dot{left:18px;}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-title">ADMIN</div>
+    <div class="login-sub">Temponovo Vitrina</div>
+    <input id="login-pass" class="login-input" type="password" placeholder="Clave de administrador" autocomplete="off"/>
+    <button id="login-btn" class="login-btn">Entrar</button>
+    <div id="login-error" class="login-error"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <nav class="sidebar">
+    <div class="sidebar-title">Admin</div>
+    <button class="nav-item active" data-sec="empresas">🏢 Empresas</button>
+    <button class="nav-item" data-sec="vendedoras">👤 Vendedoras</button>
+    <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
+    <button class="nav-item" data-sec="reporte">📊 Reporte</button>
+    <button class="nav-item" data-sec="importar">⇪ Importar CSV</button>
+    <div class="sidebar-foot">
+      <button class="btn-logout" id="btn-logout">Cerrar sesión</button>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="wrap">
+
+      <!-- EMPRESAS -->
+      <section class="section active" id="sec-empresas">
+        <h2 class="page-t">Empresas</h2>
+        <p class="page-s">Cada Empresa es quien realmente le compra a Temponovo en Odoo. Sus vendedoras venden a su nombre y las ventas se consolidan en un solo pedido.</p>
+
+        <div class="card">
+          <div class="card-h">Nueva empresa</div>
+          <div class="row">
+            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="emp-nombre" placeholder="Ej: Empresa Tali"/></div>
+            <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="emp-partner" type="number" placeholder="Ej: 827"/></div>
+            <button class="btn dark" id="emp-crear">Crear empresa</button>
+          </div>
+          <div class="msg" id="emp-msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Todas las empresas</div>
+          <div id="emp-list"><div class="empty">Cargando…</div></div>
+        </div>
+      </section>
+
+      <!-- VENDEDORAS -->
+      <section class="section" id="sec-vendedoras">
+        <h2 class="page-t">Vendedoras</h2>
+        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige a qué Empresa pertenece, su multiplicador de precio y qué categorías vende.</p>
+
+        <div class="card">
+          <div class="card-h">Nueva vendedora</div>
+          <div class="row">
+            <div class="fld"><label class="fld-l">Empresa</label><select class="fld-select" id="v-empresa"></select></div>
+            <div class="fld"><label class="fld-l">Código (usuario)</label><input class="fld-in" id="v-codigo" placeholder="Ej: CAROLINA" style="text-transform:uppercase"/></div>
+            <div class="fld"><label class="fld-l">Clave</label><input class="fld-in" id="v-clave" placeholder="Clave de acceso"/></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="v-nombre" placeholder="Ej: Carolina Cereceda"/></div>
+            <div class="fld" style="max-width:140px"><label class="fld-l">Multiplicador</label><input class="fld-in" id="v-mult" type="number" step="0.1" value="2"/></div>
+            <div class="fld"><label class="fld-l">Sucursales</label><input class="fld-in" id="v-sucursales" placeholder="Santiago, Providencia…"/></div>
+          </div>
+          <div class="fld" style="margin-top:10px">
+            <label class="fld-l">Categorías que vende (vacío = todas)</label>
+            <div class="chip-list" id="v-categorias"></div>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn dark" id="v-crear">Crear vendedora</button>
+          </div>
+          <div class="msg" id="v-msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Vendedoras</div>
+          <div class="row" style="margin-bottom:14px">
+            <div class="fld sel-empresa"><label class="fld-l">Filtrar por empresa</label><select class="fld-select" id="v-filtro-empresa"></select></div>
+          </div>
+          <div id="v-list"><div class="empty">Cargando…</div></div>
+        </div>
+      </section>
+
+      <!-- VENTAS -->
+      <section class="section" id="sec-ventas">
+        <h2 class="page-t">Ventas</h2>
+        <p class="page-s">Las ventas de cada vendedora quedan pendientes hasta que las consolidas en un solo pedido de Odoo, a nombre de la Empresa.</p>
+
+        <div class="card">
+          <div class="row">
+            <div class="fld sel-empresa"><label class="fld-l">Empresa</label><select class="fld-select" id="vt-empresa"></select></div>
+            <div class="fld" style="max-width:180px"><label class="fld-l">Estado</label>
+              <select class="fld-select" id="vt-estado">
+                <option value="">Todas</option>
+                <option value="pendiente">Pendientes</option>
+                <option value="consolidada">Consolidadas</option>
+              </select>
+            </div>
+            <button class="btn" id="vt-buscar">Buscar</button>
+            <button class="btn dark" id="vt-consolidar">Consolidar pendientes de esta empresa</button>
+          </div>
+          <div class="msg" id="vt-msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Resultado</div>
+          <div id="vt-list"><div class="empty">Elige una empresa y busca.</div></div>
+        </div>
+      </section>
+
+      <!-- REPORTE -->
+      <section class="section" id="sec-reporte">
+        <h2 class="page-t">Reporte</h2>
+        <p class="page-s">Ventas totales por vendedora, agrupadas por empresa.</p>
+        <div class="card">
+          <div id="rep-list"><div class="empty">Cargando…</div></div>
+        </div>
+      </section>
+
+      <!-- IMPORTAR -->
+      <section class="section" id="sec-importar">
+        <h2 class="page-t">Importar clientes.csv</h2>
+        <p class="page-s">Migra tus clientas del archivo <code>clientes.csv</code> antiguo: crea una Empresa y una Vendedora por cada fila (con el mismo partnerId de Odoo que ya tenían), y genera una clave temporal para cada una. Las que ya existan (mismo código) se saltan, así que puedes correrlo más de una vez sin problema.</p>
+        <div class="card">
+          <button class="btn dark" id="imp-run">Importar ahora</button>
+          <div class="msg" id="imp-msg"></div>
+          <div class="claves-box" id="imp-claves" style="display:none"></div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+const API = '/api/admin';
+let TOKEN = localStorage.getItem('tn_admin_token') || '';
+let EMPRESAS = [];
+let CATEGORIAS = [];
+let CATEGORIAS_SEL = new Set();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const fmt = n => '$' + Math.round(n||0).toLocaleString('es-CL');
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...(opts.headers||{}) } });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { logout(); throw new Error('Sesión expirada, entra de nuevo'); }
+  if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  return d;
+}
+function showMsg(id, text, ok) {
+  const el = $(id); el.className = 'msg ' + (ok ? 'ok' : 'err'); el.textContent = text;
+  setTimeout(() => { el.style.display = 'none'; }, ok ? 4000 : 7000);
+}
+
+/* ── LOGIN ── */
+$('login-btn').onclick = async () => {
+  const password = $('login-pass').value;
+  if (!password) return;
+  $('login-btn').disabled = true; $('login-error').textContent = '';
+  try {
+    const r = await fetch(API + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Error');
+    TOKEN = d.token; localStorage.setItem('tn_admin_token', TOKEN);
+    openApp();
+  } catch (e) { $('login-error').textContent = e.message; }
+  $('login-btn').disabled = false;
+};
+$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('login-btn').click(); });
+function logout() { TOKEN = ''; localStorage.removeItem('tn_admin_token'); $('app').classList.remove('open'); $('login-screen').style.display = 'flex'; }
+$('btn-logout').onclick = logout;
+
+function openApp() {
+  $('login-screen').style.display = 'none';
+  $('app').classList.add('open');
+  loadEmpresas().then(() => { loadCategorias(); loadVendedoras(); });
+}
+if (TOKEN) openApp();
+
+/* ── NAV ── */
+document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === btn));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  $('sec-' + btn.dataset.sec).classList.add('active');
+  if (btn.dataset.sec === 'reporte') loadReporte();
+});
+
+/* ── EMPRESAS ── */
+async function loadEmpresas() {
+  try {
+    EMPRESAS = await api('/empresas');
+    renderEmpresas();
+    fillEmpresaSelects();
+  } catch (e) { $('emp-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+function renderEmpresas() {
+  if (!EMPRESAS.length) { $('emp-list').innerHTML = '<div class="empty">Todavía no creas ninguna empresa.</div>'; return; }
+  $('emp-list').innerHTML = `<table><thead><tr><th>Nombre</th><th>Partner ID</th><th>Vendedoras</th><th></th></tr></thead><tbody>
+    ${EMPRESAS.map(e => `<tr>
+      <td>${esc(e.nombre)}</td>
+      <td class="mono">${e.partner_id}</td>
+      <td>${(VENDEDORAS||[]).filter(v=>v.empresa_id===e.id).length || '—'}</td>
+      <td><button class="btn btn-sm danger" data-del-emp="${e.id}">Eliminar</button></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+  $('emp-list').querySelectorAll('[data-del-emp]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Eliminar esta empresa? También se eliminan sus vendedoras y ventas.')) return;
+    try { await api('/empresas/' + b.dataset.delEmp, { method: 'DELETE' }); loadEmpresas(); loadVendedoras(); }
+    catch (e) { alert(e.message); }
+  });
+}
+function fillEmpresaSelects() {
+  const opts = EMPRESAS.map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join('');
+  $('v-empresa').innerHTML = opts || '<option value="">— crea una empresa primero —</option>';
+  $('v-filtro-empresa').innerHTML = '<option value="">Todas las empresas</option>' + opts;
+  $('vt-empresa').innerHTML = (opts || '<option value="">— no hay empresas —</option>');
+}
+$('emp-crear').onclick = async () => {
+  const nombre = $('emp-nombre').value.trim();
+  const partnerId = parseInt($('emp-partner').value);
+  if (!nombre || !partnerId) return showMsg('emp-msg', 'Nombre y Partner ID son obligatorios', false);
+  try {
+    await api('/empresas', { method: 'POST', body: JSON.stringify({ nombre, partnerId }) });
+    $('emp-nombre').value = ''; $('emp-partner').value = '';
+    showMsg('emp-msg', '✓ Empresa creada', true);
+    loadEmpresas();
+  } catch (e) { showMsg('emp-msg', e.message, false); }
+};
+
+/* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
+async function loadCategorias() {
+  try {
+    CATEGORIAS = await api('/categorias');
+    $('v-categorias').innerHTML = CATEGORIAS.map(c => `
+      <label class="chk" data-cat="${esc(c)}"><input type="checkbox"/> ${esc(c)}</label>`).join('') || '<span class="note">No se pudo leer el catálogo de Odoo.</span>';
+    $('v-categorias').querySelectorAll('.chk').forEach(chk => {
+      chk.onclick = e => {
+        e.preventDefault();
+        const cat = chk.dataset.cat;
+        if (CATEGORIAS_SEL.has(cat)) CATEGORIAS_SEL.delete(cat); else CATEGORIAS_SEL.add(cat);
+        chk.classList.toggle('on', CATEGORIAS_SEL.has(cat));
+        chk.querySelector('input').checked = CATEGORIAS_SEL.has(cat);
+      };
+    });
+  } catch (e) { $('v-categorias').innerHTML = '<span class="note">' + esc(e.message) + '</span>'; }
+}
+
+/* ── VENDEDORAS ── */
+let VENDEDORAS = [];
+async function loadVendedoras() {
+  try {
+    const empresaId = $('v-filtro-empresa').value;
+    VENDEDORAS = await api('/vendedoras' + (empresaId ? '?empresaId=' + empresaId : ''));
+    renderVendedoras();
+    renderEmpresas(); // refresca conteo
+  } catch (e) { $('v-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+$('v-filtro-empresa').addEventListener('change', loadVendedoras);
+function empresaNombre(id) { return (EMPRESAS.find(e => e.id === id) || {}).nombre || '—'; }
+function renderVendedoras() {
+  if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
+  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Empresa</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${VENDEDORAS.map(v => `<tr>
+      <td class="mono">${esc(v.codigo)}</td>
+      <td>${esc(v.nombre)}</td>
+      <td>${esc(empresaNombre(v.empresa_id))}</td>
+      <td class="mono">×${v.multiplicador}</td>
+      <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
+      <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
+      <td>
+        <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
+        <button class="btn btn-sm danger" data-del-v="${v.id}">Eliminar</button>
+      </td>
+    </tr>`).join('')}
+  </tbody></table>`;
+  $('v-list').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+    const v = VENDEDORAS.find(x => x.id == b.dataset.toggle);
+    try { await api('/vendedoras/' + v.id, { method: 'PUT', body: JSON.stringify({ activo: !v.activo }) }); loadVendedoras(); }
+    catch (e) { alert(e.message); }
+  });
+  $('v-list').querySelectorAll('[data-reset]').forEach(b => b.onclick = async () => {
+    const nueva = prompt('Nueva clave para esta vendedora:');
+    if (!nueva) return;
+    try { await api('/vendedoras/' + b.dataset.reset, { method: 'PUT', body: JSON.stringify({ clave: nueva }) }); alert('Clave actualizada. Avísale la nueva clave.'); }
+    catch (e) { alert(e.message); }
+  });
+  $('v-list').querySelectorAll('[data-del-v]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Eliminar esta vendedora?')) return;
+    try { await api('/vendedoras/' + b.dataset.delV, { method: 'DELETE' }); loadVendedoras(); }
+    catch (e) { alert(e.message); }
+  });
+}
+$('v-crear').onclick = async () => {
+  const empresaId = $('v-empresa').value;
+  const codigo = $('v-codigo').value.trim().toUpperCase();
+  const clave = $('v-clave').value;
+  const nombre = $('v-nombre').value.trim();
+  const multiplicador = parseFloat($('v-mult').value) || 2;
+  const sucursales = $('v-sucursales').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!empresaId || !codigo || !clave || !nombre) return showMsg('v-msg', 'Empresa, código, clave y nombre son obligatorios', false);
+  try {
+    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ empresaId, codigo, clave, nombre, multiplicador, categorias: [...CATEGORIAS_SEL], sucursales }) });
+    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-sucursales').value = ''; $('v-mult').value = 2;
+    CATEGORIAS_SEL.clear(); $('v-categorias').querySelectorAll('.chk').forEach(c => { c.classList.remove('on'); c.querySelector('input').checked = false; });
+    showMsg('v-msg', '✓ Vendedora creada', true);
+    loadVendedoras();
+  } catch (e) { showMsg('v-msg', e.message, false); }
+};
+
+/* ── VENTAS ── */
+$('vt-buscar').onclick = loadVentas;
+async function loadVentas() {
+  const empresaId = $('vt-empresa').value;
+  const estado = $('vt-estado').value;
+  if (!empresaId) { $('vt-list').innerHTML = '<div class="empty">Elige una empresa.</div>'; return; }
+  try {
+    const q = '?empresaId=' + empresaId + (estado ? '&estado=' + estado : '');
+    const ventas = await api('/ventas' + q);
+    renderVentas(ventas);
+  } catch (e) { $('vt-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+function renderVentas(ventas) {
+  if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
+  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Total</th><th>Estado</th></tr></thead><tbody>
+    ${ventas.map(v => `<tr>
+      <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
+      <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
+      <td>${esc(v.nombre_venta || '—')}</td>
+      <td>${(v.productos||[]).map(p => esc(p.sku) + ' ×' + p.quantity).join(', ')}</td>
+      <td class="mono">${fmt(v.total)}</td>
+      <td><span class="badge ${v.estado==='consolidada'?'b-ok':'b-warn'}">${v.estado==='consolidada'?'Consolidada':'Pendiente'}</span></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+$('vt-consolidar').onclick = async () => {
+  const empresaId = $('vt-empresa').value;
+  if (!empresaId) return showMsg('vt-msg', 'Elige una empresa', false);
+  if (!confirm('¿Juntar TODAS las ventas pendientes de esta empresa en un solo pedido de Odoo? No se puede deshacer.')) return;
+  try {
+    const r = await api('/consolidar/' + empresaId, { method: 'POST' });
+    showMsg('vt-msg', `✓ Pedido #${r.orderId} creado en Odoo con ${r.ventasConsolidadas} venta(s) consolidada(s).`, true);
+    loadVentas();
+  } catch (e) { showMsg('vt-msg', e.message, false); }
+};
+
+/* ── REPORTE ── */
+async function loadReporte() {
+  try {
+    const rows = await api('/reporte');
+    if (!rows.length) { $('rep-list').innerHTML = '<div class="empty">Sin datos todavía.</div>'; return; }
+    $('rep-list').innerHTML = `<table><thead><tr><th>Empresa</th><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Pendientes</th><th>Total</th></tr></thead><tbody>
+      ${rows.map(r => `<tr>
+        <td>${esc(r.empresa_nombre)}</td>
+        <td>${esc(r.vendedora_nombre)}</td>
+        <td class="mono">${esc(r.codigo)}</td>
+        <td class="mono">${r.ventas}</td>
+        <td class="mono">${r.pendientes}</td>
+        <td class="mono">${fmt(r.total)}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  } catch (e) { $('rep-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+
+/* ── IMPORTAR CSV ── */
+$('imp-run').onclick = async () => {
+  if (!confirm('¿Importar clientes.csv? Crea una Empresa + Vendedora por cada fila nueva (las que ya existan se saltan).')) return;
+  $('imp-run').disabled = true;
+  try {
+    const r = await api('/importar-csv', { method: 'POST' });
+    if (!r.creadas.length) {
+      showMsg('imp-msg', 'No había filas nuevas para importar (o ya estaban todas migradas).', true);
+    } else {
+      showMsg('imp-msg', `✓ Se crearon ${r.creadas.length} vendedora(s). Anota estas claves — no se van a poder ver de nuevo.`, true);
+      $('imp-claves').style.display = 'block';
+      $('imp-claves').innerHTML = r.creadas.map(c => `<div class="clave-row"><span>${esc(c.codigo)} — ${esc(c.nombre)}</span><b>${esc(c.claveTemporal)}</b></div>`).join('');
+    }
+    loadEmpresas(); loadVendedoras();
+  } catch (e) { showMsg('imp-msg', e.message, false); }
+  $('imp-run').disabled = false;
+};
+</script>
+</body>
+</html>
