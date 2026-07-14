@@ -557,7 +557,7 @@ body.public .priv{display:none!important;}
           <div class="emoji">🎨</div>
           <div>
             <div class="st">1 · Diséñala como tu negocio</div>
-            <div class="sd">En <b>Configuración ⚙</b> pones tu logo, tu nombre, tus colores, tu letra, <b>tus precios de venta</b> (multiplicador o precio fijo por producto) y <b>tus etiquetas</b> — pon "Más vendido", "Nuevo" o tus propias categorías sobre los productos. Tip: el ojo 👁 de arriba muestra u oculta <b>tus costos</b> — ocúltalos antes de pasarle el teléfono a tu clienta.</div>
+            <div class="sd">En <b>Configuración ⚙</b> pones tu logo, tu nombre, tus colores, tu letra y <b>tus etiquetas</b> — pon "Más vendido", "Nuevo" o tus propias categorías sobre los productos. Tus precios de venta y qué productos ves ya vienen configurados por Temponovo. Tip: el ojo 👁 de arriba muestra u oculta <b>tus costos</b> — ocúltalos antes de pasarle el teléfono a tu clienta.</div>
             <button class="cfg-btn dark" id="info-go-cfg" style="margin-top:10px">Ir a configuración ⚙</button>
           </div>
         </div>
@@ -694,47 +694,6 @@ body.public .priv{display:none!important;}
           <div class="font-opts" id="fo-f2"></div>
         </div>
       </div>
-    </div>
-
-    <div class="cfg-block">
-      <div class="cfg-h">Precio de venta</div>
-      <div class="cfg-row">
-        <span class="cfg-lbl">Multiplicador (venta = tu precio ×)</span>
-        <input class="cfg-input cfg-num" id="cfg-mult" type="number" step="0.1" min="1"/>
-      </div>
-      <div class="cfg-h" style="margin-top:16px">Excel de precios</div>
-      <div class="dl-row">
-        <button class="cfg-btn" id="dl-base">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
-          Descargar base
-        </button>
-        <button class="cfg-btn dark" id="up-precios">
-          <svg viewBox="0 0 24 24"><path d="M12 21V9m0 0-4 4m4-4 4 4"/><path d="M5 3h14"/></svg>
-          Subir precios
-        </button>
-        <input type="file" id="up-precios-input" accept=".xlsx,.xls,.csv" style="display:none"/>
-      </div>
-      <p class="cfg-note" id="ov-note">Descarga la base con tus precios actuales, cámbialos en Excel y súbela. El precio fijo manda sobre el multiplicador.</p>
-      <div class="dl-row" id="ov-clear-row" style="display:none;margin-top:10px">
-        <button class="cfg-btn danger" id="ov-clear">Quitar precios fijos</button>
-      </div>
-    </div>
-
-    <div class="cfg-block">
-      <div class="cfg-h">Mi catálogo · qué mostrar</div>
-      <div class="cfg-row" style="flex-direction:column;align-items:stretch;gap:8px">
-        <span class="cfg-lbl">Familias visibles en mi vitrina</span>
-        <div class="chk-list" id="cfg-fams"></div>
-      </div>
-      <div class="cfg-row" style="margin-top:6px">
-        <div class="sug-wrap">
-          <input class="cfg-input" id="hide-sku" placeholder="Busca por nombre o código…" autocomplete="off"/>
-          <div class="sug-box" id="hide-sug"></div>
-        </div>
-        <button class="cfg-btn" id="hide-add">Ocultar</button>
-      </div>
-      <div class="mini-list" id="hidden-list" style="display:none"></div>
-      <p class="cfg-note">Lo oculto no aparece en tu vitrina ni en tu link público, pero sigue disponible en Venta Rápida.</p>
     </div>
 
     <div class="cfg-block">
@@ -1071,7 +1030,6 @@ async function initApp(){
       (p.barcode? `<option value="${esc(p.barcode)}">${esc(p.sku)} · ${esc(p.nombre)}</option>` : '')
     ).join('');
     renderFams(); renderTagFilter(); renderPriceFilter(); renderGrid(); renderRows();
-    renderCatalogoCfg();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
   }
@@ -1207,8 +1165,9 @@ function filtrados(){
       if(r && (v < r.min || v >= r.max)) return false;
     }
     if(FILTRO_TXT){
-      const hay = (p.nombre+' '+p.sku+' '+(p.atributos||[]).map(a=>a.val).join(' ')).toLowerCase();
-      if(!hay.includes(FILTRO_TXT)) return false;
+      const hay = (p.nombre+' '+p.sku+' '+(p.categoria||'')+' '+(p.atributos||[]).map(a=>(a.attr||'')+' '+(a.val||'')).join(' ')).toLowerCase();
+      const palabras = FILTRO_TXT.split(/\s+/).filter(Boolean);
+      if(!palabras.every(w=>hay.includes(w))) return false;
     }
     return true;
   });
@@ -1633,49 +1592,6 @@ function initCfgPanel(){
   fontOpts($('fo-f1'), Object.keys(F1_STACK), F1_STACK, 'f1');
   fontOpts($('fo-f2'), Object.keys(F2_STACK), F2_STACK, 'f2');
 
-  $('cfg-mult').value = CFG.mult || ME?.multiplicador || 2;
-  $('cfg-mult').onchange = ()=>{
-    const v = parseFloat($('cfg-mult').value);
-    CFG.mult = (v && v>=1) ? v : null;
-    saveCfg(); renderGrid(); toast('Precios de venta actualizados');
-  };
-
-  $('dl-base').onclick = ()=>{
-    if(!PRODUCTOS_ALL.length){ toast('Catálogo aún cargando'); return; }
-    const list = vendibles();
-    if(!list.length){ toast('No tienes categorías elegidas para vender'); return; }
-    const rows = list.map(p=>({ 'Código':p.sku, 'Producto':p.nombre, 'Precio venta':sugerido(p) }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols']=[{wch:16},{wch:44},{wch:14}];
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Precios');
-    XLSX.writeFile(wb, 'mis-precios.xlsx');
-  };
-  $('up-precios').onclick = ()=> $('up-precios-input').click();
-  $('up-precios-input').onchange = async e=>{
-    const f = e.target.files[0]; if(!f) return;
-    try {
-      const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf);
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
-      let n = 0;
-      rows.forEach(r=>{
-        const keys = Object.keys(r);
-        const kSku = keys.find(k=>/c[oó]d/i.test(k)) || keys[0];
-        const kPr  = keys.find(k=>/precio/i.test(k)) || keys[keys.length-1];
-        const sku = String(r[kSku]||'').trim().toUpperCase();
-        const pr  = parseFloat(String(r[kPr]).replace(/[^\d.,]/g,'').replace(',','.'));
-        if(sku && pr>0 && PRODUCTOS_ALL.find(p=>(p.sku||'').toUpperCase()===sku)){
-          CFG.overrides[sku] = Math.round(pr); n++;
-        }
-      });
-      saveCfg(); renderGrid(); refreshOvUI();
-      toast(n + ' precios cargados');
-    } catch(err){ toast('No se pudo leer el archivo'); }
-    e.target.value = '';
-  };
-  $('ov-clear').onclick = ()=>{ CFG.overrides={}; saveCfg(); renderGrid(); refreshOvUI(); toast('Precios fijos eliminados'); };
-  refreshOvUI();
-
   $('dl-excel').onclick = ()=>{
     if(!PRODUCTOS_ALL.length){ toast('Catálogo aún cargando'); return; }
     const rows = PRODUCTOS_ALL.map(p=>{
@@ -1696,8 +1612,7 @@ function initCfgPanel(){
     window.location = `${API}/fotos?c=${encodeURIComponent(CODE)}${q}`;
   };
 
-  renderCatalogoCfg(); renderTagsCfg(); renderPublicLink();
-  attachSuggest($('hide-sku'), $('hide-sug'));
+  renderTagsCfg(); renderPublicLink();
   attachSuggest($('tag-sku'), $('tag-sug'));
 
   $('cfg-save').onclick = async ()=>{
@@ -1712,8 +1627,9 @@ function initCfgPanel(){
   };
 
   $('cfg-reset').onclick = ()=>{
-    if(!confirm('¿Restablecer logo, colores, tipografías y precios personalizados?')) return;
-    CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
+    if(!confirm('¿Restablecer logo, colores y tipografías? (tus precios y categorías los administra Temponovo, no se tocan)')) return;
+    const { mult, overrides, hiddenFams, hiddenSkus, ...appearance } = DEFAULT_CFG;
+    CFG = { ...CFG, ...JSON.parse(JSON.stringify(appearance)) };
     saveCfg(); applyCfg(); initCfgPanel(); renderFams(); renderTagFilter(); renderGrid();
     toast('Vitrina restablecida');
   };
@@ -1736,47 +1652,6 @@ function attachSuggest(inp, box){
     });
   });
   document.addEventListener('click', e=>{ if(!e.target.closest('.sug-wrap')) box.classList.remove('open'); });
-}
-
-/* ── catálogo visible ── */
-function renderCatalogoCfg(){
-  const fams = [...new Set(PRODUCTOS.map(p=>famSub(p).fam))].sort();
-  const hF = new Set(CFG.hiddenFams||[]);
-  $('cfg-fams').innerHTML = fams.map(f=>`
-    <label class="chk"><input type="checkbox" data-f="${esc(f)}" ${hF.has(f)?'':'checked'}/> ${esc(f)}</label>`).join('')
-    || '<span class="cfg-note">Catálogo aún cargando…</span>';
-  $('cfg-fams').querySelectorAll('input').forEach(ch=>{
-    ch.onchange = ()=>{
-      const set = new Set(CFG.hiddenFams||[]);
-      ch.checked ? set.delete(ch.dataset.f) : set.add(ch.dataset.f);
-      CFG.hiddenFams = [...set];
-      saveCfg(); renderFams(); renderGrid();
-    };
-  });
-  renderHiddenList();
-  $('hide-add').onclick = ()=>{
-    let v = $('hide-sku').value.trim().toUpperCase();
-    const p = findProd(v); if(p) v = p.sku;
-    if(!v || !p){ toast('Código no encontrado'); return; }
-    if(!(CFG.hiddenSkus||[]).includes(v)) CFG.hiddenSkus = [...(CFG.hiddenSkus||[]), v];
-    $('hide-sku').value='';
-    saveCfg(); renderHiddenList(); renderGrid();
-  };
-}
-function renderHiddenList(){
-  const list = CFG.hiddenSkus||[];
-  const box = $('hidden-list');
-  box.style.display = list.length ? 'flex':'none';
-  box.innerHTML = list.map(sk=>{
-    const p = findProd(sk);
-    return `<div class="mini-item"><span class="grow"><b style="font-family:var(--mono)">${esc(sk)}</b> ${p?'· '+esc(p.nombre):''}</span><button data-k="${esc(sk)}">×</button></div>`;
-  }).join('');
-  box.querySelectorAll('button').forEach(b=>{
-    b.onclick = ()=>{
-      CFG.hiddenSkus = (CFG.hiddenSkus||[]).filter(x=>x!==b.dataset.k);
-      saveCfg(); renderHiddenList(); renderGrid();
-    };
-  });
 }
 
 /* ── etiquetas ── */
@@ -1931,13 +1806,6 @@ function refreshLogoUI(){
   prev.src = CFG.logo || '';
   prev.classList.toggle('show', !!CFG.logo);
   $('cfg-logo-del').style.display = CFG.logo ? 'inline-flex' : 'none';
-}
-function refreshOvUI(){
-  const n = Object.keys(CFG.overrides).length;
-  $('ov-clear-row').style.display = n ? 'flex' : 'none';
-  $('ov-note').textContent = n
-    ? n + ' producto(s) con precio fijo. Descarga la base para revisarlos o quítalos abajo.'
-    : 'Descarga la base con tus precios actuales, cámbialos en Excel y súbela. El precio fijo manda sobre el multiplicador.';
 }
 
 </script>
