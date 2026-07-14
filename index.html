@@ -2125,7 +2125,7 @@ async function startTracking(){
     const video = $('try-video');
     if(video.readyState>=2 && video.videoWidth){
       try {
-        const preds = await handModel.estimateHands(video, true);
+        const preds = await handModel.estimateHands(video, false);
         if(preds && preds.length){
           applyHandTracking(preds[0], video);
           lastHandSeen = Date.now();
@@ -2169,7 +2169,7 @@ $('photo-input').onchange = e=>{
     setStatus('Buscando tu muñeca en la foto…');
     try {
       await ensureHandModel();
-      const preds = await handModel.estimateHands(img, true);
+      const preds = await handModel.estimateHands(img, false);
       if(preds && preds.length){
         resetTrack();
         applyHandTracking(preds[0], img, true);
