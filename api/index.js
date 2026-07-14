@@ -110,6 +110,8 @@ function ensureDb() {
     // Si el proyecto ya tenía las tablas viejas con empresa_id, las acomoda solo:
     await sql`ALTER TABLE vendedoras DROP COLUMN IF EXISTS empresa_id`;
     await sql`ALTER TABLE ventas_pendientes DROP COLUMN IF EXISTS empresa_id`;
+    // "entrega": 'despacho' | 'retiro' — con qué método se acordó la entrega de la venta.
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS entrega TEXT DEFAULT 'despacho'`;
     // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
     const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
     if (oldEmpresas.rows[0]?.t) {
@@ -499,7 +501,7 @@ app.get('/api/fotos', async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 app.post('/api/pedido', requireClient, async (req, res) => {
   try {
-    const { productos, nombreVenta, direccion, comuna, telefono, email, nota, metodoPago } = req.body?.data || {};
+    const { productos, nombreVenta, direccion, comuna, entrega, telefono, email, nota, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
 
     let prods = [];
@@ -509,14 +511,15 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     let total = 0;
     productos.forEach(p => { total += (precioBySku[p.sku] || 0) * mult * (parseFloat(p.quantity) || 1); });
 
+    const entregaFinal = entrega === 'retiro' ? 'retiro' : 'despacho';
     const notaFinal = [nota || '', metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
 
     const { rows } = await sql`
       INSERT INTO ventas_pendientes
-        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, nota, total)
+        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total)
       VALUES
         (${req.vendedora.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
-         ${telefono || ''}, ${email || ''}, ${direccion || ''}, ${comuna || ''}, ${notaFinal}, ${Math.round(total)})
+         ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(total)})
       RETURNING id`;
 
     res.json({ ok: true, orderId: rows[0].id, message: 'Venta registrada. Queda pendiente de consolidar por el administrador.' });
@@ -536,6 +539,7 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       neto: parseFloat(o.total || 0),
       nota: o.nota || '',
       ref: o.nombre_venta || '',
+      entrega: o.entrega || 'despacho',
       lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: '', cantidad: p.quantity, total: 0 }))
     })));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }

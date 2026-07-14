@@ -494,16 +494,31 @@ body.public .priv{display:none!important;}
               <input class="fld-in" id="vr-email" type="email" placeholder="clienta@correo.cl"/>
             </div>
             <div class="fld">
-              <label class="fld-l">Dirección de despacho</label>
-              <div class="sug-wrap">
-                <input class="fld-in" id="vr-direccion" placeholder="Escribe y elige del mapa…" autocomplete="off"/>
-                <div class="sug-box" id="dir-sug"></div>
+              <label class="fld-l">Entrega</label>
+              <div class="modo-row" id="entrega-row">
+                <div class="modo active" data-entrega="despacho">
+                  <div class="mt">🚚 Despacho</div>
+                  <div class="md">Se lo enviamos a su domicilio.</div>
+                </div>
+                <div class="modo" data-entrega="retiro">
+                  <div class="mt">🤝 Retiro vendedor</div>
+                  <div class="md">La clienta retira contigo.</div>
+                </div>
               </div>
-              <p class="proto-note" id="dir-ok" style="display:none">📍 Dirección verificada en el mapa</p>
             </div>
-            <div class="fld">
-              <label class="fld-l">Comuna</label>
-              <input class="fld-in" id="vr-comuna" placeholder="Se completa al elegir la dirección del mapa…" autocomplete="off"/>
+            <div id="entrega-despacho-flds">
+              <div class="fld">
+                <label class="fld-l">Dirección de despacho</label>
+                <div class="sug-wrap">
+                  <input class="fld-in" id="vr-direccion" placeholder="Escribe y elige del mapa…" autocomplete="off"/>
+                  <div class="sug-box" id="dir-sug"></div>
+                </div>
+                <p class="proto-note" id="dir-ok" style="display:none">📍 Dirección verificada en el mapa</p>
+              </div>
+              <div class="fld">
+                <label class="fld-l">Oficina / Departamento</label>
+                <input class="fld-in" id="vr-depto" placeholder="Ej: Depto 402, Torre B (opcional)" autocomplete="off"/>
+              </div>
             </div>
             <div class="fld">
               <label class="fld-l">Notas del pedido</label>
@@ -1345,6 +1360,17 @@ document.querySelectorAll('.chip').forEach(c=>{
   };
 });
 
+/* Entrega: despacho a domicilio o retiro con la vendedora — oculta los campos de dirección si es retiro */
+let METODO_ENTREGA = 'despacho';
+document.querySelectorAll('#entrega-row .modo').forEach(m=>{
+  m.onclick = ()=>{
+    document.querySelectorAll('#entrega-row .modo').forEach(x=>x.classList.remove('active'));
+    m.classList.add('active');
+    METODO_ENTREGA = m.dataset.entrega;
+    $('entrega-despacho-flds').style.display = METODO_ENTREGA === 'retiro' ? 'none' : '';
+  };
+});
+
 /* dirección con autocompletado (vía nuestro propio backend, que consulta Photon/Nominatim del lado del servidor —
    así evitamos los bloqueos/CORS que a veces dan esos servicios cuando se llaman directo desde el navegador).
    Muestra la lista de sugerencias mientras escribes; tú eliges cuál — no te la pisa sola. */
@@ -1364,12 +1390,11 @@ $('vr-direccion').addEventListener('input', ()=>{
         box.classList.add('open');
         return;
       }
-      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}" data-c="${esc(it.comuna)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
+      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
       box.classList.add('open');
       box.querySelectorAll('.sug-item[data-d]').forEach(el=>{
         el.onclick = ()=>{
           $('vr-direccion').value = el.dataset.d;
-          if(el.dataset.c) $('vr-comuna').value = el.dataset.c;
           DIR_OK = true; $('dir-ok').style.display='block';
           box.classList.remove('open');
         };
@@ -1394,15 +1419,16 @@ $('vr-enviar').onclick = async ()=>{
       nombreVenta: $('vr-nombre').value.trim(),
       telefono: $('vr-fono').value.trim(),
       email: $('vr-email').value.trim(),
-      direccion: $('vr-direccion').value.trim() + (DIR_OK ? ' ✓maps' : ''),
-      comuna: $('vr-comuna').value.trim(),
+      entrega: METODO_ENTREGA,
+      direccion: METODO_ENTREGA==='retiro' ? '' : $('vr-direccion').value.trim() + (DIR_OK ? ' ✓maps' : ''),
+      comuna: METODO_ENTREGA==='retiro' ? '' : $('vr-depto').value.trim(),
       nota: $('vr-nota').value.trim(),
       metodoPago: METODO_PAGO + ' (por confirmar)'
     }})});
     ROWS = []; ensureRows(12); saveRows(); renderRows();
-    $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-comuna').value=''; $('vr-nota').value='';
+    $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-depto').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
-    $('vr-ok').textContent = '✓ ¡Venta enviada! N° interno ' + r.orderId + '. Preparamos el despacho y te avisamos.';
+    $('vr-ok').textContent = '✓ ¡Venta enviada! N° interno ' + r.orderId + '. ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
     $('vr-ok').style.display='block';
     PEDIDOS = null; // refrescar mis ventas
   } catch(e){

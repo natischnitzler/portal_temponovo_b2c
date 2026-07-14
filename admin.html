@@ -368,12 +368,16 @@ async function loadVentas() {
 loadVentas();
 function renderVentas(ventas) {
   if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
-  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Total</th><th>Estado</th></tr></thead><tbody>
+  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Estado</th></tr></thead><tbody>
     ${ventas.map(v => `<tr>
       <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
       <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
       <td>${esc(v.nombre_venta || '—')}</td>
       <td>${(v.productos||[]).map(p => esc(p.sku) + ' ×' + p.quantity).join(', ')}</td>
+      <td>
+        <span class="badge ${v.entrega==='retiro'?'b-warn':'b-ok'}">${v.entrega==='retiro'?'Retiro':'Despacho'}</span>
+        ${v.entrega!=='retiro' && (v.direccion||v.comuna) ? `<div class="note" style="margin-top:4px;max-width:220px">${esc([v.direccion,v.comuna].filter(Boolean).join(' — '))}</div>` : ''}
+      </td>
       <td class="mono">${fmt(v.total)}</td>
       <td><span class="badge ${v.estado==='consolidada'?'b-ok':'b-warn'}">${v.estado==='consolidada'?'Consolidada':'Pendiente'}</span></td>
     </tr>`).join('')}
