@@ -391,6 +391,71 @@ app.get('/api/imagen/:id', async (req, res) => {
   }
 });
 
+// ── DIRECCIÓN — geocodificación server-side (evita el CORS/bloqueos que dan Photon/Nominatim directo desde el navegador) ──
+// Usa el módulo https nativo (no depende de que el runtime de Node tenga fetch global).
+const https = require('https');
+function httpsGetJson(url, headers) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers, timeout: 6000 }, (r) => {
+      let data = '';
+      r.on('data', chunk => { data += chunk; });
+      r.on('end', () => {
+        if (r.statusCode < 200 || r.statusCode >= 300) return reject(new Error('HTTP ' + r.statusCode));
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+const GEOCODE_UA = 'VitrinaTemponovo/1.0 (+https://temponovo.odoo.com)';
+async function geocodificar(q) {
+  const key = 'geo_' + q.toLowerCase();
+  const hit = cacheGet(key); if (hit) return hit;
+
+  let items = [];
+  // 1) Photon (komoot) — primera opción, buenos resultados en Chile
+  try {
+    const d = await httpsGetJson(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=es&limit=5&lat=-33.45&lon=-70.66`,
+      { 'User-Agent': GEOCODE_UA, 'Accept': 'application/json' });
+    items = (d.features || []).map(f => {
+      const p = f.properties || {};
+      const l1 = [p.name || p.street, p.housenumber].filter(Boolean).join(' ');
+      const comuna = p.district || p.city || p.county || '';
+      const l2 = [p.district, p.city || p.county, p.state].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+      return { label: [l1, l2].filter(Boolean).join(', '), comuna };
+    }).filter(x => x.label);
+  } catch (e) { console.warn('⚠ geocodificar (photon):', e.message); }
+
+  // 2) Nominatim (OpenStreetMap) — respaldo si Photon no contestó o no encontró nada
+  if (!items.length) {
+    try {
+      const d = await httpsGetJson(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=5&countrycodes=cl`,
+        { 'User-Agent': GEOCODE_UA, 'Accept': 'application/json' });
+      items = (Array.isArray(d) ? d : []).map(p => {
+        const a = p.address || {};
+        const l1 = [a.road, a.house_number].filter(Boolean).join(' ') || (p.display_name || '').split(',')[0];
+        const comuna = a.city_district || a.suburb || a.city || a.town || a.municipality || '';
+        const l2 = [comuna, a.state].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(', ');
+        return { label: [l1, l2].filter(Boolean).join(', '), comuna };
+      }).filter(x => x.label);
+    } catch (e) { console.warn('⚠ geocodificar (nominatim):', e.message); }
+  }
+
+  cacheSet(key, items, 10 * 60 * 1000);
+  return items;
+}
+app.get('/api/geocodificar', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 3) return res.json([]);
+    res.json(await geocodificar(q));
+  } catch (e) { console.error('❌ /api/geocodificar', e.message); res.json([]); }
+});
+
 // ── FOTOS EN ZIP (opcionalmente filtradas por familia) ───────────
 app.get('/api/fotos', async (req, res) => {
   try {
