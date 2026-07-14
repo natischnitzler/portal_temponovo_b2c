@@ -117,9 +117,9 @@ h1,h2,h3,.t{font-family:var(--f1);}
 
 /* ── VITRINA ── */
 .vit-toolbar{padding:12px 14px 10px;display:flex;flex-direction:column;gap:12px;background:var(--paper);position:sticky;top:58px;z-index:50;border-bottom:1px solid var(--line);}
-.vit-search{background:var(--white);border:1px solid var(--line);border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:9px;}
+.vit-search{background:var(--white);border:1px solid var(--line);border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:9px;min-width:0;}
 .vit-search svg{width:16px;height:16px;stroke:var(--steel);fill:none;stroke-width:1.6;flex-shrink:0;}
-.vit-search input{background:transparent;border:none;outline:none;font-size:14px;flex:1;color:var(--ink);}
+.vit-search input{background:transparent;border:none;outline:none;font-size:14px;flex:1;min-width:0;color:var(--ink);}
 .fam-row{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding:14px 14px 4px;max-width:1100px;margin:0 auto;width:100%;}
 .fam-row::-webkit-scrollbar{display:none;}
 .fam-tile{flex-shrink:0;width:120px;height:82px;border:1px solid var(--line);background:var(--white);position:relative;overflow:hidden;cursor:pointer;display:flex;align-items:flex-end;border-radius:8px;}
@@ -308,12 +308,16 @@ body.costs #btn-eye svg{stroke-width:2;}
 .vit-welcome:empty{display:none;}
 
 /* toolbar estilo tienda: buscador + ordenar + filtrar, alineados con categorías */
-.search-line{display:flex;gap:10px;max-width:1100px;margin:0 auto;width:100%;align-items:center;padding:0 14px;}
-.vit-search{flex:1;}
-.sort-sel{border:1px solid var(--line);background:var(--white);padding:10px 12px;font-size:12px;letter-spacing:.04em;outline:none;border-radius:var(--r);color:var(--ink-soft);width:auto;cursor:pointer;flex-shrink:0;}
-.filter-btn{border:1px solid var(--line);background:var(--white);padding:10px 14px;font-size:12px;letter-spacing:.04em;border-radius:var(--r);color:var(--ink-soft);display:flex;align-items:center;gap:7px;flex-shrink:0;position:relative;}
-.filter-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.search-line{display:flex;flex-wrap:wrap;gap:10px;max-width:1100px;margin:0 auto;width:100%;align-items:center;padding:0 14px;}
+.vit-search{flex:1 1 100%;min-width:0;}
+.sort-sel{border:1px solid var(--line);background:var(--white);padding:10px 12px;font-size:12px;letter-spacing:.04em;outline:none;border-radius:var(--r);color:var(--ink-soft);width:auto;cursor:pointer;flex:1;min-width:0;}
+.filter-btn{border:1px solid var(--line);background:var(--white);padding:10px 14px;font-size:12px;letter-spacing:.04em;border-radius:var(--r);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:7px;flex:1;min-width:0;position:relative;}
+.filter-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;flex-shrink:0;}
 .filter-btn.on{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);color:var(--ink);}
+@media(min-width:520px){
+  .vit-search{flex:1 1 auto;}
+  .sort-sel,.filter-btn{flex:0 0 auto;}
+}
 .filter-panel{display:none;max-width:1100px;margin:10px auto 0;width:calc(100% - 28px);background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:14px;}
 .filter-panel.open{display:block;}
 .fp-t{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel);margin:0 0 8px;}
