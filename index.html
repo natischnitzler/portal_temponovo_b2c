@@ -1347,7 +1347,9 @@ document.querySelectorAll('.chip').forEach(c=>{
   };
 });
 
-/* dirección con autocompletado de mapas (OpenStreetMap/Photon, sesgo Chile) — se rellena sola con la mejor coincidencia apenas hace una pausa al escribir */
+/* dirección con autocompletado (vía nuestro propio backend, que consulta Photon/Nominatim del lado del servidor —
+   así evitamos los bloqueos/CORS que a veces dan esos servicios cuando se llaman directo desde el navegador).
+   Se rellena sola con la mejor coincidencia apenas hace una pausa al escribir. */
 let dirT = null, DIR_OK = false;
 $('vr-direccion').addEventListener('input', ()=>{
   DIR_OK = false; $('dir-ok').style.display='none';
@@ -1357,16 +1359,13 @@ $('vr-direccion').addEventListener('input', ()=>{
   if(q.length<3){ box.classList.remove('open'); return; }
   dirT = setTimeout(async ()=>{
     try {
-      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=es&limit=5&lat=-33.45&lon=-70.66`);
-      const d = await r.json();
-      const items = (d.features||[]).map(f=>{
-        const p = f.properties||{};
-        const l1 = [p.name || p.street, p.housenumber].filter(Boolean).join(' ');
-        const comuna = p.district || p.city || p.county || '';
-        const l2 = [p.district, p.city || p.county, p.state].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
-        return { label: [l1, l2].filter(Boolean).join(', '), comuna };
-      }).filter(x=>x.label);
-      if(!items.length){ box.classList.remove('open'); return; }
+      const r = await fetch(`${API}/geocodificar?q=${encodeURIComponent(q)}`);
+      const items = await r.json();
+      if(!Array.isArray(items) || !items.length){
+        box.innerHTML = `<div class="sug-item" style="color:var(--steel);cursor:default">No encontramos sugerencias — puedes seguir escribiendo la dirección igual.</div>`;
+        box.classList.add('open');
+        return;
+      }
 
       // Se autocompleta sola con la mejor coincidencia — si sigue escribiendo, se vuelve a ajustar solo.
       const top = items[0];
@@ -1376,7 +1375,7 @@ $('vr-direccion').addEventListener('input', ()=>{
 
       box.innerHTML = items.map((it,i)=>`<div class="sug-item ${i===0?'auto':''}" data-d="${esc(it.label)}" data-c="${esc(it.comuna)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
       box.classList.add('open');
-      box.querySelectorAll('.sug-item').forEach(el=>{
+      box.querySelectorAll('.sug-item[data-d]').forEach(el=>{
         el.onclick = ()=>{
           $('vr-direccion').value = el.dataset.d;
           if(el.dataset.c) $('vr-comuna').value = el.dataset.c;
