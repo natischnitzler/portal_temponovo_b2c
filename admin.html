@@ -107,11 +107,10 @@ tr:last-child td{border-bottom:none;}
 <div id="app">
   <nav class="sidebar">
     <div class="sidebar-title">Admin</div>
-    <button class="nav-item active" data-sec="empresas">🏢 Empresas</button>
+    <button class="nav-item active" data-sec="config">⚙ Configuración</button>
     <button class="nav-item" data-sec="vendedoras">👤 Vendedoras</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
-    <button class="nav-item" data-sec="importar">⇪ Importar CSV</button>
     <div class="sidebar-foot">
       <button class="btn-logout" id="btn-logout">Cerrar sesión</button>
     </div>
@@ -120,41 +119,36 @@ tr:last-child td{border-bottom:none;}
   <main class="main">
     <div class="wrap">
 
-      <!-- EMPRESAS -->
-      <section class="section active" id="sec-empresas">
-        <h2 class="page-t">Empresas</h2>
-        <p class="page-s">Cada Empresa es quien realmente le compra a Temponovo en Odoo. Sus vendedoras venden a su nombre y las ventas se consolidan en un solo pedido.</p>
+      <!-- CONFIGURACIÓN -->
+      <section class="section active" id="sec-config">
+        <h2 class="page-t">Configuración</h2>
+        <p class="page-s">Estos son los datos de tu empresa: el nombre y el Partner ID en Odoo al que se le facturan todas las ventas consolidadas.</p>
 
         <div class="card">
-          <div class="card-h">Nueva empresa</div>
+          <div class="card-h">Datos de la empresa</div>
           <div class="row">
-            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="emp-nombre" placeholder="Ej: Empresa Tali"/></div>
-            <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="emp-partner" type="number" placeholder="Ej: 827"/></div>
-            <button class="btn dark" id="emp-crear">Crear empresa</button>
+            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="cfg-nombre" placeholder="Ej: Temponovo"/></div>
+            <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="cfg-partner" type="number" placeholder="Ej: 827"/></div>
+            <button class="btn dark" id="cfg-guardar">Guardar</button>
           </div>
-          <div class="msg" id="emp-msg"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-h">Todas las empresas</div>
-          <div id="emp-list"><div class="empty">Cargando…</div></div>
+          <p class="note">Todas las ventas consolidadas se crean en Odoo a nombre de este Partner ID.</p>
+          <div class="msg" id="cfg-msg"></div>
         </div>
       </section>
 
       <!-- VENDEDORAS -->
       <section class="section" id="sec-vendedoras">
         <h2 class="page-t">Vendedoras</h2>
-        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige a qué Empresa pertenece, su multiplicador de precio y qué categorías vende.</p>
+        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige su multiplicador de precio y qué categorías vende.</p>
 
         <div class="card">
           <div class="card-h">Nueva vendedora</div>
           <div class="row">
-            <div class="fld"><label class="fld-l">Empresa</label><select class="fld-select" id="v-empresa"></select></div>
             <div class="fld"><label class="fld-l">Código (usuario)</label><input class="fld-in" id="v-codigo" placeholder="Ej: CAROLINA" style="text-transform:uppercase"/></div>
             <div class="fld"><label class="fld-l">Clave</label><input class="fld-in" id="v-clave" placeholder="Clave de acceso"/></div>
+            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="v-nombre" placeholder="Ej: Carolina Cereceda"/></div>
           </div>
           <div class="row" style="margin-top:10px">
-            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="v-nombre" placeholder="Ej: Carolina Cereceda"/></div>
             <div class="fld" style="max-width:140px"><label class="fld-l">Multiplicador</label><input class="fld-in" id="v-mult" type="number" step="0.1" value="2"/></div>
             <div class="fld"><label class="fld-l">Sucursales</label><input class="fld-in" id="v-sucursales" placeholder="Santiago, Providencia…"/></div>
           </div>
@@ -170,9 +164,6 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Vendedoras</div>
-          <div class="row" style="margin-bottom:14px">
-            <div class="fld sel-empresa"><label class="fld-l">Filtrar por empresa</label><select class="fld-select" id="v-filtro-empresa"></select></div>
-          </div>
           <div id="v-list"><div class="empty">Cargando…</div></div>
         </div>
       </section>
@@ -180,11 +171,10 @@ tr:last-child td{border-bottom:none;}
       <!-- VENTAS -->
       <section class="section" id="sec-ventas">
         <h2 class="page-t">Ventas</h2>
-        <p class="page-s">Las ventas de cada vendedora quedan pendientes hasta que las consolidas en un solo pedido de Odoo, a nombre de la Empresa.</p>
+        <p class="page-s">Las ventas de cada vendedora quedan pendientes hasta que las consolidas en un solo pedido de Odoo.</p>
 
         <div class="card">
           <div class="row">
-            <div class="fld sel-empresa"><label class="fld-l">Empresa</label><select class="fld-select" id="vt-empresa"></select></div>
             <div class="fld" style="max-width:180px"><label class="fld-l">Estado</label>
               <select class="fld-select" id="vt-estado">
                 <option value="">Todas</option>
@@ -193,34 +183,23 @@ tr:last-child td{border-bottom:none;}
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
-            <button class="btn dark" id="vt-consolidar">Consolidar pendientes de esta empresa</button>
+            <button class="btn dark" id="vt-consolidar">Consolidar todas las pendientes</button>
           </div>
           <div class="msg" id="vt-msg"></div>
         </div>
 
         <div class="card">
           <div class="card-h">Resultado</div>
-          <div id="vt-list"><div class="empty">Elige una empresa y busca.</div></div>
+          <div id="vt-list"><div class="empty">Buscando…</div></div>
         </div>
       </section>
 
       <!-- REPORTE -->
       <section class="section" id="sec-reporte">
         <h2 class="page-t">Reporte</h2>
-        <p class="page-s">Ventas totales por vendedora, agrupadas por empresa.</p>
+        <p class="page-s">Ventas totales por vendedora.</p>
         <div class="card">
           <div id="rep-list"><div class="empty">Cargando…</div></div>
-        </div>
-      </section>
-
-      <!-- IMPORTAR -->
-      <section class="section" id="sec-importar">
-        <h2 class="page-t">Importar clientes.csv</h2>
-        <p class="page-s">Migra tus clientas del archivo <code>clientes.csv</code> antiguo: crea una Empresa y una Vendedora por cada fila (con el mismo partnerId de Odoo que ya tenían), y genera una clave temporal para cada una. Las que ya existan (mismo código) se saltan, así que puedes correrlo más de una vez sin problema.</p>
-        <div class="card">
-          <button class="btn dark" id="imp-run">Importar ahora</button>
-          <div class="msg" id="imp-msg"></div>
-          <div class="claves-box" id="imp-claves" style="display:none"></div>
         </div>
       </section>
 
@@ -228,10 +207,10 @@ tr:last-child td{border-bottom:none;}
   </main>
 </div>
 
+
 <script>
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('tn_admin_token') || '';
-let EMPRESAS = [];
 let CATEGORIAS = [];
 let CATEGORIAS_SEL = new Set();
 
@@ -272,7 +251,7 @@ $('btn-logout').onclick = logout;
 function openApp() {
   $('login-screen').style.display = 'none';
   $('app').classList.add('open');
-  loadEmpresas().then(() => { loadCategorias(); loadVendedoras(); });
+  loadConfig(); loadCategorias(); loadVendedoras();
 }
 if (TOKEN) openApp();
 
@@ -284,46 +263,22 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   if (btn.dataset.sec === 'reporte') loadReporte();
 });
 
-/* ── EMPRESAS ── */
-async function loadEmpresas() {
+/* ── CONFIGURACIÓN (una sola empresa) ── */
+async function loadConfig() {
   try {
-    EMPRESAS = await api('/empresas');
-    renderEmpresas();
-    fillEmpresaSelects();
-  } catch (e) { $('emp-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+    const cfg = await api('/config');
+    $('cfg-nombre').value = cfg.nombre || '';
+    $('cfg-partner').value = cfg.partner_id || '';
+  } catch (e) { showMsg('cfg-msg', e.message, false); }
 }
-function renderEmpresas() {
-  if (!EMPRESAS.length) { $('emp-list').innerHTML = '<div class="empty">Todavía no creas ninguna empresa.</div>'; return; }
-  $('emp-list').innerHTML = `<table><thead><tr><th>Nombre</th><th>Partner ID</th><th>Vendedoras</th><th></th></tr></thead><tbody>
-    ${EMPRESAS.map(e => `<tr>
-      <td>${esc(e.nombre)}</td>
-      <td class="mono">${e.partner_id}</td>
-      <td>${(VENDEDORAS||[]).filter(v=>v.empresa_id===e.id).length || '—'}</td>
-      <td><button class="btn btn-sm danger" data-del-emp="${e.id}">Eliminar</button></td>
-    </tr>`).join('')}
-  </tbody></table>`;
-  $('emp-list').querySelectorAll('[data-del-emp]').forEach(b => b.onclick = async () => {
-    if (!confirm('¿Eliminar esta empresa? También se eliminan sus vendedoras y ventas.')) return;
-    try { await api('/empresas/' + b.dataset.delEmp, { method: 'DELETE' }); loadEmpresas(); loadVendedoras(); }
-    catch (e) { alert(e.message); }
-  });
-}
-function fillEmpresaSelects() {
-  const opts = EMPRESAS.map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join('');
-  $('v-empresa').innerHTML = opts || '<option value="">— crea una empresa primero —</option>';
-  $('v-filtro-empresa').innerHTML = '<option value="">Todas las empresas</option>' + opts;
-  $('vt-empresa').innerHTML = (opts || '<option value="">— no hay empresas —</option>');
-}
-$('emp-crear').onclick = async () => {
-  const nombre = $('emp-nombre').value.trim();
-  const partnerId = parseInt($('emp-partner').value);
-  if (!nombre || !partnerId) return showMsg('emp-msg', 'Nombre y Partner ID son obligatorios', false);
+$('cfg-guardar').onclick = async () => {
+  const nombre = $('cfg-nombre').value.trim();
+  const partnerId = parseInt($('cfg-partner').value);
+  if (!nombre || !partnerId) return showMsg('cfg-msg', 'Nombre y Partner ID son obligatorios', false);
   try {
-    await api('/empresas', { method: 'POST', body: JSON.stringify({ nombre, partnerId }) });
-    $('emp-nombre').value = ''; $('emp-partner').value = '';
-    showMsg('emp-msg', '✓ Empresa creada', true);
-    loadEmpresas();
-  } catch (e) { showMsg('emp-msg', e.message, false); }
+    await api('/config', { method: 'PUT', body: JSON.stringify({ nombre, partnerId }) });
+    showMsg('cfg-msg', '✓ Configuración guardada', true);
+  } catch (e) { showMsg('cfg-msg', e.message, false); }
 };
 
 /* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
@@ -348,21 +303,16 @@ async function loadCategorias() {
 let VENDEDORAS = [];
 async function loadVendedoras() {
   try {
-    const empresaId = $('v-filtro-empresa').value;
-    VENDEDORAS = await api('/vendedoras' + (empresaId ? '?empresaId=' + empresaId : ''));
+    VENDEDORAS = await api('/vendedoras');
     renderVendedoras();
-    renderEmpresas(); // refresca conteo
   } catch (e) { $('v-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
-$('v-filtro-empresa').addEventListener('change', loadVendedoras);
-function empresaNombre(id) { return (EMPRESAS.find(e => e.id === id) || {}).nombre || '—'; }
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Empresa</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
-      <td>${esc(empresaNombre(v.empresa_id))}</td>
       <td class="mono">×${v.multiplicador}</td>
       <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
@@ -390,15 +340,14 @@ function renderVendedoras() {
   });
 }
 $('v-crear').onclick = async () => {
-  const empresaId = $('v-empresa').value;
   const codigo = $('v-codigo').value.trim().toUpperCase();
   const clave = $('v-clave').value;
   const nombre = $('v-nombre').value.trim();
   const multiplicador = parseFloat($('v-mult').value) || 2;
   const sucursales = $('v-sucursales').value.split(',').map(s => s.trim()).filter(Boolean);
-  if (!empresaId || !codigo || !clave || !nombre) return showMsg('v-msg', 'Empresa, código, clave y nombre son obligatorios', false);
+  if (!codigo || !clave || !nombre) return showMsg('v-msg', 'Código, clave y nombre son obligatorios', false);
   try {
-    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ empresaId, codigo, clave, nombre, multiplicador, categorias: [...CATEGORIAS_SEL], sucursales }) });
+    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, multiplicador, categorias: [...CATEGORIAS_SEL], sucursales }) });
     $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-sucursales').value = ''; $('v-mult').value = 2;
     CATEGORIAS_SEL.clear(); $('v-categorias').querySelectorAll('.chk').forEach(c => { c.classList.remove('on'); c.querySelector('input').checked = false; });
     showMsg('v-msg', '✓ Vendedora creada', true);
@@ -409,15 +358,14 @@ $('v-crear').onclick = async () => {
 /* ── VENTAS ── */
 $('vt-buscar').onclick = loadVentas;
 async function loadVentas() {
-  const empresaId = $('vt-empresa').value;
   const estado = $('vt-estado').value;
-  if (!empresaId) { $('vt-list').innerHTML = '<div class="empty">Elige una empresa.</div>'; return; }
   try {
-    const q = '?empresaId=' + empresaId + (estado ? '&estado=' + estado : '');
+    const q = estado ? '?estado=' + estado : '';
     const ventas = await api('/ventas' + q);
     renderVentas(ventas);
   } catch (e) { $('vt-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
+loadVentas();
 function renderVentas(ventas) {
   if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
   $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Total</th><th>Estado</th></tr></thead><tbody>
@@ -432,11 +380,9 @@ function renderVentas(ventas) {
   </tbody></table>`;
 }
 $('vt-consolidar').onclick = async () => {
-  const empresaId = $('vt-empresa').value;
-  if (!empresaId) return showMsg('vt-msg', 'Elige una empresa', false);
-  if (!confirm('¿Juntar TODAS las ventas pendientes de esta empresa en un solo pedido de Odoo? No se puede deshacer.')) return;
+  if (!confirm('¿Juntar TODAS las ventas pendientes en un solo pedido de Odoo? No se puede deshacer.')) return;
   try {
-    const r = await api('/consolidar/' + empresaId, { method: 'POST' });
+    const r = await api('/consolidar', { method: 'POST' });
     showMsg('vt-msg', `✓ Pedido #${r.orderId} creado en Odoo con ${r.ventasConsolidadas} venta(s) consolidada(s).`, true);
     loadVentas();
   } catch (e) { showMsg('vt-msg', e.message, false); }
@@ -447,9 +393,8 @@ async function loadReporte() {
   try {
     const rows = await api('/reporte');
     if (!rows.length) { $('rep-list').innerHTML = '<div class="empty">Sin datos todavía.</div>'; return; }
-    $('rep-list').innerHTML = `<table><thead><tr><th>Empresa</th><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Pendientes</th><th>Total</th></tr></thead><tbody>
+    $('rep-list').innerHTML = `<table><thead><tr><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Pendientes</th><th>Total</th></tr></thead><tbody>
       ${rows.map(r => `<tr>
-        <td>${esc(r.empresa_nombre)}</td>
         <td>${esc(r.vendedora_nombre)}</td>
         <td class="mono">${esc(r.codigo)}</td>
         <td class="mono">${r.ventas}</td>
@@ -459,24 +404,6 @@ async function loadReporte() {
     </tbody></table>`;
   } catch (e) { $('rep-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
-
-/* ── IMPORTAR CSV ── */
-$('imp-run').onclick = async () => {
-  if (!confirm('¿Importar clientes.csv? Crea una Empresa + Vendedora por cada fila nueva (las que ya existan se saltan).')) return;
-  $('imp-run').disabled = true;
-  try {
-    const r = await api('/importar-csv', { method: 'POST' });
-    if (!r.creadas.length) {
-      showMsg('imp-msg', 'No había filas nuevas para importar (o ya estaban todas migradas).', true);
-    } else {
-      showMsg('imp-msg', `✓ Se crearon ${r.creadas.length} vendedora(s). Anota estas claves — no se van a poder ver de nuevo.`, true);
-      $('imp-claves').style.display = 'block';
-      $('imp-claves').innerHTML = r.creadas.map(c => `<div class="clave-row"><span>${esc(c.codigo)} — ${esc(c.nombre)}</span><b>${esc(c.claveTemporal)}</b></div>`).join('');
-    }
-    loadEmpresas(); loadVendedoras();
-  } catch (e) { showMsg('imp-msg', e.message, false); }
-  $('imp-run').disabled = false;
-};
 </script>
 </body>
 </html>

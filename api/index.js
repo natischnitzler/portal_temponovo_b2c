@@ -1,8 +1,6 @@
 const express  = require('express');
 const xmlrpc   = require('xmlrpc');
 const cors     = require('cors');
-const fs       = require('fs');
-const path     = require('path');
 const archiver = require('archiver');
 const crypto   = require('crypto');
 const { sql }  = require('./db');
@@ -63,21 +61,25 @@ function cacheGet(k) { const e = cache[k]; if (!e) return null; if (Date.now() -
 function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
 
 // ════════════════════════════════════════════════════════════════
-// BASE DE DATOS — empresas, vendedoras, ventas pendientes
+// BASE DE DATOS — configuración (una sola empresa), vendedoras, ventas pendientes
 // ════════════════════════════════════════════════════════════════
 let dbReady = null;
 function ensureDb() {
   if (dbReady) return dbReady;
   dbReady = (async () => {
-    await sql`CREATE TABLE IF NOT EXISTS empresas (
-      id SERIAL PRIMARY KEY,
-      nombre TEXT NOT NULL,
-      partner_id INTEGER NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT now()
+    // Una sola fila (id=1): el nombre y el partnerId de Odoo de LA empresa.
+    // Ya no hay "empresas" plural — todo el portal es de una sola empresa.
+    await sql`CREATE TABLE IF NOT EXISTS configuracion (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      nombre TEXT NOT NULL DEFAULT '',
+      partner_id INTEGER,
+      updated_at TIMESTAMPTZ DEFAULT now(),
+      CHECK (id = 1)
     )`;
+    await sql`INSERT INTO configuracion (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
+
     await sql`CREATE TABLE IF NOT EXISTS vendedoras (
       id SERIAL PRIMARY KEY,
-      empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
       codigo TEXT NOT NULL UNIQUE,
       clave_hash TEXT NOT NULL,
       nombre TEXT NOT NULL,
@@ -90,7 +92,6 @@ function ensureDb() {
     await sql`CREATE TABLE IF NOT EXISTS ventas_pendientes (
       id SERIAL PRIMARY KEY,
       vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE CASCADE,
-      empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
       productos JSONB NOT NULL,
       nombre_venta TEXT,
       telefono TEXT,
@@ -104,6 +105,20 @@ function ensureDb() {
       created_at TIMESTAMPTZ DEFAULT now(),
       consolidado_at TIMESTAMPTZ
     )`;
+
+    // ── Migración desde versiones anteriores (varias empresas) ──
+    // Si el proyecto ya tenía las tablas viejas con empresa_id, las acomoda solo:
+    await sql`ALTER TABLE vendedoras DROP COLUMN IF EXISTS empresa_id`;
+    await sql`ALTER TABLE ventas_pendientes DROP COLUMN IF EXISTS empresa_id`;
+    // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
+    const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
+    if (oldEmpresas.rows[0]?.t) {
+      const { rows: viejas } = await sql`SELECT nombre, partner_id FROM empresas ORDER BY id LIMIT 1`;
+      if (viejas.length) {
+        await sql`UPDATE configuracion SET nombre = ${viejas[0].nombre}, partner_id = ${viejas[0].partner_id} WHERE id = 1 AND (nombre = '' OR nombre IS NULL)`;
+      }
+      await sql`DROP TABLE IF EXISTS empresas CASCADE`;
+    }
   })();
   return dbReady;
 }
@@ -155,10 +170,10 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// ── EMPRESAS / VENDEDORAS ─────────────────────────────────────────
-async function getEmpresa(id) {
-  const { rows } = await sql`SELECT * FROM empresas WHERE id = ${id}`;
-  return rows[0] || null;
+// ── CONFIGURACIÓN GLOBAL (la única empresa) / VENDEDORAS ─────────
+async function getConfig() {
+  const { rows } = await sql`SELECT * FROM configuracion WHERE id = 1`;
+  return rows[0] || { nombre: '', partner_id: null };
 }
 async function getVendedora(codigo) {
   const { rows } = await sql`SELECT * FROM vendedoras WHERE codigo = ${(codigo || '').toUpperCase()}`;
@@ -174,9 +189,9 @@ async function vendedoraBySlug(slug) {
 async function publicClienteBySlug(slug) {
   const v = await vendedoraBySlug(slug);
   if (!v) return null;
-  const emp = await getEmpresa(v.empresa_id);
-  if (!emp) return null;
-  return { code: v.codigo, partnerId: emp.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
+  const cfg = await getConfig();
+  if (!cfg.partner_id) return null;
+  return { code: v.codigo, partnerId: cfg.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
 }
 
 // ── MIDDLEWARE: ACCESO DE VENDEDORA (código + clave) ─────────────
@@ -188,10 +203,10 @@ async function requireClient(req, res, next) {
     const v = await getVendedora(codigo);
     if (!v || !v.activo) return res.status(401).json({ error: 'Usuario no reconocido' });
     if (!verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Clave incorrecta' });
-    const emp = await getEmpresa(v.empresa_id);
-    if (!emp) return res.status(500).json({ error: 'Esta vendedora no tiene una empresa asignada' });
-    req.vendedora = v; req.empresa = emp;
-    req.partnerId = emp.partner_id; req.clientName = v.nombre; req.multiplicador = parseFloat(v.multiplicador) || 2;
+    const cfg = await getConfig();
+    if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
+    req.vendedora = v; req.config = cfg;
+    req.partnerId = cfg.partner_id; req.clientName = v.nombre; req.multiplicador = parseFloat(v.multiplicador) || 2;
     next();
   } catch (e) { console.error('❌ requireClient', e.message); res.status(500).json({ error: shortErr(e) }); }
 }
@@ -319,12 +334,12 @@ app.get('/api/productos', async (req, res) => {
     const clave  = req.headers['x-client-pass'] || '';
     const v = await getVendedora(codigo);
     if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Cliente no reconocido' });
-    const emp = await getEmpresa(v.empresa_id);
-    if (!emp) return res.status(500).json({ error: 'Esta vendedora no tiene una empresa asignada' });
+    const cfg = await getConfig();
+    if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
 
     const cached = cacheGet('cat_' + v.codigo); if (cached) return res.json(cached);
 
-    let prods = await productosCliente({ partnerId: emp.partner_id });
+    let prods = await productosCliente({ partnerId: cfg.partner_id });
     const categorias = v.categorias || [];
     if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
 
@@ -433,9 +448,9 @@ app.post('/api/pedido', requireClient, async (req, res) => {
 
     const { rows } = await sql`
       INSERT INTO ventas_pendientes
-        (vendedora_id, empresa_id, productos, nombre_venta, telefono, email, direccion, comuna, nota, total)
+        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, nota, total)
       VALUES
-        (${req.vendedora.id}, ${req.empresa.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
+        (${req.vendedora.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
          ${telefono || ''}, ${email || ''}, ${direccion || ''}, ${comuna || ''}, ${notaFinal}, ${Math.round(total)})
       RETURNING id`;
 
@@ -601,54 +616,40 @@ app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── Empresas ──
-app.get('/api/admin/empresas', requireAdmin, async (_req, res) => {
-  try { const { rows } = await sql`SELECT * FROM empresas ORDER BY nombre`; res.json(rows); }
+// ── Configuración de la empresa (una sola, global) ──
+app.get('/api/admin/config', requireAdmin, async (_req, res) => {
+  try { res.json(await getConfig()); }
   catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
-app.post('/api/admin/empresas', requireAdmin, async (req, res) => {
+app.put('/api/admin/config', requireAdmin, async (req, res) => {
   try {
     const { nombre, partnerId } = req.body || {};
-    if (!nombre || !partnerId) return res.status(400).json({ error: 'Nombre y partnerId son obligatorios' });
-    const { rows } = await sql`INSERT INTO empresas (nombre, partner_id) VALUES (${nombre}, ${partnerId}) RETURNING *`;
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
-});
-app.put('/api/admin/empresas/:id', requireAdmin, async (req, res) => {
-  try {
-    const { nombre, partnerId } = req.body || {};
+    if (!nombre || !partnerId) return res.status(400).json({ error: 'Nombre y Partner ID son obligatorios' });
     const { rows } = await sql`
-      UPDATE empresas SET nombre = COALESCE(${nombre}, nombre), partner_id = COALESCE(${partnerId}, partner_id)
-      WHERE id = ${req.params.id} RETURNING *`;
-    if (!rows.length) return res.status(404).json({ error: 'Empresa no encontrada' });
+      UPDATE configuracion SET nombre = ${nombre}, partner_id = ${partnerId}, updated_at = now()
+      WHERE id = 1 RETURNING *`;
+    Object.keys(cache).filter(k => k.startsWith('cat_') || k.startsWith('pub_') || k.startsWith('pl_')).forEach(k => delete cache[k]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
-});
-app.delete('/api/admin/empresas/:id', requireAdmin, async (req, res) => {
-  try { await sql`DELETE FROM empresas WHERE id = ${req.params.id}`; res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
 // ── Vendedoras ──
-app.get('/api/admin/vendedoras', requireAdmin, async (req, res) => {
+app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
   try {
-    const empresaId = req.query.empresaId;
-    const { rows } = empresaId
-      ? await sql`SELECT id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras WHERE empresa_id = ${empresaId} ORDER BY nombre`
-      : await sql`SELECT id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
+    const { rows } = await sql`SELECT id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
   try {
-    const { empresaId, codigo, clave, nombre, multiplicador, categorias, sucursales } = req.body || {};
-    if (!empresaId || !codigo || !clave || !nombre) return res.status(400).json({ error: 'empresaId, código, clave y nombre son obligatorios' });
+    const { codigo, clave, nombre, multiplicador, categorias, sucursales } = req.body || {};
+    if (!codigo || !clave || !nombre) return res.status(400).json({ error: 'Código, clave y nombre son obligatorios' });
     const hash = hashPassword(clave);
     const { rows } = await sql`
-      INSERT INTO vendedoras (empresa_id, codigo, clave_hash, nombre, multiplicador, categorias, sucursales)
-      VALUES (${empresaId}, ${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${multiplicador || 2},
+      INSERT INTO vendedoras (codigo, clave_hash, nombre, multiplicador, categorias, sucursales)
+      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${multiplicador || 2},
               ${JSON.stringify(categorias || [])}, ${JSON.stringify(sucursales || [])})
-      RETURNING id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
     res.json(rows[0]);
   } catch (e) {
     if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de usuario ya existe' });
@@ -668,7 +669,7 @@ app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
         sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
         activo = COALESCE(${activo}, activo)
       WHERE id = ${req.params.id}
-      RETURNING id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
     if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
     delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
     res.json(rows[0]);
@@ -682,32 +683,26 @@ app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
 // ── Ventas pendientes + consolidación ──
 app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
   try {
-    const empresaId = req.query.empresaId;
     const estado = req.query.estado;
-    let rows;
-    if (empresaId && estado) ({ rows } = await sql`
-      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
-      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
-      WHERE vp.empresa_id = ${empresaId} AND vp.estado = ${estado} ORDER BY vp.created_at DESC`);
-    else if (empresaId) ({ rows } = await sql`
-      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
-      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
-      WHERE vp.empresa_id = ${empresaId} ORDER BY vp.created_at DESC`);
-    else ({ rows } = await sql`
-      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
-      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
-      ORDER BY vp.created_at DESC LIMIT 500`);
+    const { rows } = estado
+      ? await sql`
+          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+          FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+          WHERE vp.estado = ${estado} ORDER BY vp.created_at DESC`
+      : await sql`
+          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+          FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+          ORDER BY vp.created_at DESC LIMIT 500`;
     res.json(rows);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-app.post('/api/admin/consolidar/:empresaId', requireAdmin, async (req, res) => {
+app.post('/api/admin/consolidar', requireAdmin, async (req, res) => {
   try {
-    const empresaId = req.params.empresaId;
-    const emp = await getEmpresa(empresaId);
-    if (!emp) return res.status(404).json({ error: 'Empresa no encontrada' });
-    const { rows: pendientes } = await sql`SELECT * FROM ventas_pendientes WHERE empresa_id = ${empresaId} AND estado = 'pendiente'`;
-    if (!pendientes.length) return res.status(400).json({ error: 'No hay ventas pendientes para esta empresa' });
+    const cfg = await getConfig();
+    if (!cfg.partner_id) return res.status(400).json({ error: 'Falta configurar el Partner ID de Odoo en Configuración' });
+    const { rows: pendientes } = await sql`SELECT * FROM ventas_pendientes WHERE estado = 'pendiente'`;
+    if (!pendientes.length) return res.status(400).json({ error: 'No hay ventas pendientes' });
 
     const totales = {};
     pendientes.forEach(v => (v.productos || []).forEach(p => {
@@ -726,8 +721,8 @@ app.post('/api/admin/consolidar/:empresaId', requireAdmin, async (req, res) => {
     const nombres = [...new Set(pendientes.map(v => v.nombre_venta).filter(Boolean))].join(', ');
     const vendedorasCount = new Set(pendientes.map(v => v.vendedora_id)).size;
     const orderId = await xmlrpcCall('sale.order', 'create', [{
-      partner_id: emp.partner_id,
-      client_order_ref: 'Consolidado ' + emp.nombre + (nombres ? ' — ' + nombres : ''),
+      partner_id: cfg.partner_id,
+      client_order_ref: 'Consolidado' + (nombres ? ' — ' + nombres : ''),
       note: `Venta consolidada de ${pendientes.length} pedido(s) de ${vendedorasCount} vendedora(s).`,
       order_line: orderLines
     }]);
@@ -743,60 +738,15 @@ app.post('/api/admin/consolidar/:empresaId', requireAdmin, async (req, res) => {
 app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
   try {
     const { rows } = await sql`
-      SELECT v.id AS vendedora_id, v.nombre AS vendedora_nombre, v.codigo, e.id AS empresa_id, e.nombre AS empresa_nombre,
+      SELECT v.id AS vendedora_id, v.nombre AS vendedora_nombre, v.codigo,
              COUNT(vp.id) AS ventas, COALESCE(SUM(vp.total), 0) AS total,
              COUNT(vp.id) FILTER (WHERE vp.estado = 'pendiente') AS pendientes
       FROM vendedoras v
-      JOIN empresas e ON e.id = v.empresa_id
       LEFT JOIN ventas_pendientes vp ON vp.vendedora_id = v.id
-      GROUP BY v.id, v.nombre, v.codigo, e.id, e.nombre
-      ORDER BY e.nombre, v.nombre`;
+      GROUP BY v.id, v.nombre, v.codigo
+      ORDER BY v.nombre`;
     res.json(rows);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
-});
-
-// ── Migración única: importar clientes.csv como Empresa+Vendedora ──
-// (uno por cada fila del CSV; devuelve la clave temporal de cada una para que la anotes)
-app.post('/api/admin/importar-csv', requireAdmin, async (_req, res) => {
-  try {
-    const file = path.join(__dirname, '..', 'clientes.csv');
-    if (!fs.existsSync(file)) return res.status(404).json({ error: 'No se encontró clientes.csv en el proyecto' });
-    const raw = fs.readFileSync(file, 'utf8');
-    const sep = raw.split(/\r?\n/)[0].includes(';') ? ';' : ',';
-    function parseLine(line) {
-      const f = []; let cur = '', inQ = false;
-      for (const c of line) {
-        if (c === '"') inQ = !inQ;
-        else if (c === sep && !inQ) { f.push(cur.trim()); cur = ''; }
-        else cur += c;
-      }
-      f.push(cur.trim()); return f;
-    }
-    const lines = raw.split(/\r?\n/).filter(Boolean);
-    const creadas = [];
-    for (let i = 1; i < lines.length; i++) {
-      const p = parseLine(lines[i]);
-      if (p.length < 3) continue;
-      const codigo = (p[0] || '').trim().toUpperCase();
-      const nombre = (p[1] || '').trim();
-      const partnerId = parseInt(p[2] || '0', 10);
-      const multiplicador = parseFloat(p[3] || '2');
-      const sucRaw = (p[4] || '').replace(/^"|"$/g, '').trim();
-      const sucursales = sucRaw ? sucRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-      if (!codigo || !partnerId) continue;
-
-      const existe = await getVendedora(codigo);
-      if (existe) continue; // no pisa vendedoras ya migradas
-
-      const { rows: empRows } = await sql`INSERT INTO empresas (nombre, partner_id) VALUES (${nombre}, ${partnerId}) RETURNING id`;
-      const claveTemp = crypto.randomBytes(4).toString('hex');
-      await sql`
-        INSERT INTO vendedoras (empresa_id, codigo, clave_hash, nombre, multiplicador, sucursales)
-        VALUES (${empRows[0].id}, ${codigo}, ${hashPassword(claveTemp)}, ${nombre}, ${multiplicador || 2}, ${JSON.stringify(sucursales)})`;
-      creadas.push({ codigo, nombre, claveTemporal: claveTemp });
-    }
-    res.json({ ok: true, creadas, mensaje: 'Anota estas claves temporales y entrégaselas a cada vendedora — no se pueden volver a ver.' });
-  } catch (e) { console.error('❌ /api/admin/importar-csv', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/health', async (_req, res) => {

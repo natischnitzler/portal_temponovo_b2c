@@ -2,17 +2,21 @@
 -- No hace falta correr esto a mano: el backend crea estas tablas solo
 -- (CREATE TABLE IF NOT EXISTS) la primera vez que recibe una request.
 -- Se deja aquí solo como referencia para entender la estructura.
+--
+-- Hay UNA sola empresa (la que compra en Odoo). Sus datos (nombre y
+-- Partner ID) viven en la tabla "configuracion", que siempre tiene una
+-- única fila (id = 1). Ya no existe una tabla "empresas" con varias filas.
 
-CREATE TABLE IF NOT EXISTS empresas (
-  id SERIAL PRIMARY KEY,
-  nombre TEXT NOT NULL,
-  partner_id INTEGER NOT NULL,     -- ID del partner en Odoo al que se le factura
-  created_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE IF NOT EXISTS configuracion (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  nombre TEXT NOT NULL DEFAULT '',
+  partner_id INTEGER,            -- ID del partner en Odoo al que se le factura
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CHECK (id = 1)
 );
 
 CREATE TABLE IF NOT EXISTS vendedoras (
   id SERIAL PRIMARY KEY,
-  empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
   codigo TEXT NOT NULL UNIQUE,     -- usuario con el que entra a la vitrina
   clave_hash TEXT NOT NULL,        -- nunca se guarda la clave en texto plano
   nombre TEXT NOT NULL,
@@ -26,7 +30,6 @@ CREATE TABLE IF NOT EXISTS vendedoras (
 CREATE TABLE IF NOT EXISTS ventas_pendientes (
   id SERIAL PRIMARY KEY,
   vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE CASCADE,
-  empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
   productos JSONB NOT NULL,        -- [{sku, quantity}, ...]
   nombre_venta TEXT,
   telefono TEXT,

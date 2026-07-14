@@ -2,24 +2,24 @@
 
 Portal para revendedoras: entran con su código y clave, ven los relojes en
 grande, arman pedidos, y esos pedidos quedan **pendientes** hasta que el
-administrador los junta ("consolida") en una sola venta en Odoo por Empresa.
+administrador los junta ("consolida") en una sola venta en Odoo.
 
 ## Estructura del negocio
 
-- **Empresa** — quien realmente le compra a Temponovo en Odoo (tiene un
-  `partnerId`). Ej: "Empresa Tali".
-- **Vendedora** — una persona que usa la Vitrina para vender. Pertenece a una
-  Empresa, tiene su propio usuario/clave, su propio multiplicador de precio y
-  sus propias categorías habilitadas. Varias vendedoras pueden pertenecer a
-  la misma Empresa.
+- **La empresa** — es una sola: quien realmente le compra a Temponovo en
+  Odoo (tiene un `partnerId`). Su nombre y su Partner ID se configuran una
+  sola vez desde el Panel de Admin → **Configuración**.
+- **Vendedora** — una persona que usa la Vitrina para vender. Tiene su
+  propio usuario/clave, su propio multiplicador de precio y sus propias
+  categorías habilitadas.
 - **Venta pendiente** — cada pedido que hace una vendedora queda guardado
-  como pendiente, asociado a su Empresa. El administrador las revisa y las
-  **consolida**: se juntan todas las ventas pendientes de una Empresa en un
-  solo pedido en Odoo, a nombre del `partnerId` de esa Empresa.
+  como pendiente. El administrador las revisa y las **consolida**: se
+  juntan todas las ventas pendientes en un solo pedido en Odoo, a nombre
+  del `partnerId` configurado.
 
 Todo esto se administra desde el **Panel de Admin** (`/admin`), con su
-propia clave — ahí se crean/editan Empresas y Vendedoras, se ven las ventas
-pendientes y se consolidan.
+propia clave — ahí se configura la empresa, se crean/editan Vendedoras, se
+ven las ventas pendientes y se consolidan.
 
 ## Configuración
 
@@ -41,21 +41,16 @@ pendientes y se consolidan.
 1. Vercel → tu proyecto → **Storage** → **Create Database** → **Postgres**
    (o Neon, es el mismo motor).
 2. Conéctala a este proyecto — Vercel agrega `POSTGRES_URL` solo.
-3. Listo. Las tablas (`empresas`, `vendedoras`, `ventas_pendientes`) se
-   crean solas la primera vez que el sitio recibe una visita — no hay que
-   correr nada a mano (`schema.sql` queda solo como referencia).
+3. Listo. Las tablas (`configuracion`, `vendedoras`, `ventas_pendientes`)
+   se crean solas la primera vez que el sitio recibe una visita — no hay
+   que correr nada a mano (`schema.sql` queda solo como referencia).
 
-### 3. Primeras Empresas y Vendedoras
+### 3. Primera configuración y Vendedoras
 
-Desde el Panel de Admin (`/admin`) creas la Empresa (nombre + `partnerId` de
-Odoo) y luego las Vendedoras dentro de ella (usuario, clave, nombre,
-multiplicador, categorías que vende).
-
-Si ya tenías clientas en el antiguo `clientes.csv`, el admin tiene un botón
-**"Importar clientes.csv"** que las migra automáticamente: crea una Empresa
-por cada una (con su mismo `partnerId`) y una Vendedora con clave temporal
-(se muestra una sola vez — anótala y pásasela a cada una para que después la
-cambie).
+Desde el Panel de Admin (`/admin` → **Configuración**) pones el nombre de
+tu empresa y el `partnerId` de Odoo al que se le facturan todas las
+ventas. Después, desde **Vendedoras**, creas cada vendedora (usuario,
+clave, nombre, multiplicador, categorías que vende).
 
 ### 4. Despliegue
 
@@ -73,13 +68,13 @@ vercel --prod
 | GET    | /api/imagen/:id                | Imagen del producto                                  |
 | POST   | /api/pedido                    | Crea una venta **pendiente** (no toca Odoo todavía)  |
 | GET    | /api/pedidos                   | Historial de ventas de la vendedora (pendientes + consolidadas) |
-| GET    | /api/config · POST /api/config | Personalización de la vitrina (logo, colores, etc.) |
+| GET    | /api/config · POST /api/config | Personalización de la vitrina (logo, colores, etc.) — de cada vendedora |
 | POST   | /api/admin/login                | Login del panel de admin                             |
-| GET/POST/PUT/DELETE /api/admin/empresas     | CRUD de Empresas                       |
+| GET/PUT /api/admin/config       | Nombre y Partner ID de la empresa (una sola)        |
 | GET/POST/PUT/DELETE /api/admin/vendedoras   | CRUD de Vendedoras                     |
-| GET    | /api/admin/ventas               | Ventas pendientes/consolidadas, filtrables por empresa |
-| POST   | /api/admin/consolidar/:empresaId | Junta las ventas pendientes de una Empresa en un pedido de Odoo |
-| GET    | /api/admin/reporte               | Ventas por vendedora/empresa                          |
+| GET    | /api/admin/ventas               | Ventas pendientes/consolidadas, filtrables por estado |
+| POST   | /api/admin/consolidar            | Junta TODAS las ventas pendientes en un pedido de Odoo |
+| GET    | /api/admin/reporte               | Ventas por vendedora                                  |
 | GET    | /health                          | Health check (incluye si la base de datos conecta)   |
 
 ## Notas técnicas
@@ -93,4 +88,8 @@ vercel --prod
   vendedora se sigue guardando como antes, como un archivo adjunto en el
   partner de Odoo — no se movió a la base de datos nueva.
 - El catálogo se cachea 30 min y se puede limpiar con
-  `DELETE /api/productos/cache` (ahora requiere sesión de admin).
+  `DELETE /api/productos/cache` (requiere sesión de admin).
+- Ya no existe la importación de `clientes.csv` ni el concepto de varias
+  Empresas: el portal es para una sola empresa, configurada en
+  `/admin` → Configuración. El archivo `clientes.csv` no se usa más y se
+  puede borrar del proyecto.
