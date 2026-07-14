@@ -1383,7 +1383,11 @@ $('vr-direccion').addEventListener('input', ()=>{
           box.classList.remove('open');
         };
       });
-    } catch(e){ box.classList.remove('open'); }
+    } catch(e){
+      console.warn('dirección:', e);
+      box.innerHTML = `<div class="sug-item" style="color:var(--steel);cursor:default">No pudimos buscar la dirección ahora — puedes escribirla igual.</div>`;
+      box.classList.add('open');
+    }
   }, 220);
 });
 document.addEventListener('click', e=>{ if(!e.target.closest('#sec-rapida .sug-wrap')) $('dir-sug').classList.remove('open'); });
