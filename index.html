@@ -2076,9 +2076,11 @@ function applyHandTracking(pred, el, snap){
   const handWidth = Math.hypot(indexMCP.x-pinkyMCP.x, indexMCP.y-pinkyMCP.y);
 
   let size = Math.max(60, Math.min(300, handWidth*1.25));
-  // sube un poco desde la muñeca hacia el antebrazo, sin pasarse
-  let cx = wrist.x + dir.x*handLen*0.4;
-  let cy = wrist.y + dir.y*handLen*0.4;
+  // sube un poco desde la muñeca hacia el antebrazo — el desplazamiento no puede crecer sin límite
+  // (si la mano está grande/cerca de la cámara, handLen se dispara y antes empujaba el reloj fuera de cuadro)
+  const offset = Math.min(handLen*0.4, size*0.5);
+  let cx = wrist.x + dir.x*offset;
+  let cy = wrist.y + dir.y*offset;
   // nunca dejar que se salga del cuadro visible
   cx = Math.max(size*0.35, Math.min(rect.width  - size*0.35, cx));
   cy = Math.max(size*0.35, Math.min(rect.height - size*0.35, cy));
