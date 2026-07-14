@@ -386,6 +386,8 @@ body.public .priv{display:none!important;}
     <div class="login-sub">Compra Fácil</div>
     <label class="login-label">Código de acceso</label>
     <input id="login-code" class="login-input" type="text" autocomplete="off" autocapitalize="characters" placeholder="········"/>
+    <label class="login-label" style="margin-top:18px">Clave</label>
+    <input id="login-pass" class="login-input" type="password" autocomplete="off" placeholder="········"/>
     <button id="login-btn" class="login-btn">Entrar</button>
     <div id="login-error" class="login-error"></div>
     <div class="login-foot">Distribución autorizada</div>
@@ -777,6 +779,7 @@ const API = '/api';
 const PUBLIC = location.pathname.startsWith('/v/');
 const SLUG = PUBLIC ? location.pathname.split('/')[2] : '';
 let CODE = localStorage.getItem('tn_code') || '';
+let PASS = localStorage.getItem('tn_pass') || '';
 let ME = null;
 let PRODUCTOS = [];        // solo con stock (vitrina)
 let PRODUCTOS_ALL = [];    // todo (venta rápida / excel)
@@ -790,11 +793,11 @@ const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 function imgUrl(id,big){
   if(PUBLIC) return `${API}/public/${SLUG}/imagen/${id}${big?'?s=g':''}`;
-  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}${big?'&s=g':''}`;
+  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}&p=${encodeURIComponent(PASS)}${big?'&s=g':''}`;
 }
 
 async function api(path, opts={}){
-  const r = await fetch(API+path, {...opts, headers:{'Content-Type':'application/json','x-client-code':CODE, ...(opts.headers||{})}});
+  const r = await fetch(API+path, {...opts, headers:{'Content-Type':'application/json','x-client-code':CODE,'x-client-pass':PASS, ...(opts.headers||{})}});
   const d = await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(d.error||('Error '+r.status));
   return d;
@@ -937,31 +940,35 @@ function sugerido(p){
 }
 
 /* ═══════════ LOGIN ═══════════ */
-async function tryLogin(code){
+async function tryLogin(code, pass){
   CODE = code.trim().toUpperCase();
+  PASS = pass;
   ME = await api('/me');
   localStorage.setItem('tn_code', CODE);
+  localStorage.setItem('tn_pass', PASS);
   $('login-screen').style.display='none';
   $('app').classList.add('open');
   initApp();
 }
 $('login-btn').onclick = async ()=>{
   const code = $('login-code').value;
-  if(!code.trim()) return;
+  const pass = $('login-pass').value;
+  if(!code.trim() || !pass){ $('login-error').textContent = 'Ingresa tu código y tu clave.'; return; }
   $('login-btn').disabled = true; $('login-error').textContent='';
-  try { await tryLogin(code); }
-  catch(e){ $('login-error').textContent = e.message==='Cliente no reconocido' ? 'Código no reconocido.' : e.message; }
+  try { await tryLogin(code, pass); }
+  catch(e){ $('login-error').textContent = /no reconocid|incorrecta/i.test(e.message) ? 'Código o clave incorrectos.' : e.message; }
   $('login-btn').disabled = false;
 };
-$('login-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-btn').click(); });
-function salir(){ localStorage.removeItem('tn_code'); location.reload(); }
+$('login-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-pass').focus(); });
+$('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('login-btn').click(); });
+function salir(){ localStorage.removeItem('tn_code'); localStorage.removeItem('tn_pass'); location.reload(); }
 
 if(PUBLIC){
   document.body.classList.add('public');
   $('login-screen').style.display='none';
   $('app').classList.add('open');
   initPublic();
-} else if(CODE){ tryLogin(CODE).catch(()=>{ localStorage.removeItem('tn_code'); CODE=''; }); }
+} else if(CODE && PASS){ tryLogin(CODE, PASS).catch(()=>{ localStorage.removeItem('tn_code'); localStorage.removeItem('tn_pass'); CODE=''; PASS=''; }); }
 
 async function initPublic(){
   try {

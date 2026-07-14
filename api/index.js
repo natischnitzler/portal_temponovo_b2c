@@ -1,64 +1,28 @@
-const express = require('express');
-const xmlrpc  = require('xmlrpc');
-const cors    = require('cors');
-const fs      = require('fs');
-const path    = require('path');
+const express  = require('express');
+const xmlrpc   = require('xmlrpc');
+const cors     = require('cors');
+const fs       = require('fs');
+const path     = require('path');
 const archiver = require('archiver');
-const crypto  = require('crypto');
+const crypto   = require('crypto');
+const { sql }  = require('./db');
 // nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (e) { console.warn('⚠ nodemailer no instalado — el formulario de contacto quedará solo en logs'); }
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' })); // antes 100kb por defecto — muy poco para configs con logo
 
 // ── CONFIGURACIÓN ODOO TEMPONOVO ─────────────────────────────────
 const ODOO_URL  = process.env.ODOO_URL  || 'https://temponovo.odoo.com';
-// En Odoo SaaS (*.odoo.com) la base suele llamarse igual que el subdominio
 const DB_GUESS  = new URL(ODOO_URL).hostname.split('.')[0];
 const ODOO_DB   = process.env.ODOO_DB   || DB_GUESS;
 const ODOO_USER = process.env.ODOO_USER || '';
 const ODOO_PASS = process.env.ODOO_PASSWORD || '';
 
-// Filtro opcional de categorías (complete_name separadas por "|")
-// Ej: CATEGORIAS="Relojes / Hombre|Relojes / Mujer"
 const CATEGORIAS_OK = (process.env.CATEGORIAS || '')
   .split('|').map(s => s.trim()).filter(Boolean);
-
-// ── CLIENTES DESDE CSV ───────────────────────────────────────────
-function loadClientes() {
-  const file = path.join(__dirname, '..', 'clientes.csv');
-  if (!fs.existsSync(file)) { console.warn('⚠ No se encontró clientes.csv'); return {}; }
-  const raw = fs.readFileSync(file, 'utf8');
-  const sep = raw.split(/\r?\n/)[0].includes(';') ? ';' : ',';
-  function parseLine(line) {
-    const f = []; let cur = '', inQ = false;
-    for (const c of line) {
-      if (c === '"') inQ = !inQ;
-      else if (c === sep && !inQ) { f.push(cur.trim()); cur = ''; }
-      else cur += c;
-    }
-    f.push(cur.trim()); return f;
-  }
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const result = {};
-  for (let i = 1; i < lines.length; i++) {
-    const p = parseLine(lines[i]);
-    if (p.length < 3) continue;
-    const codigo        = (p[0] || '').trim().toUpperCase();
-    const nombre        = (p[1] || '').trim();
-    const partnerId     = parseInt(p[2] || '0', 10);
-    const multiplicador = parseFloat(p[3] || '2');
-    const sucRaw        = (p[4] || '').replace(/^"|"$/g, '').trim();
-    const sucursales    = sucRaw ? sucRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-    if (codigo && partnerId) result[codigo] = { partnerId, name: nombre, multiplicador, sucursales };
-  }
-  console.log('✅ Clientes:', Object.keys(result).join(', '));
-  return result;
-}
-const CLIENTES = loadClientes();
-function getCliente(code) { return CLIENTES[(code || '').toUpperCase()] || null; }
 
 // ── ODOO AUTH ────────────────────────────────────────────────────
 let cachedUID = null, lastAuthTime = 0;
@@ -89,34 +53,150 @@ function xmlrpcCall(model, method, args, kwargs) {
 }
 
 // ── CACHÉ EN MEMORIA ─────────────────────────────────────────────
-// Acorta los tracebacks de Odoo al error real (última línea)
 function shortErr(e) {
   const msg = (e && e.message) || String(e);
   const lines = msg.split('\n').map(s => s.trim()).filter(Boolean);
   return lines.length > 1 ? lines[lines.length - 1] : msg;
 }
-
 const cache = {};
 function cacheGet(k) { const e = cache[k]; if (!e) return null; if (Date.now() - e.ts > e.ttl) { delete cache[k]; return null; } return e.data; }
 function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
 
-// ── MIDDLEWARE ───────────────────────────────────────────────────
-function requireClient(req, res, next) {
-  const code = (req.headers['x-client-code'] || '').toUpperCase();
-  const c = getCliente(code);
-  if (!c) return res.status(401).json({ error: 'Cliente no reconocido' });
-  req.partnerId = c.partnerId; req.clientName = c.name; req.multiplicador = c.multiplicador || 2;
+// ════════════════════════════════════════════════════════════════
+// BASE DE DATOS — empresas, vendedoras, ventas pendientes
+// ════════════════════════════════════════════════════════════════
+let dbReady = null;
+function ensureDb() {
+  if (dbReady) return dbReady;
+  dbReady = (async () => {
+    await sql`CREATE TABLE IF NOT EXISTS empresas (
+      id SERIAL PRIMARY KEY,
+      nombre TEXT NOT NULL,
+      partner_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`;
+    await sql`CREATE TABLE IF NOT EXISTS vendedoras (
+      id SERIAL PRIMARY KEY,
+      empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      codigo TEXT NOT NULL UNIQUE,
+      clave_hash TEXT NOT NULL,
+      nombre TEXT NOT NULL,
+      multiplicador NUMERIC DEFAULT 2,
+      categorias JSONB DEFAULT '[]',
+      sucursales JSONB DEFAULT '[]',
+      activo BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`;
+    await sql`CREATE TABLE IF NOT EXISTS ventas_pendientes (
+      id SERIAL PRIMARY KEY,
+      vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE CASCADE,
+      empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      productos JSONB NOT NULL,
+      nombre_venta TEXT,
+      telefono TEXT,
+      email TEXT,
+      direccion TEXT,
+      comuna TEXT,
+      nota TEXT,
+      total NUMERIC DEFAULT 0,
+      estado TEXT DEFAULT 'pendiente',
+      odoo_order_id INTEGER,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      consolidado_at TIMESTAMPTZ
+    )`;
+  })();
+  return dbReady;
+}
+// se asegura que las tablas existan antes de CUALQUIER request (barato y sin efecto una vez creadas)
+// — excepto /health, que debe poder responder aunque la base de datos esté mal configurada
+app.use(async (req, res, next) => {
+  if (req.path === '/health') return next();
+  try { await ensureDb(); next(); }
+  catch (e) {
+    console.error('❌ DB init', e.message);
+    res.status(500).json({ error: 'No se pudo conectar a la base de datos. ¿Está creada y conectada en Vercel → Storage → Postgres?' });
+  }
+});
+
+// ── CONTRASEÑAS (hash con salt, sin dependencias externas) ───────
+function hashPassword(plain) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(plain), salt, 64).toString('hex');
+  return salt + ':' + hash;
+}
+function verifyPassword(plain, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  try {
+    const check = crypto.scryptSync(String(plain), salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
+  } catch { return false; }
+}
+
+// ── SESIÓN DE ADMIN (token firmado con expiración, sin tabla de sesiones) ──
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const ADMIN_SECRET   = process.env.ADMIN_SECRET   || 'cambia-esto-en-vercel';
+function makeAdminToken() {
+  const exp = Date.now() + 12 * 3600 * 1000; // 12 horas
+  const payload = String(exp);
+  const sig = crypto.createHmac('sha256', ADMIN_SECRET).update(payload).digest('hex');
+  return payload + '.' + sig;
+}
+function verifyAdminToken(token) {
+  if (!token || !token.includes('.')) return false;
+  const [payload, sig] = token.split('.');
+  const expected = crypto.createHmac('sha256', ADMIN_SECRET).update(payload).digest('hex');
+  try { if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) return false; }
+  catch { return false; }
+  return Date.now() < parseInt(payload, 10);
+}
+function requireAdmin(req, res, next) {
+  if (!verifyAdminToken(req.headers['x-admin-token'])) return res.status(401).json({ error: 'Sesión de administrador inválida o expirada' });
   next();
 }
 
-// ── LINK PÚBLICO + CONFIG EN ODOO ────────────────────────────────
-function slugOf(code) {
-  return crypto.createHash('sha256').update('tnv:' + code.toUpperCase()).digest('hex').slice(0, 10);
+// ── EMPRESAS / VENDEDORAS ─────────────────────────────────────────
+async function getEmpresa(id) {
+  const { rows } = await sql`SELECT * FROM empresas WHERE id = ${id}`;
+  return rows[0] || null;
 }
-function clienteBySlug(slug) {
-  for (const [code, c] of Object.entries(CLIENTES)) if (slugOf(code) === slug) return { code, ...c };
-  return null;
+async function getVendedora(codigo) {
+  const { rows } = await sql`SELECT * FROM vendedoras WHERE codigo = ${(codigo || '').toUpperCase()}`;
+  return rows[0] || null;
 }
+function slugOf(codigo) {
+  return crypto.createHash('sha256').update('tnv:' + (codigo || '').toUpperCase()).digest('hex').slice(0, 10);
+}
+async function vendedoraBySlug(slug) {
+  const { rows } = await sql`SELECT * FROM vendedoras WHERE activo = true`;
+  return rows.find(v => slugOf(v.codigo) === slug) || null;
+}
+async function publicClienteBySlug(slug) {
+  const v = await vendedoraBySlug(slug);
+  if (!v) return null;
+  const emp = await getEmpresa(v.empresa_id);
+  if (!emp) return null;
+  return { code: v.codigo, partnerId: emp.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
+}
+
+// ── MIDDLEWARE: ACCESO DE VENDEDORA (código + clave) ─────────────
+async function requireClient(req, res, next) {
+  try {
+    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
+    const clave  = req.headers['x-client-pass'] || '';
+    if (!codigo || !clave) return res.status(401).json({ error: 'Faltan credenciales' });
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo) return res.status(401).json({ error: 'Usuario no reconocido' });
+    if (!verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Clave incorrecta' });
+    const emp = await getEmpresa(v.empresa_id);
+    if (!emp) return res.status(500).json({ error: 'Esta vendedora no tiene una empresa asignada' });
+    req.vendedora = v; req.empresa = emp;
+    req.partnerId = emp.partner_id; req.clientName = v.nombre; req.multiplicador = parseFloat(v.multiplicador) || 2;
+    next();
+  } catch (e) { console.error('❌ requireClient', e.message); res.status(500).json({ error: shortErr(e) }); }
+}
+
+// ── LINK PÚBLICO + CONFIG (guardada en Odoo, por vendedora) ──────
 async function readCfg(code, partnerId) {
   const hit = cacheGet('cfg_' + code); if (hit !== null) return hit;
   const name = 'vitrina-cfg-' + code;
@@ -190,7 +270,6 @@ async function fetchProductos() {
       'product_template_attribute_value_ids', 'product_tmpl_id'
     ]]);
 
-    // Descripción desde el template
     const tmplIds = [...new Set(prods.map(p => Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id))];
     let tmplMap = {};
     if (tmplIds.length) {
@@ -198,7 +277,6 @@ async function fetchProductos() {
       tmpls.forEach(t => { tmplMap[t.id] = t; });
     }
 
-    // Atributos con nombre ("Color: Dorado", "Correa: Cuero"...)
     const attrValIds = [...new Set(prods.flatMap(p => p.product_template_attribute_value_ids || []))];
     let attrMap = {};
     if (attrValIds.length) {
@@ -222,7 +300,7 @@ async function fetchProductos() {
         descripcion: tmpl.description_sale || '',
         precio: parseFloat(p.list_price || 0),
         categoria: Array.isArray(p.categ_id) ? p.categ_id[1] : '',
-        atributos,                                   // [{attr:'Color', val:'Dorado'}, ...]
+        atributos,
         barcode: p.barcode || '',
         stock: parseFloat(p.qty_available || 0)
       });
@@ -237,37 +315,41 @@ async function fetchProductos() {
 // ════════════════════════════════════════════════════════════════
 app.get('/api/productos', async (req, res) => {
   try {
-    const code = (req.headers['x-client-code'] || '').toUpperCase();
-    const cliente = getCliente(code);
-    if (!cliente) return res.status(401).json({ error: 'Cliente no reconocido' });
+    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
+    const clave  = req.headers['x-client-pass'] || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Cliente no reconocido' });
+    const emp = await getEmpresa(v.empresa_id);
+    if (!emp) return res.status(500).json({ error: 'Esta vendedora no tiene una empresa asignada' });
 
-    const cached = cacheGet('cat_' + code); if (cached) return res.json(cached);
+    const cached = cacheGet('cat_' + v.codigo); if (cached) return res.json(cached);
 
-    const prods = await productosCliente(cliente);
-    const mult = cliente.multiplicador || 2;
-    const result = prods.map(p => ({
-      ...p,
-      precioSugerido: Math.round(p.precio * mult)
-    }));
+    let prods = await productosCliente({ partnerId: emp.partner_id });
+    const categorias = v.categorias || [];
+    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
 
-    cacheSet('cat_' + code, result, 15 * 60 * 1000);
+    const mult = parseFloat(v.multiplicador) || 2;
+    const result = prods.map(p => ({ ...p, precioSugerido: Math.round(p.precio * mult) }));
+
+    cacheSet('cat_' + v.codigo, result, 15 * 60 * 1000);
     res.json(result);
   } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
-app.delete('/api/productos/cache', (_req, res) => {
+app.delete('/api/productos/cache', requireAdmin, (_req, res) => {
   Object.keys(cache).filter(k => k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('img_'))
     .forEach(k => delete cache[k]);
   res.json({ ok: true });
 });
 
 // ── IMAGEN INDIVIDUAL (miniatura o grande) ───────────────────────
-// GET /api/imagen/:id?c=CODIGO&s=g   → image_1024 (detalle / probar)
-// GET /api/imagen/:id?c=CODIGO       → image_256  (grilla)
+// GET /api/imagen/:id?c=CODIGO&p=CLAVE&s=g   → image_1024 (detalle / probar)
 app.get('/api/imagen/:id', async (req, res) => {
   try {
-    const code = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
-    if (!getCliente(code)) return res.status(401).send('No autorizado');
+    const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+    const clave  = req.headers['x-client-pass']  || req.query.p || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).send('No autorizado');
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).send('ID inválido');
     const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
@@ -295,20 +377,16 @@ app.get('/api/imagen/:id', async (req, res) => {
 });
 
 // ── FOTOS EN ZIP (opcionalmente filtradas por familia) ───────────
-// GET /api/fotos?c=CODIGO&familia=Relojes
 app.get('/api/fotos', async (req, res) => {
   try {
-    const code = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
-    if (!getCliente(code)) return res.status(401).json({ error: 'No autorizado' });
+    const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+    const clave  = req.headers['x-client-pass']  || req.query.p || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'No autorizado' });
 
     const familia = (req.query.familia || '').trim().toLowerCase();
     let prods = await fetchProductos();
-    if (familia) {
-      prods = prods.filter(p => {
-        const parts = (p.categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
-        return (parts[0] || '').toLowerCase() === familia;
-      });
-    }
+    if (familia) prods = prods.filter(p => famOf(p.categoria).toLowerCase() === familia);
     if (!prods.length) return res.status(404).json({ error: 'Sin productos para esa familia' });
 
     res.setHeader('Content-Type', 'application/zip');
@@ -318,7 +396,6 @@ app.get('/api/fotos', async (req, res) => {
     archive.on('error', e => { console.error('❌ zip', e.message); try { res.end(); } catch {} });
     archive.pipe(res);
 
-    // Traer imágenes en tandas para no reventar memoria ni tiempos
     const ids = prods.map(p => p.id);
     const bySku = {}; prods.forEach(p => { bySku[p.id] = p.sku || String(p.id); });
     for (let i = 0; i < ids.length; i += 50) {
@@ -338,109 +415,72 @@ app.get('/api/fotos', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// PEDIDOS — crear venta + historial
+// VENTAS — ahora quedan "pendientes" hasta que el admin las consolida
 // ════════════════════════════════════════════════════════════════
 app.post('/api/pedido', requireClient, async (req, res) => {
   try {
-    const { productos, nombreVenta, direccion, telefono, email, nota, modoPago, metodoPago } = req.body?.data || {};
+    const { productos, nombreVenta, direccion, comuna, telefono, email, nota, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
-    const skus = productos.map(p => p.sku);
-    const prodRecs = await xmlrpcCall('product.product', 'search_read',
-      [[['default_code', 'in', skus], ['active', '=', true]]], { fields: ['id', 'default_code'] });
-    const skuToId = {};
-    prodRecs.forEach(p => { skuToId[p.default_code] = p.id; });
-    const orderLines = productos.filter(p => skuToId[p.sku])
-      .map(p => [0, 0, { product_id: skuToId[p.sku], product_uom_qty: p.quantity, name: p.sku }]);
-    if (!orderLines.length) return res.status(400).json({ error: 'Ningún SKU reconocido' });
-    const noteParts = [
-      nombreVenta ? 'Venta: ' + nombreVenta : '',
-      telefono ? 'Teléfono: ' + telefono : '',
-      email ? 'Email: ' + email : '',
-      direccion ? 'Despacho: ' + direccion : '',
-      modoPago ? 'Modo de pago: ' + modoPago : '',
-      metodoPago ? 'Método: ' + metodoPago : '',
-      nota || ''
-    ].filter(Boolean);
-    const orderId = await xmlrpcCall('sale.order', 'create', [{
-      partner_id: req.partnerId,
-      client_order_ref: nombreVenta || '',
-      note: noteParts.join(' | '),
-      order_line: orderLines
-    }]);
-    await xmlrpcCall('sale.order', 'action_confirm', [[orderId]]);
-    res.json({ ok: true, orderId, message: 'Pedido creado en Odoo' });
+
+    let prods = [];
+    try { prods = await productosCliente({ partnerId: req.partnerId }); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
+    const precioBySku = {}; prods.forEach(p => { precioBySku[p.sku] = p.precio; });
+    const mult = req.multiplicador || 2;
+    let total = 0;
+    productos.forEach(p => { total += (precioBySku[p.sku] || 0) * mult * (parseFloat(p.quantity) || 1); });
+
+    const notaFinal = [nota || '', metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
+
+    const { rows } = await sql`
+      INSERT INTO ventas_pendientes
+        (vendedora_id, empresa_id, productos, nombre_venta, telefono, email, direccion, comuna, nota, total)
+      VALUES
+        (${req.vendedora.id}, ${req.empresa.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
+         ${telefono || ''}, ${email || ''}, ${direccion || ''}, ${comuna || ''}, ${notaFinal}, ${Math.round(total)})
+      RETURNING id`;
+
+    res.json({ ok: true, orderId: rows[0].id, message: 'Venta registrada. Queda pendiente de consolidar por el administrador.' });
   } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/api/pedidos', requireClient, async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit || '100');
-    const ids = await xmlrpcCall('sale.order', 'search', [[
-      ['partner_id', '=', req.partnerId],
-      ['state', 'in', ['sale', 'done', 'cancel']]
-    ]], { order: 'date_order desc', limit });
-    if (!ids.length) return res.json([]);
-    const orders = await xmlrpcCall('sale.order', 'read',
-      [ids, ['name', 'date_order', 'state', 'amount_total', 'amount_untaxed', 'note', 'client_order_ref', 'order_line']]);
-
-    // Líneas para agrupar por familia en el gráfico
-    const lineIds = [...new Set(orders.flatMap(o => o.order_line || []))];
-    let lineMap = {};
-    if (lineIds.length) {
-      const lines = await xmlrpcCall('sale.order.line', 'read',
-        [lineIds, ['order_id', 'product_id', 'name', 'product_uom_qty', 'price_total']]);
-      // categoría de cada producto
-      const prodIds = [...new Set(lines.map(l => Array.isArray(l.product_id) ? l.product_id[0] : 0).filter(Boolean))];
-      let catMap = {};
-      if (prodIds.length) {
-        const prods = await xmlrpcCall('product.product', 'read', [prodIds, ['id', 'default_code', 'categ_id']]);
-        prods.forEach(p => { catMap[p.id] = { sku: p.default_code || '', cat: Array.isArray(p.categ_id) ? p.categ_id[1] : '' }; });
-      }
-      lines.forEach(l => {
-        const oid = Array.isArray(l.order_id) ? l.order_id[0] : l.order_id;
-        const pid = Array.isArray(l.product_id) ? l.product_id[0] : 0;
-        (lineMap[oid] = lineMap[oid] || []).push({
-          sku: catMap[pid]?.sku || l.name || '',
-          categoria: catMap[pid]?.cat || '',
-          cantidad: parseFloat(l.product_uom_qty || 0),
-          total: parseFloat(l.price_total || 0)
-        });
-      });
-    }
-
-    res.json(orders.map(o => ({
-      id: o.id, nombre: o.name, fecha: o.date_order, estado: o.state,
-      total: parseFloat(o.amount_total || 0), neto: parseFloat(o.amount_untaxed || 0),
-      nota: o.note || '', ref: o.client_order_ref || '',
-      lineas: lineMap[o.id] || []
+    const { rows } = await sql`
+      SELECT * FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} ORDER BY created_at DESC LIMIT 200`;
+    res.json(rows.map(o => ({
+      id: o.id,
+      nombre: 'V' + String(o.id).padStart(6, '0'),
+      fecha: o.created_at,
+      estado: o.estado === 'consolidada' ? 'sale' : 'pendiente',
+      total: parseFloat(o.total || 0),
+      neto: parseFloat(o.total || 0),
+      nota: o.nota || '',
+      ref: o.nombre_venta || '',
+      lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: '', cantidad: p.quantity, total: 0 }))
     })));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── CONFIG DE LA CLIENTA (persistente, multi-dispositivo) ───────
+// ── CONFIG DE LA VENDEDORA (persistente, multi-dispositivo) ─────
 app.get('/api/config', requireClient, async (req, res) => {
-  try {
-    const code = (req.headers['x-client-code'] || '').toUpperCase();
-    res.json(await readCfg(code, req.partnerId));
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+  try { res.json(await readCfg(req.vendedora.codigo, req.partnerId)); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.post('/api/config', requireClient, async (req, res) => {
   try {
     const cfg = req.body?.data || {};
     if (JSON.stringify(cfg).length > 300000) return res.status(413).json({ error: 'Configuración demasiado grande (logo muy pesado)' });
-    const code = (req.headers['x-client-code'] || '').toUpperCase();
-    await writeCfg(code, req.partnerId, cfg);
+    await writeCfg(req.vendedora.codigo, req.partnerId, cfg);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── VITRINA PÚBLICA (link compartible, solo lectura) ────────────
+// ── VITRINA PÚBLICA (link compartible, solo lectura) ─────────────
 app.get('/api/public/:slug/config', async (req, res) => {
   try {
-    const c = clienteBySlug(req.params.slug);
+    const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
     const cfg = await readCfg(c.code, c.partnerId);
-    // Solo lo visual — nunca multiplicador ni datos internos
     const { nombre, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap } = cfg;
     res.json({ nombre: nombre || c.name, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
@@ -448,7 +488,7 @@ app.get('/api/public/:slug/config', async (req, res) => {
 
 app.get('/api/public/:slug/productos', async (req, res) => {
   try {
-    const c = clienteBySlug(req.params.slug);
+    const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
     const hit = cacheGet('pub_' + req.params.slug); if (hit) return res.json(hit);
     const cfg = await readCfg(c.code, c.partnerId);
@@ -456,7 +496,8 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     const ov = cfg.overrides || {};
     const hFams = new Set(cfg.hiddenFams || []);
     const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
-    const prods = await productosCliente(c);
+    let prods = await productosCliente(c);
+    if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p.categoria)));
     const result = prods
       .filter(p => p.stock > 0)
       .filter(p => !hFams.has(famOf(p.categoria)))
@@ -473,7 +514,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
 
 app.get('/api/public/:slug/imagen/:id', async (req, res) => {
   try {
-    const c = clienteBySlug(req.params.slug);
+    const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).send('No encontrada');
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).send('ID inválido');
@@ -493,8 +534,6 @@ app.get('/api/public/:slug/imagen/:id', async (req, res) => {
 });
 
 // ── QUIERO VENDER — formulario público → correo ─────────────────
-// Config en Vercel: CONTACT_EMAIL (destino), SMTP_HOST, SMTP_PORT,
-// SMTP_USER, SMTP_PASS  (ej: Gmail con contraseña de aplicación)
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const mailer = (nodemailer && process.env.SMTP_HOST) ? nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -512,20 +551,14 @@ app.post('/api/contacto', async (req, res) => {
     if (contactHits[ip].length >= 5) return res.status(429).json({ error: 'Demasiados envíos, intenta más tarde' });
 
     const { nombre, telefono, email, ciudad, mensaje, web } = req.body?.data || {};
-    if (web) return res.json({ ok: true });   // honeypot
+    if (web) return res.json({ ok: true });
     if (!nombre || !telefono) return res.status(400).json({ error: 'Nombre y teléfono son obligatorios' });
     contactHits[ip].push(now);
 
     const texto = [
-      'Nueva solicitud desde la Vitrina — ¿Quieres vender con nosotros?',
-      '',
-      'Nombre:   ' + nombre,
-      'WhatsApp: ' + telefono,
-      'Email:    ' + (email || '—'),
-      'Ciudad:   ' + (ciudad || '—'),
-      '',
-      'Mensaje:',
-      mensaje || '—'
+      'Nueva solicitud desde la Vitrina — ¿Quieres vender con nosotros?', '',
+      'Nombre:   ' + nombre, 'WhatsApp: ' + telefono, 'Email:    ' + (email || '—'), 'Ciudad:   ' + (ciudad || '—'),
+      '', 'Mensaje:', mensaje || '—'
     ].join('\n');
 
     if (!mailer || !CONTACT_EMAIL) {
@@ -533,35 +566,251 @@ app.post('/api/contacto', async (req, res) => {
       return res.json({ ok: true, fallback: true });
     }
     await mailer.sendMail({
-      from: `"Vitrina" <${process.env.SMTP_USER}>`,
-      to: CONTACT_EMAIL,
-      replyTo: email || undefined,
-      subject: '✨ Nueva vendedora interesada: ' + nombre,
-      text: texto
+      from: `"Vitrina" <${process.env.SMTP_USER}>`, to: CONTACT_EMAIL, replyTo: email || undefined,
+      subject: '✨ Nueva vendedora interesada: ' + nombre, text: texto
     });
     res.json({ ok: true });
   } catch (e) { console.error('❌ /api/contacto', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── PERFIL ───────────────────────────────────────────────────────
-app.get('/api/me', (req, res) => {
-  const code = (req.headers['x-client-code'] || '').toUpperCase();
-  const c = getCliente(code);
-  if (!c) return res.status(401).json({ error: 'Cliente no reconocido' });
-  res.json({ name: c.name, partnerId: c.partnerId, multiplicador: c.multiplicador || 2, sucursales: c.sucursales || [], publicSlug: slugOf(code) });
+// ── PERFIL ─────────────────────────────────────────────────────
+app.get('/api/me', async (req, res) => {
+  try {
+    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
+    const clave  = req.headers['x-client-pass'] || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Cliente no reconocido' });
+    res.json({ name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, sucursales: v.sucursales || [], publicSlug: slugOf(v.codigo) });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-app.get('/health', (_req, res) => res.json({
-  ok: true,
-  ts: new Date().toISOString(),
-  config: {
-    odooUrl: ODOO_URL,
-    odooDb: ODOO_DB,
-    userSet: !!ODOO_USER,
-    passwordSet: !!ODOO_PASS,
-    clientes: Object.keys(CLIENTES).length
+// ════════════════════════════════════════════════════════════════
+// ADMIN
+// ════════════════════════════════════════════════════════════════
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body || {};
+  if (!ADMIN_PASSWORD) return res.status(500).json({ error: 'Falta ADMIN_PASSWORD en las variables de entorno del servidor' });
+  if (!password || password !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Clave incorrecta' });
+  res.json({ token: makeAdminToken() });
+});
+
+app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
+  try {
+    const prods = await fetchProductos();
+    res.json([...new Set(prods.map(p => famOf(p.categoria)))].sort());
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Empresas ──
+app.get('/api/admin/empresas', requireAdmin, async (_req, res) => {
+  try { const { rows } = await sql`SELECT * FROM empresas ORDER BY nombre`; res.json(rows); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.post('/api/admin/empresas', requireAdmin, async (req, res) => {
+  try {
+    const { nombre, partnerId } = req.body || {};
+    if (!nombre || !partnerId) return res.status(400).json({ error: 'Nombre y partnerId son obligatorios' });
+    const { rows } = await sql`INSERT INTO empresas (nombre, partner_id) VALUES (${nombre}, ${partnerId}) RETURNING *`;
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.put('/api/admin/empresas/:id', requireAdmin, async (req, res) => {
+  try {
+    const { nombre, partnerId } = req.body || {};
+    const { rows } = await sql`
+      UPDATE empresas SET nombre = COALESCE(${nombre}, nombre), partner_id = COALESCE(${partnerId}, partner_id)
+      WHERE id = ${req.params.id} RETURNING *`;
+    if (!rows.length) return res.status(404).json({ error: 'Empresa no encontrada' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.delete('/api/admin/empresas/:id', requireAdmin, async (req, res) => {
+  try { await sql`DELETE FROM empresas WHERE id = ${req.params.id}`; res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Vendedoras ──
+app.get('/api/admin/vendedoras', requireAdmin, async (req, res) => {
+  try {
+    const empresaId = req.query.empresaId;
+    const { rows } = empresaId
+      ? await sql`SELECT id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras WHERE empresa_id = ${empresaId} ORDER BY nombre`
+      : await sql`SELECT id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
+    res.json(rows); // nunca se devuelve clave_hash
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
+  try {
+    const { empresaId, codigo, clave, nombre, multiplicador, categorias, sucursales } = req.body || {};
+    if (!empresaId || !codigo || !clave || !nombre) return res.status(400).json({ error: 'empresaId, código, clave y nombre son obligatorios' });
+    const hash = hashPassword(clave);
+    const { rows } = await sql`
+      INSERT INTO vendedoras (empresa_id, codigo, clave_hash, nombre, multiplicador, categorias, sucursales)
+      VALUES (${empresaId}, ${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${multiplicador || 2},
+              ${JSON.stringify(categorias || [])}, ${JSON.stringify(sucursales || [])})
+      RETURNING id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+    res.json(rows[0]);
+  } catch (e) {
+    if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de usuario ya existe' });
+    res.status(500).json({ error: shortErr(e) });
   }
-}));
+});
+app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
+  try {
+    const { nombre, clave, multiplicador, categorias, sucursales, activo } = req.body || {};
+    const claveHash = clave ? hashPassword(clave) : null;
+    const { rows } = await sql`
+      UPDATE vendedoras SET
+        nombre = COALESCE(${nombre}, nombre),
+        clave_hash = COALESCE(${claveHash}, clave_hash),
+        multiplicador = COALESCE(${multiplicador}, multiplicador),
+        categorias = COALESCE(${categorias ? JSON.stringify(categorias) : null}, categorias),
+        sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
+        activo = COALESCE(${activo}, activo)
+      WHERE id = ${req.params.id}
+      RETURNING id, empresa_id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+    if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
+  try { await sql`DELETE FROM vendedoras WHERE id = ${req.params.id}`; res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Ventas pendientes + consolidación ──
+app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
+  try {
+    const empresaId = req.query.empresaId;
+    const estado = req.query.estado;
+    let rows;
+    if (empresaId && estado) ({ rows } = await sql`
+      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+      WHERE vp.empresa_id = ${empresaId} AND vp.estado = ${estado} ORDER BY vp.created_at DESC`);
+    else if (empresaId) ({ rows } = await sql`
+      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+      WHERE vp.empresa_id = ${empresaId} ORDER BY vp.created_at DESC`);
+    else ({ rows } = await sql`
+      SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+      FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+      ORDER BY vp.created_at DESC LIMIT 500`);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.post('/api/admin/consolidar/:empresaId', requireAdmin, async (req, res) => {
+  try {
+    const empresaId = req.params.empresaId;
+    const emp = await getEmpresa(empresaId);
+    if (!emp) return res.status(404).json({ error: 'Empresa no encontrada' });
+    const { rows: pendientes } = await sql`SELECT * FROM ventas_pendientes WHERE empresa_id = ${empresaId} AND estado = 'pendiente'`;
+    if (!pendientes.length) return res.status(400).json({ error: 'No hay ventas pendientes para esta empresa' });
+
+    const totales = {};
+    pendientes.forEach(v => (v.productos || []).forEach(p => {
+      totales[p.sku] = (totales[p.sku] || 0) + (parseFloat(p.quantity) || 1);
+    }));
+    const skus = Object.keys(totales);
+    if (!skus.length) return res.status(400).json({ error: 'Las ventas pendientes no tienen productos válidos' });
+
+    const prodRecs = await xmlrpcCall('product.product', 'search_read',
+      [[['default_code', 'in', skus], ['active', '=', true]]], { fields: ['id', 'default_code'] });
+    const skuToId = {}; prodRecs.forEach(p => { skuToId[p.default_code] = p.id; });
+    const orderLines = Object.entries(totales).filter(([sku]) => skuToId[sku])
+      .map(([sku, qty]) => [0, 0, { product_id: skuToId[sku], product_uom_qty: qty, name: sku }]);
+    if (!orderLines.length) return res.status(400).json({ error: 'Ningún SKU reconocido en Odoo' });
+
+    const nombres = [...new Set(pendientes.map(v => v.nombre_venta).filter(Boolean))].join(', ');
+    const vendedorasCount = new Set(pendientes.map(v => v.vendedora_id)).size;
+    const orderId = await xmlrpcCall('sale.order', 'create', [{
+      partner_id: emp.partner_id,
+      client_order_ref: 'Consolidado ' + emp.nombre + (nombres ? ' — ' + nombres : ''),
+      note: `Venta consolidada de ${pendientes.length} pedido(s) de ${vendedorasCount} vendedora(s).`,
+      order_line: orderLines
+    }]);
+    await xmlrpcCall('sale.order', 'action_confirm', [[orderId]]);
+
+    const ids = pendientes.map(v => v.id);
+    await sql`UPDATE ventas_pendientes SET estado = 'consolidada', odoo_order_id = ${orderId}, consolidado_at = now() WHERE id = ANY(${ids})`;
+
+    res.json({ ok: true, orderId, ventasConsolidadas: pendientes.length });
+  } catch (e) { console.error('❌ /api/admin/consolidar', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await sql`
+      SELECT v.id AS vendedora_id, v.nombre AS vendedora_nombre, v.codigo, e.id AS empresa_id, e.nombre AS empresa_nombre,
+             COUNT(vp.id) AS ventas, COALESCE(SUM(vp.total), 0) AS total,
+             COUNT(vp.id) FILTER (WHERE vp.estado = 'pendiente') AS pendientes
+      FROM vendedoras v
+      JOIN empresas e ON e.id = v.empresa_id
+      LEFT JOIN ventas_pendientes vp ON vp.vendedora_id = v.id
+      GROUP BY v.id, v.nombre, v.codigo, e.id, e.nombre
+      ORDER BY e.nombre, v.nombre`;
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Migración única: importar clientes.csv como Empresa+Vendedora ──
+// (uno por cada fila del CSV; devuelve la clave temporal de cada una para que la anotes)
+app.post('/api/admin/importar-csv', requireAdmin, async (_req, res) => {
+  try {
+    const file = path.join(__dirname, '..', 'clientes.csv');
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'No se encontró clientes.csv en el proyecto' });
+    const raw = fs.readFileSync(file, 'utf8');
+    const sep = raw.split(/\r?\n/)[0].includes(';') ? ';' : ',';
+    function parseLine(line) {
+      const f = []; let cur = '', inQ = false;
+      for (const c of line) {
+        if (c === '"') inQ = !inQ;
+        else if (c === sep && !inQ) { f.push(cur.trim()); cur = ''; }
+        else cur += c;
+      }
+      f.push(cur.trim()); return f;
+    }
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const creadas = [];
+    for (let i = 1; i < lines.length; i++) {
+      const p = parseLine(lines[i]);
+      if (p.length < 3) continue;
+      const codigo = (p[0] || '').trim().toUpperCase();
+      const nombre = (p[1] || '').trim();
+      const partnerId = parseInt(p[2] || '0', 10);
+      const multiplicador = parseFloat(p[3] || '2');
+      const sucRaw = (p[4] || '').replace(/^"|"$/g, '').trim();
+      const sucursales = sucRaw ? sucRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+      if (!codigo || !partnerId) continue;
+
+      const existe = await getVendedora(codigo);
+      if (existe) continue; // no pisa vendedoras ya migradas
+
+      const { rows: empRows } = await sql`INSERT INTO empresas (nombre, partner_id) VALUES (${nombre}, ${partnerId}) RETURNING id`;
+      const claveTemp = crypto.randomBytes(4).toString('hex');
+      await sql`
+        INSERT INTO vendedoras (empresa_id, codigo, clave_hash, nombre, multiplicador, sucursales)
+        VALUES (${empRows[0].id}, ${codigo}, ${hashPassword(claveTemp)}, ${nombre}, ${multiplicador || 2}, ${JSON.stringify(sucursales)})`;
+      creadas.push({ codigo, nombre, claveTemporal: claveTemp });
+    }
+    res.json({ ok: true, creadas, mensaje: 'Anota estas claves temporales y entrégaselas a cada vendedora — no se pueden volver a ver.' });
+  } catch (e) { console.error('❌ /api/admin/importar-csv', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.get('/health', async (_req, res) => {
+  let dbOk = false;
+  try { await sql`SELECT 1`; dbOk = true; } catch {}
+  res.json({
+    ok: true,
+    ts: new Date().toISOString(),
+    config: {
+      odooUrl: ODOO_URL, odooDb: ODOO_DB, userSet: !!ODOO_USER, passwordSet: !!ODOO_PASS,
+      adminPasswordSet: !!ADMIN_PASSWORD, db: dbOk
+    }
+  });
+});
 
 module.exports = app;
 
