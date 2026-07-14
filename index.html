@@ -344,8 +344,6 @@ body.costs #btn-eye svg{stroke-width:2;}
 .sug-box.open{display:block;}
 .sug-item{display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px;}
 .sug-item:hover{background:var(--paper);}
-.sug-item.auto{background:var(--paper);}
-.sug-item.auto:after{content:'usando esta';margin-left:auto;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--steel);flex-shrink:0;}
 .sug-item img{width:34px;height:34px;object-fit:contain;flex-shrink:0;}
 .sug-item .s{font-family:var(--mono);font-size:10.5px;color:var(--steel);}
 
@@ -1349,7 +1347,7 @@ document.querySelectorAll('.chip').forEach(c=>{
 
 /* dirección con autocompletado (vía nuestro propio backend, que consulta Photon/Nominatim del lado del servidor —
    así evitamos los bloqueos/CORS que a veces dan esos servicios cuando se llaman directo desde el navegador).
-   Se rellena sola con la mejor coincidencia apenas hace una pausa al escribir. */
+   Muestra la lista de sugerencias mientras escribes; tú eliges cuál — no te la pisa sola. */
 let dirT = null, DIR_OK = false;
 $('vr-direccion').addEventListener('input', ()=>{
   DIR_OK = false; $('dir-ok').style.display='none';
@@ -1366,14 +1364,7 @@ $('vr-direccion').addEventListener('input', ()=>{
         box.classList.add('open');
         return;
       }
-
-      // Se autocompleta sola con la mejor coincidencia — si sigue escribiendo, se vuelve a ajustar solo.
-      const top = items[0];
-      $('vr-direccion').value = top.label;
-      if(top.comuna) $('vr-comuna').value = top.comuna;
-      DIR_OK = true; $('dir-ok').style.display='block';
-
-      box.innerHTML = items.map((it,i)=>`<div class="sug-item ${i===0?'auto':''}" data-d="${esc(it.label)}" data-c="${esc(it.comuna)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
+      box.innerHTML = items.map(it=>`<div class="sug-item" data-d="${esc(it.label)}" data-c="${esc(it.comuna)}"><span>📍</span><div>${esc(it.label)}</div></div>`).join('');
       box.classList.add('open');
       box.querySelectorAll('.sug-item[data-d]').forEach(el=>{
         el.onclick = ()=>{
