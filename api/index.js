@@ -494,22 +494,26 @@ async function tempoAgregarProductos(idVenta, productos) {
   });
   return (r && r.data) || r || {};
 }
-// GET /api/sale — para verificar el estado real de una venta antes de
-// confiarle más productos (por ejemplo, /sale/update puede responder
-// "éxito" aunque la venta ya esté cancelada en Odoo, así que no basta con
-// mirar el código de respuesta).
+// GET /api/sale — se usa DESPUÉS de cada /sale/update para confirmar que los
+// productos de verdad quedaron en la venta. La API puede responder "éxito"
+// (200, con Id_Venta y Nombre) sin haber agregado nada de verdad — por
+// ejemplo si la venta ya está cancelada, bloqueada o facturada — así que no
+// alcanza con mirar el código de respuesta, hay que releer la venta.
 async function tempoConsultarVenta(idVenta) {
   const r = await tempoApiCall('GET', '/api/sale', { headers: { Idventa: String(idVenta) } });
   return (r && r.data) || r || {};
 }
-function ventaPareceCancelada(info) {
-  try { return /cancel/i.test(JSON.stringify(info)); } catch { return false; }
+// Devuelve los SKU que se intentaron agregar pero que NO aparecen en la
+// venta al releerla — esos son los que en realidad no quedaron guardados.
+function productosFaltantes(productosEnviados, ventaInfo) {
+  const lineas = (ventaInfo && ventaInfo.Productos) || [];
+  const skusEnVenta = new Set(lineas.map(l => String(l.Sku || l.sku || '').toUpperCase()));
+  return productosEnviados.filter(p => !skusEnVenta.has(String(p.sku).toUpperCase()));
 }
 // Intenta agregar la venta a la ÚNICA "venta abierta" global (compartida por
 // todas las vendedoras, porque todas facturan al mismo partner). Si esa
-// venta ya no admite cambios (por ejemplo porque ya fue pickeada/despachada
-// y la API tira error), o si aparece cancelada en Odoo, abre una venta nueva
-// automáticamente.
+// venta ya no admite cambios de verdad (aunque la API haya respondido
+// "éxito"), abre una venta nueva automáticamente.
 //
 // Usa un lock a nivel de fila (SELECT ... FOR UPDATE) sobre "configuracion"
 // mientras dura la llamada a la API, para que si dos vendedoras mandan un
@@ -525,24 +529,18 @@ async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
     let nombreOdoo = rows[0]?.venta_abierta_nombre || null;
 
     if (idVenta) {
-      let reutilizable = true;
       try {
+        await tempoAgregarProductos(idVenta, productosApi);
         const info = await tempoConsultarVenta(idVenta);
-        if (ventaPareceCancelada(info)) { reutilizable = false; console.warn(`⚠ venta abierta ${idVenta} aparece CANCELADA en Odoo, se abre una nueva`); }
-      } catch (e) {
-        // Si ni se puede consultar su estado, mejor no arriesgarse a sumarle productos a ciegas.
-        reutilizable = false; console.warn(`⚠ no se pudo verificar el estado de la venta ${idVenta} (${shortErr(e)}), se abre una nueva`);
-      }
-      if (reutilizable) {
-        try {
-          const r = await tempoAgregarProductos(idVenta, productosApi);
-          await client.query('COMMIT');
-          return { idVenta, nombreOdoo: r.Nombre || nombreOdoo };
-        } catch (e) {
-          console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
+        const faltan = productosFaltantes(productosApi, info);
+        if (faltan.length) {
+          throw new Error('La venta no reflejó los productos agregados (' + faltan.map(p => p.sku).join(', ') + ') — probablemente está bloqueada, facturada o cancelada en Odoo');
         }
+        await client.query('COMMIT');
+        return { idVenta, nombreOdoo: info.Nombre || nombreOdoo };
+      } catch (e) {
+        console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios de verdad (${shortErr(e)}), se abre una nueva`);
       }
-      idVenta = null;
     }
     const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
     const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
