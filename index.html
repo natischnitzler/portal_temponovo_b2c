@@ -149,6 +149,12 @@ h1,h2,h3,.t{font-family:var(--f1);}
 /* ── SHEET (ficha / config) ── */
 .sheet-back{position:fixed;inset:0;background:rgba(25,27,30,.45);z-index:200;display:none;backdrop-filter:blur(2px);}
 .sheet-back.open{display:block;}
+.onboard-card{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);width:calc(100% - 48px);max-width:380px;background:var(--paper);border-radius:var(--r);z-index:201;padding:32px 26px 26px;text-align:center;display:none;box-shadow:0 24px 60px rgba(25,27,30,.25);}
+.onboard-card.open{display:block;}
+.onboard-emoji{font-size:36px;margin-bottom:12px;}
+.onboard-t{font-family:var(--f1);font-size:22px;margin-bottom:10px;}
+.onboard-s{font-size:13.5px;color:var(--ink-soft);line-height:1.7;margin-bottom:22px;}
+.onboard-skip{background:none;border:none;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);padding:12px 0 2px;width:100%;}
 .sheet{position:fixed;left:0;right:0;bottom:0;top:5vh;background:var(--paper);z-index:201;transform:translateY(105%);transition:transform .35s cubic-bezier(.22,.9,.3,1);display:flex;flex-direction:column;border-radius:18px 18px 0 0;overflow:hidden;max-width:760px;margin:0 auto;}
 .sheet.open{transform:translateY(0);}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);flex-shrink:0;background:var(--paper);}
@@ -789,6 +795,16 @@ body.public .priv{display:none!important;}
   </div>
 </div>
 
+<!-- BIENVENIDA / ONBOARDING -->
+<div class="sheet-back" id="onboard-back"></div>
+<div class="onboard-card" id="onboard-card">
+  <div class="onboard-emoji">✨</div>
+  <h2 class="onboard-t">¡Bienvenida a tu vitrina!</h2>
+  <p class="onboard-s">Antes de mostrarle esto a tus clientas, dale tu toque: tu nombre, tu logo y tus colores. Toma menos de un minuto.</p>
+  <button class="big-btn dark" id="onboard-disenar">Diseñar mi vitrina ✨</button>
+  <button class="onboard-skip" id="onboard-skip">Ahora no, uso el diseño por defecto</button>
+</div>
+
 <div id="toast"></div>
 <script>
 /* ═══════════ ESTADO ═══════════ */
@@ -823,10 +839,15 @@ async function api(path, opts={}){
 /* ═══════════ CONFIG "MI VITRINA" ═══════════ */
 const DEFAULT_CFG = { nombre:'', slogan:'', logo:'', hdr:'#191b1e', fondo:'#faf9f6', f1:'Marcellus', f2:'Jost',
   radius:'suave', welcome:'', mult:null, overrides:{}, hiddenFams:[], hiddenSkus:[], tags:[], tagMap:{} };
-let CFG = { ...DEFAULT_CFG, ...JSON.parse(localStorage.getItem('tn_cfg')||'{}') };
+// La copia local (para que cargue rápido offline) se guarda POR vendedora —
+// nunca en una sola llave compartida, o si dos personas usan el mismo
+// celular/navegador, la segunda hereda visualmente el diseño de la primera.
+function localCfgKey(code){ return 'tn_cfg_' + (code || '').toUpperCase(); }
+function loadLocalCfg(code){ try { return JSON.parse(localStorage.getItem(localCfgKey(code)) || '{}') || {}; } catch { return {}; } }
+let CFG = { ...DEFAULT_CFG, ...loadLocalCfg(CODE) };
 let cfgPushT = null;
 function saveCfg(){
-  localStorage.setItem('tn_cfg', JSON.stringify(CFG));
+  localStorage.setItem(localCfgKey(CODE), JSON.stringify(CFG));
   if(PUBLIC) return;
   clearTimeout(cfgPushT);
   cfgPushT = setTimeout(()=>{
@@ -963,6 +984,7 @@ async function tryLogin(code, pass){
   ME = await api('/me');
   localStorage.setItem('tn_code', CODE);
   localStorage.setItem('tn_pass', PASS);
+  CFG = { ...DEFAULT_CFG, ...loadLocalCfg(CODE) }; // no heredar el diseño de quien haya usado este navegador antes
   $('login-screen').style.display='none';
   $('app').classList.add('open');
   initApp();
@@ -1039,11 +1061,23 @@ $('btn-eye').onclick = ()=>{
 
 /* ═══════════ INIT ═══════════ */
 async function initApp(){
+  let esPrimeraVez = false;
   try {
     const sc = await api('/config');
-    if(sc && Object.keys(sc).length){ CFG = { ...DEFAULT_CFG, ...sc }; localStorage.setItem('tn_cfg', JSON.stringify(CFG)); }
+    if(sc && Object.keys(sc).length){
+      CFG = { ...DEFAULT_CFG, ...sc };
+      localStorage.setItem(localCfgKey(CODE), JSON.stringify(CFG));
+    } else {
+      // Todavía no ha guardado ningún diseño en el servidor: nunca se debe
+      // heredar un diseño local viejo (de otra vendedora que usó este mismo
+      // navegador antes) — se parte siempre del default limpio (negro, sin logo).
+      esPrimeraVez = true;
+      CFG = { ...DEFAULT_CFG };
+      localStorage.removeItem(localCfgKey(CODE));
+    }
   } catch(e){}
   applyCfg(); initCfgPanel(); ensureRows(12); updateBadges();
+  if(esPrimeraVez && localStorage.getItem('tn_onboard_ok_'+CODE) !== '1') openOnboarding();
   try {
     PRODUCTOS_ALL = await api('/productos');
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);   // sin stock no se muestra
@@ -1577,6 +1611,20 @@ const BG_COLORS  = ['#faf9f6','#ffffff','#f4efe6','#f7f1f3','#eef1f4','#eff3ee']
 function openCfg(){ $('cfg-back').classList.add('open'); $('cfg-sheet').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeCfg(){ $('cfg-back').classList.remove('open'); $('cfg-sheet').classList.remove('open'); document.body.style.overflow=''; }
 $('btn-cfg').onclick = openCfg;
+
+/* ── Bienvenida / onboarding (primera vez que una vendedora entra) ── */
+function openOnboarding(){
+  $('onboard-back').classList.add('open'); $('onboard-card').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeOnboarding(){
+  $('onboard-back').classList.remove('open'); $('onboard-card').classList.remove('open');
+  document.body.style.overflow='';
+  localStorage.setItem('tn_onboard_ok_'+CODE, '1');
+}
+$('onboard-disenar').onclick = ()=>{ closeOnboarding(); openCfg(); };
+$('onboard-skip').onclick = closeOnboarding;
+$('onboard-back').onclick = closeOnboarding;
 $('cfg-close').onclick = closeCfg;
 $('cfg-back').onclick = closeCfg;
 
