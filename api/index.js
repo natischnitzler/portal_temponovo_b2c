@@ -22,6 +22,12 @@ const ODOO_PASS = process.env.ODOO_PASSWORD || '';
 const CATEGORIAS_OK = (process.env.CATEGORIAS || '')
   .split('|').map(s => s.trim()).filter(Boolean);
 
+// ── API REST DE VENTAS TEMPONOVO (documentación aparte, NO XML-RPC) ──
+// Todas las ventas de las vendedoras se crean/editan a través de esta API
+// (Authorization: API-KEY), nunca directo contra Odoo por XML-RPC.
+const TEMPO_API_URL = (process.env.TEMPONOVO_API_URL || 'https://cmcorpcl-temponovo.odoo.com').replace(/\/$/, '');
+const TEMPO_API_KEY = process.env.TEMPONOVO_API_KEY || '';
+
 // ── ODOO AUTH ────────────────────────────────────────────────────
 let cachedUID = null, lastAuthTime = 0;
 async function getUID() {
@@ -112,6 +118,15 @@ function ensureDb() {
     await sql`ALTER TABLE ventas_pendientes DROP COLUMN IF EXISTS empresa_id`;
     // "entrega": 'despacho' | 'retiro' — con qué método se acordó la entrega de la venta.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS entrega TEXT DEFAULT 'despacho'`;
+    // Email de la vendedora (se manda como vendor_email a la API de ventas) y
+    // la "venta abierta" en Odoo donde se van agregando sus próximos pedidos,
+    // hasta que la API la rechace (ya pickeada) y haya que abrir una nueva.
+    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`;
+    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS venta_abierta_id INTEGER`;
+    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS venta_abierta_nombre TEXT`;
+    // Nombre de la venta en Odoo (ej. "S06819") y detalle del error si la API falló.
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS odoo_venta_nombre TEXT`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS error_msg TEXT`;
     // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
     const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
     if (oldEmpresas.rows[0]?.t) {
@@ -411,6 +426,82 @@ function httpsGetJson(url, headers) {
   });
 }
 
+// ── CLIENTE DE LA API DE VENTAS TEMPONOVO ────────────────────────
+function tempoApiCall(method, path, { headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!TEMPO_API_KEY) return reject(new Error('Falta TEMPONOVO_API_KEY en las variables de entorno del servidor'));
+    let url;
+    try { url = new URL(TEMPO_API_URL + path); } catch { return reject(new Error('TEMPONOVO_API_URL inválida')); }
+    const data = body ? JSON.stringify(body) : null;
+    const req = https.request({
+      method,
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname + url.search,
+      headers: {
+        'Authorization': TEMPO_API_KEY,
+        'Content-Type': 'application/json',
+        ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
+        ...headers
+      },
+      timeout: 15000
+    }, r => {
+      let raw = '';
+      r.on('data', chunk => { raw += chunk; });
+      r.on('end', () => {
+        let parsed = null;
+        try { parsed = raw ? JSON.parse(raw) : null; } catch { /* respuesta no-JSON */ }
+        if (r.statusCode >= 200 && r.statusCode < 300) return resolve(parsed);
+        const msg = (parsed && (parsed.error || parsed.message || JSON.stringify(parsed))) || raw || ('HTTP ' + r.statusCode);
+        const err = new Error(msg); err.status = r.statusCode; err.body = parsed;
+        reject(err);
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('Tiempo de espera agotado llamando a la API de Temponovo')));
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+async function tempoCrearVenta({ vendorEmail, observacion, tipoVenta, productos }) {
+  const r = await tempoApiCall('POST', '/sale/create', {
+    body: { data: {
+      vendor_email: vendorEmail || undefined,
+      tempo_observation: observacion || '',
+      tempo_type_sale: tipoVenta || '',
+      productos
+    } }
+  });
+  const d = (r && r.data) || r || {};
+  if (!d.Id_Venta) throw new Error('La API de Temponovo no devolvió Id_Venta');
+  return d; // { Id_Venta, Nombre }
+}
+async function tempoAgregarProductos(idVenta, productos) {
+  const r = await tempoApiCall('POST', '/sale/update', {
+    headers: { Idventa: String(idVenta) },
+    body: { data: { productos } }
+  });
+  return (r && r.data) || r || {};
+}
+// Intenta agregar la venta a la "venta abierta" de la vendedora; si esa venta
+// ya no admite cambios (por ejemplo porque ya fue pickeada/despachada y la
+// API tira error), abre una venta nueva automáticamente y la deja como la
+// nueva "venta abierta" de esa vendedora.
+async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
+  const productosApi = (productos || []).map(p => ({ sku: p.sku, quantity: parseFloat(p.quantity) || 1 }));
+  if (v.venta_abierta_id) {
+    try {
+      const r = await tempoAgregarProductos(v.venta_abierta_id, productosApi);
+      return { idVenta: v.venta_abierta_id, nombreOdoo: r.Nombre || v.venta_abierta_nombre };
+    } catch (e) {
+      console.warn(`⚠ venta abierta ${v.venta_abierta_id} de ${v.codigo} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
+    }
+  }
+  const r = await tempoCrearVenta({ vendorEmail: v.email, observacion, tipoVenta, productos: productosApi });
+  await sql`UPDATE vendedoras SET venta_abierta_id = ${r.Id_Venta}, venta_abierta_nombre = ${r.Nombre} WHERE id = ${v.id}`;
+  return { idVenta: r.Id_Venta, nombreOdoo: r.Nombre };
+}
+
 const GEOCODE_UA = 'VitrinaTemponovo/1.0 (+https://temponovo.odoo.com)';
 async function geocodificar(q) {
   const key = 'geo_' + q.toLowerCase();
@@ -497,13 +588,17 @@ app.get('/api/fotos', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// VENTAS — ahora quedan "pendientes" hasta que el admin las consolida
+// VENTAS — se envían al instante a Odoo vía la API de ventas de Temponovo
+// (POST /sale/create la primera vez, POST /sale/update mientras la venta
+// siga abierta). Si la API rechaza el /sale/update (p.ej. la venta ya fue
+// pickeada), se abre una venta nueva automáticamente.
 // ════════════════════════════════════════════════════════════════
 app.post('/api/pedido', requireClient, async (req, res) => {
   try {
     const { productos, nombreVenta, direccion, comuna, entrega, telefono, email, nota, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
 
+    // total estimado — solo para mostrar en "Mis Ventas"/reporte local, no se manda a Odoo
     let prods = [];
     try { prods = await productosCliente({ partnerId: req.partnerId }); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
     const precioBySku = {}; prods.forEach(p => { precioBySku[p.sku] = p.precio; });
@@ -512,17 +607,34 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     productos.forEach(p => { total += (precioBySku[p.sku] || 0) * mult * (parseFloat(p.quantity) || 1); });
 
     const entregaFinal = entrega === 'retiro' ? 'retiro' : 'despacho';
-    const notaFinal = [nota || '', metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
+    const notaFinal = [nombreVenta, telefono, email, nota, metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
 
+    let idVenta = null, nombreOdoo = null, errorMsg = null;
+    try {
+      const r = await intentarEnviarVenta({
+        productos, observacion: notaFinal,
+        tipoVenta: entregaFinal === 'retiro' ? 'Retiro' : 'Despacho'
+      }, req.vendedora);
+      idVenta = r.idVenta; nombreOdoo = r.nombreOdoo;
+    } catch (e) { errorMsg = shortErr(e); console.error('❌ envío a API Temponovo', e.message); }
+
+    const estado = (idVenta && !errorMsg) ? 'enviada' : 'error';
     const { rows } = await sql`
       INSERT INTO ventas_pendientes
-        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total)
+        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at)
       VALUES
         (${req.vendedora.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
-         ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(total)})
+         ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(total)},
+         ${estado}, ${idVenta}, ${nombreOdoo}, ${errorMsg}, ${estado === 'enviada' ? new Date() : null})
       RETURNING id`;
 
-    res.json({ ok: true, orderId: rows[0].id, message: 'Venta registrada. Queda pendiente de consolidar por el administrador.' });
+    if (errorMsg) {
+      return res.status(502).json({
+        error: 'La venta quedó guardada, pero no se pudo enviar a Odoo todavía: ' + errorMsg,
+        orderId: rows[0].id, pending: true
+      });
+    }
+    res.json({ ok: true, orderId: rows[0].id, ventaOdoo: nombreOdoo, message: 'Venta enviada a Odoo (' + nombreOdoo + ')' });
   } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -532,12 +644,12 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       SELECT * FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} ORDER BY created_at DESC LIMIT 200`;
     res.json(rows.map(o => ({
       id: o.id,
-      nombre: 'V' + String(o.id).padStart(6, '0'),
+      nombre: o.odoo_venta_nombre || ('V' + String(o.id).padStart(6, '0')),
       fecha: o.created_at,
-      estado: o.estado === 'consolidada' ? 'sale' : 'pendiente',
+      estado: o.estado, // 'enviada' | 'error'
       total: parseFloat(o.total || 0),
       neto: parseFloat(o.total || 0),
-      nota: o.nota || '',
+      nota: o.estado === 'error' && o.error_msg ? ('⚠ No se pudo enviar: ' + o.error_msg) : (o.nota || ''),
       ref: o.nombre_venta || '',
       entrega: o.entrega || 'despacho',
       lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: '', cantidad: p.quantity, total: 0 }))
@@ -705,20 +817,20 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
 // ── Vendedoras ──
 app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
+    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at, venta_abierta_id, venta_abierta_nombre FROM vendedoras ORDER BY nombre`;
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
   try {
-    const { codigo, clave, nombre, multiplicador, categorias, sucursales } = req.body || {};
+    const { codigo, clave, nombre, email, multiplicador, categorias, sucursales } = req.body || {};
     if (!codigo || !clave || !nombre) return res.status(400).json({ error: 'Código, clave y nombre son obligatorios' });
     const hash = hashPassword(clave);
     const { rows } = await sql`
-      INSERT INTO vendedoras (codigo, clave_hash, nombre, multiplicador, categorias, sucursales)
-      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${multiplicador || 2},
+      INSERT INTO vendedoras (codigo, clave_hash, nombre, email, multiplicador, categorias, sucursales)
+      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${email || ''}, ${multiplicador || 2},
               ${JSON.stringify(categorias || [])}, ${JSON.stringify(sucursales || [])})
-      RETURNING id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at`;
     res.json(rows[0]);
   } catch (e) {
     if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de usuario ya existe' });
@@ -727,18 +839,19 @@ app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
 });
 app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   try {
-    const { nombre, clave, multiplicador, categorias, sucursales, activo } = req.body || {};
+    const { nombre, clave, email, multiplicador, categorias, sucursales, activo } = req.body || {};
     const claveHash = clave ? hashPassword(clave) : null;
     const { rows } = await sql`
       UPDATE vendedoras SET
         nombre = COALESCE(${nombre}, nombre),
         clave_hash = COALESCE(${claveHash}, clave_hash),
+        email = COALESCE(${email}, email),
         multiplicador = COALESCE(${multiplicador}, multiplicador),
         categorias = COALESCE(${categorias ? JSON.stringify(categorias) : null}, categorias),
         sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
         activo = COALESCE(${activo}, activo)
       WHERE id = ${req.params.id}
-      RETURNING id, codigo, nombre, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at, venta_abierta_id, venta_abierta_nombre`;
     if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
     delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
     res.json(rows[0]);
@@ -749,7 +862,71 @@ app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── Ventas pendientes + consolidación ──
+// La "venta abierta" es donde se van agregando los próximos pedidos de la
+// vendedora vía /sale/update. Cerrarla fuerza que el próximo pedido abra
+// una venta nueva en Odoo con /sale/create.
+app.post('/api/admin/vendedoras/:id/cerrar-venta', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`UPDATE vendedoras SET venta_abierta_id = NULL, venta_abierta_nombre = NULL WHERE id = ${req.params.id} RETURNING id`;
+    if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Precios fijos por vendedora (Excel) — se guardan como "overrides" en
+// su misma configuración visual (vitrina-cfg-<codigo>), igual que antes ──
+app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
+    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    const cfg0 = await getConfig();
+    if (!cfg0.partner_id) return res.status(400).json({ error: 'Falta configurar el Partner ID en Configuración' });
+    let prods = await productosCliente({ partnerId: cfg0.partner_id });
+    const categorias = v.categorias || [];
+    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
+    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    const ov = cfg.overrides || {};
+    const mult = parseFloat(v.multiplicador) || 2;
+    res.json(prods.map(p => ({
+      sku: p.sku, nombre: p.nombre,
+      precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+    })));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.post('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
+    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    const cfg0 = await getConfig();
+    const precios = req.body?.data || {};
+    if (!precios || typeof precios !== 'object') return res.status(400).json({ error: 'Formato inválido' });
+    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    cfg.overrides = { ...(cfg.overrides || {}) };
+    let n = 0;
+    Object.entries(precios).forEach(([sku, precio]) => {
+      const pr = parseFloat(precio);
+      if (sku && pr > 0) { cfg.overrides[String(sku).toUpperCase()] = Math.round(pr); n++; }
+    });
+    await writeCfg(v.codigo, cfg0.partner_id, cfg);
+    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
+    res.json({ ok: true, actualizados: n });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.delete('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
+    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    const cfg0 = await getConfig();
+    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    cfg.overrides = {};
+    await writeCfg(v.codigo, cfg0.partner_id, cfg);
+    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ── Ventas + reintentos (la API de Temponovo ya las crea al instante;
+//    esto es solo para las que fallaron y quedaron con estado 'error') ──
 app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
   try {
     const estado = req.query.estado;
@@ -766,42 +943,52 @@ app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-app.post('/api/admin/consolidar', requireAdmin, async (req, res) => {
+app.post('/api/admin/ventas/:id/reintentar', requireAdmin, async (req, res) => {
   try {
-    const cfg = await getConfig();
-    if (!cfg.partner_id) return res.status(400).json({ error: 'Falta configurar el Partner ID de Odoo en Configuración' });
-    const { rows: pendientes } = await sql`SELECT * FROM ventas_pendientes WHERE estado = 'pendiente'`;
-    if (!pendientes.length) return res.status(400).json({ error: 'No hay ventas pendientes' });
+    const { rows } = await sql`SELECT * FROM ventas_pendientes WHERE id = ${req.params.id}`;
+    const venta = rows[0]; if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+    if (venta.estado === 'enviada') return res.status(400).json({ error: 'Esta venta ya fue enviada a Odoo' });
+    const { rows: vrows } = await sql`SELECT * FROM vendedoras WHERE id = ${venta.vendedora_id}`;
+    const v = vrows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
 
-    const totales = {};
-    pendientes.forEach(v => (v.productos || []).forEach(p => {
-      totales[p.sku] = (totales[p.sku] || 0) + (parseFloat(p.quantity) || 1);
-    }));
-    const skus = Object.keys(totales);
-    if (!skus.length) return res.status(400).json({ error: 'Las ventas pendientes no tienen productos válidos' });
+    try {
+      const r = await intentarEnviarVenta({
+        productos: venta.productos, observacion: venta.nota,
+        tipoVenta: venta.entrega === 'retiro' ? 'Retiro' : 'Despacho'
+      }, v);
+      await sql`UPDATE ventas_pendientes SET estado = 'enviada', odoo_order_id = ${r.idVenta}, odoo_venta_nombre = ${r.nombreOdoo}, error_msg = NULL, consolidado_at = now() WHERE id = ${venta.id}`;
+      res.json({ ok: true, idVenta: r.idVenta, nombreOdoo: r.nombreOdoo });
+    } catch (e) {
+      const msg = shortErr(e);
+      await sql`UPDATE ventas_pendientes SET error_msg = ${msg} WHERE id = ${venta.id}`;
+      res.status(502).json({ error: msg });
+    }
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
 
-    const prodRecs = await xmlrpcCall('product.product', 'search_read',
-      [[['default_code', 'in', skus], ['active', '=', true]]], { fields: ['id', 'default_code'] });
-    const skuToId = {}; prodRecs.forEach(p => { skuToId[p.default_code] = p.id; });
-    const orderLines = Object.entries(totales).filter(([sku]) => skuToId[sku])
-      .map(([sku, qty]) => [0, 0, { product_id: skuToId[sku], product_uom_qty: qty, name: sku }]);
-    if (!orderLines.length) return res.status(400).json({ error: 'Ningún SKU reconocido en Odoo' });
-
-    const nombres = [...new Set(pendientes.map(v => v.nombre_venta).filter(Boolean))].join(', ');
-    const vendedorasCount = new Set(pendientes.map(v => v.vendedora_id)).size;
-    const orderId = await xmlrpcCall('sale.order', 'create', [{
-      partner_id: cfg.partner_id,
-      client_order_ref: 'Consolidado' + (nombres ? ' — ' + nombres : ''),
-      note: `Venta consolidada de ${pendientes.length} pedido(s) de ${vendedorasCount} vendedora(s).`,
-      order_line: orderLines
-    }]);
-    await xmlrpcCall('sale.order', 'action_confirm', [[orderId]]);
-
-    const ids = pendientes.map(v => v.id);
-    await sql`UPDATE ventas_pendientes SET estado = 'consolidada', odoo_order_id = ${orderId}, consolidado_at = now() WHERE id = ANY(${ids})`;
-
-    res.json({ ok: true, orderId, ventasConsolidadas: pendientes.length });
-  } catch (e) { console.error('❌ /api/admin/consolidar', e.message); res.status(500).json({ error: shortErr(e) }); }
+app.post('/api/admin/reintentar-todas', requireAdmin, async (req, res) => {
+  try {
+    const { rows: fallidas } = await sql`SELECT * FROM ventas_pendientes WHERE estado = 'error'`;
+    if (!fallidas.length) return res.status(400).json({ error: 'No hay ventas con error para reintentar' });
+    let enviadas = 0, conError = 0;
+    for (const venta of fallidas) {
+      try {
+        const { rows: vrows } = await sql`SELECT * FROM vendedoras WHERE id = ${venta.vendedora_id}`;
+        const v = vrows[0];
+        if (!v) { conError++; continue; }
+        const r = await intentarEnviarVenta({
+          productos: venta.productos, observacion: venta.nota,
+          tipoVenta: venta.entrega === 'retiro' ? 'Retiro' : 'Despacho'
+        }, v);
+        await sql`UPDATE ventas_pendientes SET estado = 'enviada', odoo_order_id = ${r.idVenta}, odoo_venta_nombre = ${r.nombreOdoo}, error_msg = NULL, consolidado_at = now() WHERE id = ${venta.id}`;
+        enviadas++;
+      } catch (e) {
+        await sql`UPDATE ventas_pendientes SET error_msg = ${shortErr(e)} WHERE id = ${venta.id}`;
+        conError++;
+      }
+    }
+    res.json({ ok: true, enviadas, conError });
+  } catch (e) { console.error('❌ /api/admin/reintentar-todas', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
@@ -809,7 +996,7 @@ app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
     const { rows } = await sql`
       SELECT v.id AS vendedora_id, v.nombre AS vendedora_nombre, v.codigo,
              COUNT(vp.id) AS ventas, COALESCE(SUM(vp.total), 0) AS total,
-             COUNT(vp.id) FILTER (WHERE vp.estado = 'pendiente') AS pendientes
+             COUNT(vp.id) FILTER (WHERE vp.estado = 'error') AS con_error
       FROM vendedoras v
       LEFT JOIN ventas_pendientes vp ON vp.vendedora_id = v.id
       GROUP BY v.id, v.nombre, v.codigo
@@ -826,7 +1013,7 @@ app.get('/health', async (_req, res) => {
     ts: new Date().toISOString(),
     config: {
       odooUrl: ODOO_URL, odooDb: ODOO_DB, userSet: !!ODOO_USER, passwordSet: !!ODOO_PASS,
-      adminPasswordSet: !!ADMIN_PASSWORD, db: dbOk
+      adminPasswordSet: !!ADMIN_PASSWORD, tempoApiKeySet: !!TEMPO_API_KEY, tempoApiUrl: TEMPO_API_URL, db: dbOk
     }
   });
 });

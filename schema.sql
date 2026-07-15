@@ -20,10 +20,13 @@ CREATE TABLE IF NOT EXISTS vendedoras (
   codigo TEXT NOT NULL UNIQUE,     -- usuario con el que entra a la vitrina
   clave_hash TEXT NOT NULL,        -- nunca se guarda la clave en texto plano
   nombre TEXT NOT NULL,
+  email TEXT DEFAULT '',           -- se manda como vendor_email a la API de ventas de Temponovo
   multiplicador NUMERIC DEFAULT 2,
   categorias JSONB DEFAULT '[]',   -- [] = todas las categorías; si no, lista blanca de familias
   sucursales JSONB DEFAULT '[]',
   activo BOOLEAN DEFAULT true,
+  venta_abierta_id INTEGER,        -- Id_Venta en Odoo donde se agregan sus próximos pedidos (vía /sale/update)
+  venta_abierta_nombre TEXT,       -- Nombre de esa venta (ej. "S06819"), solo para mostrar
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -36,10 +39,13 @@ CREATE TABLE IF NOT EXISTS ventas_pendientes (
   email TEXT,
   direccion TEXT,
   comuna TEXT,
+  entrega TEXT DEFAULT 'despacho', -- 'despacho' | 'retiro'
   nota TEXT,
   total NUMERIC DEFAULT 0,
-  estado TEXT DEFAULT 'pendiente', -- 'pendiente' | 'consolidada'
-  odoo_order_id INTEGER,           -- se completa al consolidar
+  estado TEXT DEFAULT 'error',     -- 'enviada' (llegó a Odoo por la API) | 'error' (falló, hay que reintentar)
+  odoo_order_id INTEGER,           -- Id_Venta devuelto por la API (POST /sale/create o /sale/update)
+  odoo_venta_nombre TEXT,          -- Nombre de la venta en Odoo (ej. "S06819")
+  error_msg TEXT,                  -- detalle del error si estado = 'error'
   created_at TIMESTAMPTZ DEFAULT now(),
-  consolidado_at TIMESTAMPTZ
+  consolidado_at TIMESTAMPTZ       -- momento en que quedó 'enviada' (se mantiene el nombre de columna por compatibilidad)
 );

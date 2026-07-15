@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Admin · Temponovo Vitrina</title>
 <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
@@ -122,7 +123,7 @@ tr:last-child td{border-bottom:none;}
       <!-- CONFIGURACIÓN -->
       <section class="section active" id="sec-config">
         <h2 class="page-t">Configuración</h2>
-        <p class="page-s">Estos son los datos de tu empresa: el nombre y el Partner ID en Odoo al que se le facturan todas las ventas consolidadas.</p>
+        <p class="page-s">Estos son los datos de tu empresa: el nombre y el Partner ID en Odoo al que se le facturan todas las ventas.</p>
 
         <div class="card">
           <div class="card-h">Datos de la empresa</div>
@@ -131,7 +132,7 @@ tr:last-child td{border-bottom:none;}
             <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="cfg-partner" type="number" placeholder="Ej: 827"/></div>
             <button class="btn dark" id="cfg-guardar">Guardar</button>
           </div>
-          <p class="note">Todas las ventas consolidadas se crean en Odoo a nombre de este Partner ID.</p>
+          <p class="note">Cada venta se crea en Odoo a través de la API de ventas de Temponovo (POST /sale/create y /sale/update), a nombre de este Partner ID.</p>
           <div class="msg" id="cfg-msg"></div>
         </div>
       </section>
@@ -139,7 +140,7 @@ tr:last-child td{border-bottom:none;}
       <!-- VENDEDORAS -->
       <section class="section" id="sec-vendedoras">
         <h2 class="page-t">Vendedoras</h2>
-        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige su multiplicador de precio y qué categorías vende.</p>
+        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige su multiplicador de precio, qué categorías vende y, si quieres, precios fijos por producto (Excel). Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
 
         <div class="card">
           <div class="card-h">Nueva vendedora</div>
@@ -147,6 +148,7 @@ tr:last-child td{border-bottom:none;}
             <div class="fld"><label class="fld-l">Código (usuario)</label><input class="fld-in" id="v-codigo" placeholder="Ej: CAROLINA" style="text-transform:uppercase"/></div>
             <div class="fld"><label class="fld-l">Clave</label><input class="fld-in" id="v-clave" placeholder="Clave de acceso"/></div>
             <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="v-nombre" placeholder="Ej: Carolina Cereceda"/></div>
+            <div class="fld"><label class="fld-l">Email (vendor_email API)</label><input class="fld-in" id="v-email" type="email" placeholder="carolina@ejemplo.cl"/></div>
           </div>
           <div class="row" style="margin-top:10px">
             <div class="fld" style="max-width:140px"><label class="fld-l">Multiplicador</label><input class="fld-in" id="v-mult" type="number" step="0.1" value="2"/></div>
@@ -166,24 +168,25 @@ tr:last-child td{border-bottom:none;}
           <div class="card-h">Vendedoras</div>
           <div id="v-list"><div class="empty">Cargando…</div></div>
         </div>
+        <input type="file" id="v-precios-input" accept=".xlsx,.xls,.csv" style="display:none"/>
       </section>
 
       <!-- VENTAS -->
       <section class="section" id="sec-ventas">
         <h2 class="page-t">Ventas</h2>
-        <p class="page-s">Las ventas de cada vendedora quedan pendientes hasta que las consolidas en un solo pedido de Odoo.</p>
+        <p class="page-s">Cada pedido se envía al instante a Odoo a través de la API de ventas de Temponovo. Si alguno queda "Con error" (por ejemplo, se cayó la conexión), puedes reintentarlo aquí.</p>
 
         <div class="card">
           <div class="row">
             <div class="fld" style="max-width:180px"><label class="fld-l">Estado</label>
               <select class="fld-select" id="vt-estado">
                 <option value="">Todas</option>
-                <option value="pendiente">Pendientes</option>
-                <option value="consolidada">Consolidadas</option>
+                <option value="enviada">Enviadas</option>
+                <option value="error">Con error</option>
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
-            <button class="btn dark" id="vt-consolidar">Consolidar todas las pendientes</button>
+            <button class="btn dark" id="vt-consolidar">Reintentar todas las fallidas</button>
           </div>
           <div class="msg" id="vt-msg"></div>
         </div>
@@ -301,6 +304,7 @@ async function loadCategorias() {
 
 /* ── VENDEDORAS ── */
 let VENDEDORAS = [];
+let PRECIOS_TARGET = null;
 async function loadVendedoras() {
   try {
     VENDEDORAS = await api('/vendedoras');
@@ -309,15 +313,22 @@ async function loadVendedoras() {
 }
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Categorías</th><th>Venta abierta</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
+      <td class="mono">${esc(v.email)||'<span class="note">—</span>'}</td>
       <td class="mono">×${v.multiplicador}</td>
       <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
+      <td>${v.venta_abierta_nombre
+          ? `<span class="badge b-ok mono">${esc(v.venta_abierta_nombre)}</span> <button class="btn btn-sm" data-cerrar="${v.id}">Cerrar</button>`
+          : '<span class="note">— (se abre una al vender)</span>'}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
         <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
+        <button class="btn btn-sm" data-precios-base="${v.id}">Descargar precios</button>
+        <button class="btn btn-sm" data-precios-up="${v.id}">Subir precios</button>
+        <button class="btn btn-sm danger" data-precios-clear="${v.id}">Quitar precios fijos</button>
         <button class="btn btn-sm danger" data-del-v="${v.id}">Eliminar</button>
       </td>
     </tr>`).join('')}
@@ -333,22 +344,73 @@ function renderVendedoras() {
     try { await api('/vendedoras/' + b.dataset.reset, { method: 'PUT', body: JSON.stringify({ clave: nueva }) }); alert('Clave actualizada. Avísale la nueva clave.'); }
     catch (e) { alert(e.message); }
   });
+  $('v-list').querySelectorAll('[data-cerrar]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Cerrar la venta abierta de esta vendedora? Su próximo pedido abrirá una venta nueva en Odoo.')) return;
+    try { await api('/vendedoras/' + b.dataset.cerrar + '/cerrar-venta', { method: 'POST' }); loadVendedoras(); }
+    catch (e) { alert(e.message); }
+  });
   $('v-list').querySelectorAll('[data-del-v]').forEach(b => b.onclick = async () => {
     if (!confirm('¿Eliminar esta vendedora?')) return;
     try { await api('/vendedoras/' + b.dataset.delV, { method: 'DELETE' }); loadVendedoras(); }
     catch (e) { alert(e.message); }
   });
+  $('v-list').querySelectorAll('[data-precios-base]').forEach(b => b.onclick = () => descargarPreciosBase(b.dataset.preciosBase));
+  $('v-list').querySelectorAll('[data-precios-up]').forEach(b => b.onclick = () => {
+    PRECIOS_TARGET = b.dataset.preciosUp;
+    $('v-precios-input').value = '';
+    $('v-precios-input').click();
+  });
+  $('v-list').querySelectorAll('[data-precios-clear]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Quitar todos los precios fijos de esta vendedora? Volverá a usar el multiplicador para todo.')) return;
+    try { await api('/vendedoras/' + b.dataset.preciosClear + '/precios', { method: 'DELETE' }); alert('Precios fijos eliminados.'); }
+    catch (e) { alert(e.message); }
+  });
 }
+async function descargarPreciosBase(vid) {
+  try {
+    const rows = await api('/vendedoras/' + vid + '/precios/base');
+    if (!rows.length) return alert('Esta vendedora no tiene productos en su catálogo.');
+    const v = VENDEDORAS.find(x => x.id == vid);
+    const data = rows.map(r => ({ 'Código': r.sku, 'Producto': r.nombre, 'Precio de venta': r.precioVenta }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 16 }, { wch: 44 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Precios');
+    XLSX.writeFile(wb, 'precios-' + (v ? v.codigo.toLowerCase() : vid) + '.xlsx');
+  } catch (e) { alert(e.message); }
+}
+$('v-precios-input').onchange = async (e) => {
+  const f = e.target.files[0]; const vid = PRECIOS_TARGET;
+  if (!f || !vid) return;
+  try {
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const precios = {};
+    rows.forEach(r => {
+      const keys = Object.keys(r);
+      const kSku = keys.find(k => /c[oó]d/i.test(k)) || keys[0];
+      const kPr = keys.find(k => /precio/i.test(k)) || keys[keys.length - 1];
+      const sku = String(r[kSku] || '').trim().toUpperCase();
+      const pr = parseFloat(String(r[kPr]).replace(/[^\d.,]/g, '').replace(',', '.'));
+      if (sku && pr > 0) precios[sku] = pr;
+    });
+    if (!Object.keys(precios).length) return alert('No se encontraron precios válidos en el archivo.');
+    const r = await api('/vendedoras/' + vid + '/precios', { method: 'POST', body: JSON.stringify({ data: precios }) });
+    alert('✓ ' + r.actualizados + ' precio(s) actualizado(s).');
+  } catch (err) { alert('No se pudo subir: ' + err.message); }
+  e.target.value = ''; PRECIOS_TARGET = null;
+};
 $('v-crear').onclick = async () => {
   const codigo = $('v-codigo').value.trim().toUpperCase();
   const clave = $('v-clave').value;
   const nombre = $('v-nombre').value.trim();
+  const email = $('v-email').value.trim();
   const multiplicador = parseFloat($('v-mult').value) || 2;
   const sucursales = $('v-sucursales').value.split(',').map(s => s.trim()).filter(Boolean);
   if (!codigo || !clave || !nombre) return showMsg('v-msg', 'Código, clave y nombre son obligatorios', false);
   try {
-    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, multiplicador, categorias: [...CATEGORIAS_SEL], sucursales }) });
-    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-sucursales').value = ''; $('v-mult').value = 2;
+    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, email, multiplicador, categorias: [...CATEGORIAS_SEL], sucursales }) });
+    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-email').value = ''; $('v-sucursales').value = ''; $('v-mult').value = 2;
     CATEGORIAS_SEL.clear(); $('v-categorias').querySelectorAll('.chk').forEach(c => { c.classList.remove('on'); c.querySelector('input').checked = false; });
     showMsg('v-msg', '✓ Vendedora creada', true);
     loadVendedoras();
@@ -368,7 +430,7 @@ async function loadVentas() {
 loadVentas();
 function renderVentas(ventas) {
   if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
-  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Estado</th></tr></thead><tbody>
+  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>N° Odoo</th><th>Estado</th><th></th></tr></thead><tbody>
     ${ventas.map(v => `<tr>
       <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
       <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
@@ -379,15 +441,25 @@ function renderVentas(ventas) {
         ${v.entrega!=='retiro' && (v.direccion||v.comuna) ? `<div class="note" style="margin-top:4px;max-width:220px">${esc([v.direccion,v.comuna].filter(Boolean).join(' — '))}</div>` : ''}
       </td>
       <td class="mono">${fmt(v.total)}</td>
-      <td><span class="badge ${v.estado==='consolidada'?'b-ok':'b-warn'}">${v.estado==='consolidada'?'Consolidada':'Pendiente'}</span></td>
+      <td class="mono">${v.odoo_venta_nombre ? esc(v.odoo_venta_nombre) : '<span class="note">—</span>'}</td>
+      <td>
+        <span class="badge ${v.estado==='enviada'?'b-ok':'b-off'}">${v.estado==='enviada'?'Enviada':'Con error'}</span>
+        ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
+      </td>
+      <td>${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}</td>
     </tr>`).join('')}
   </tbody></table>`;
+  $('vt-list').querySelectorAll('[data-reintentar]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Enviando…';
+    try { await api('/ventas/' + b.dataset.reintentar + '/reintentar', { method: 'POST' }); loadVentas(); }
+    catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Reintentar'; }
+  });
 }
 $('vt-consolidar').onclick = async () => {
-  if (!confirm('¿Juntar TODAS las ventas pendientes en un solo pedido de Odoo? No se puede deshacer.')) return;
+  if (!confirm('¿Reintentar el envío a Odoo de todas las ventas que quedaron con error?')) return;
   try {
-    const r = await api('/consolidar', { method: 'POST' });
-    showMsg('vt-msg', `✓ Pedido #${r.orderId} creado en Odoo con ${r.ventasConsolidadas} venta(s) consolidada(s).`, true);
+    const r = await api('/reintentar-todas', { method: 'POST' });
+    showMsg('vt-msg', `✓ ${r.enviadas} venta(s) enviada(s) a Odoo` + (r.conError ? `, ${r.conError} siguen con error.` : '.'), true);
     loadVentas();
   } catch (e) { showMsg('vt-msg', e.message, false); }
 };
@@ -397,12 +469,12 @@ async function loadReporte() {
   try {
     const rows = await api('/reporte');
     if (!rows.length) { $('rep-list').innerHTML = '<div class="empty">Sin datos todavía.</div>'; return; }
-    $('rep-list').innerHTML = `<table><thead><tr><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Pendientes</th><th>Total</th></tr></thead><tbody>
+    $('rep-list').innerHTML = `<table><thead><tr><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Con error</th><th>Total</th></tr></thead><tbody>
       ${rows.map(r => `<tr>
         <td>${esc(r.vendedora_nombre)}</td>
         <td class="mono">${esc(r.codigo)}</td>
         <td class="mono">${r.ventas}</td>
-        <td class="mono">${r.pendientes}</td>
+        <td class="mono">${r.con_error}</td>
         <td class="mono">${fmt(r.total)}</td>
       </tr>`).join('')}
     </tbody></table>`;

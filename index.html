@@ -1428,7 +1428,7 @@ $('vr-enviar').onclick = async ()=>{
     ROWS = []; ensureRows(12); saveRows(); renderRows();
     $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-depto').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
-    $('vr-ok').textContent = '✓ ¡Venta enviada! N° interno ' + r.orderId + '. ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
+    $('vr-ok').textContent = '✓ ¡Venta enviada a Odoo (' + (r.ventaOdoo || ('#'+r.orderId)) + ')! ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
     $('vr-ok').style.display='block';
     PEDIDOS = null; // refrescar mis ventas
   } catch(e){
@@ -1454,7 +1454,7 @@ function demoPedidos(){
       out.push({
         id:'d'+i+k, nombre:'S000'+(90-i*9-k), ref:'Venta de ejemplo '+(k+1),
         fecha: new Date(d.getFullYear(), d.getMonth(), 4+k*6).toISOString(),
-        estado: k===0&&i===2 ? 'done':'sale',
+        estado: 'enviada',
         total: tot, neto: Math.round(tot/1.19), nota:'',
         lineas: [{ sku:'DEMO-'+(100+i*10+k), categoria:cat, cantidad:1+(k%2), total:tot }]
       });
@@ -1471,11 +1471,11 @@ async function loadVentas(){
   }
   let DEMO = false;
   let pedidos = PEDIDOS;
-  if(!PEDIDOS.filter(o=>o.estado!=='cancel').length){
+  if(!PEDIDOS.filter(o=>o.estado==='enviada').length){
     DEMO = true;
     pedidos = demoPedidos();
   }
-  const ventas = pedidos.filter(o=>o.estado!=='cancel');
+  const ventas = pedidos.filter(o=>o.estado==='enviada');
 
   const now = new Date();
   const mesKey = d => d.slice(0,7);
@@ -1531,8 +1531,8 @@ async function loadVentas(){
   });
   const legend = series.map((f,si)=>`<span class="leg-i"><i style="background:${CHART_COLORS[si%CHART_COLORS.length]}"></i>${f==='_otros'?'Otros':esc(f)}</span>`).join('');
 
-  const cls = { sale:'b-sale', done:'b-done', cancel:'b-cancel' };
-  const lbl = { sale:'Confirmado', done:'Entregado', cancel:'Anulado' };
+  const cls = { enviada:'b-sale', error:'b-cancel' };
+  const lbl = { enviada:'Enviada a Odoo', error:'Con error' };
   const detalle = pedidos.map(o=>`
     <div class="his-item" data-id="${o.id}">
       <div class="his-top">
