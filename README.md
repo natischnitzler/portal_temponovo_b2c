@@ -39,6 +39,7 @@ las que hayan fallado.
 | `ODOO_PASSWORD`      | Contraseña o API key del admin (para XML-RPC de catálogo)      |
 | `TEMPONOVO_API_URL`  | `https://cmcorpcl-temponovo.odoo.com` (valor por defecto) — API de ventas |
 | `TEMPONOVO_API_KEY`  | API key entregada por Temponovo para crear/editar ventas       |
+| `TEMPONOVO_VENDOR_EMAIL` | Opcional. Email que se manda como `vendor_email` en cada venta. Si no se pone, se usa `ODOO_USER`. Todas las ventas se crean con este remitente (el de la cuenta admin) — **nunca** con el email de cada vendedora. |
 | `CATEGORIAS`         | Opcional. Categorías a mostrar separadas por `\|`.              |
 | `ADMIN_PASSWORD`     | Clave para entrar al Panel de Admin (`/admin`)                 |
 | `ADMIN_SECRET`       | Cualquier texto largo al azar (firma las sesiones de admin)    |

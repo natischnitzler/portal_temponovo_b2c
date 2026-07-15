@@ -27,6 +27,10 @@ const CATEGORIAS_OK = (process.env.CATEGORIAS || '')
 // (Authorization: API-KEY), nunca directo contra Odoo por XML-RPC.
 const TEMPO_API_URL = (process.env.TEMPONOVO_API_URL || 'https://cmcorpcl-temponovo.odoo.com').replace(/\/$/, '');
 const TEMPO_API_KEY = process.env.TEMPONOVO_API_KEY || '';
+// Las ventas SIEMPRE se crean con este remitente (la cuenta admin), nunca con
+// el email de cada vendedora — el nombre de la vendedora queda solo como
+// referencia dentro de la observación de la venta (tempo_observation).
+const TEMPO_VENDOR_EMAIL = process.env.TEMPONOVO_VENDOR_EMAIL || process.env.ODOO_USER || '';
 
 // ── ODOO AUTH ────────────────────────────────────────────────────
 let cachedUID = null, lastAuthTime = 0;
@@ -118,7 +122,8 @@ function ensureDb() {
     await sql`ALTER TABLE ventas_pendientes DROP COLUMN IF EXISTS empresa_id`;
     // "entrega": 'despacho' | 'retiro' — con qué método se acordó la entrega de la venta.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS entrega TEXT DEFAULT 'despacho'`;
-    // Email de la vendedora (se manda como vendor_email a la API de ventas) y
+    // Email de la vendedora (queda solo como dato de referencia — las ventas
+    // se crean siempre con el remitente admin, ver TEMPO_VENDOR_EMAIL) y
     // la "venta abierta" en Odoo donde se van agregando sus próximos pedidos,
     // hasta que la API la rechace (ya pickeada) y haya que abrir una nueva.
     await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`;
@@ -497,7 +502,10 @@ async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
       console.warn(`⚠ venta abierta ${v.venta_abierta_id} de ${v.codigo} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
     }
   }
-  const r = await tempoCrearVenta({ vendorEmail: v.email, observacion, tipoVenta, productos: productosApi });
+  // vendor_email SIEMPRE es el de la cuenta admin (no el de la vendedora) —
+  // el nombre/código de la vendedora va dentro de la observación.
+  const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
+  const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
   await sql`UPDATE vendedoras SET venta_abierta_id = ${r.Id_Venta}, venta_abierta_nombre = ${r.Nombre} WHERE id = ${v.id}`;
   return { idVenta: r.Id_Venta, nombreOdoo: r.Nombre };
 }
