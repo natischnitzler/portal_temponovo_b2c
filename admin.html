@@ -457,13 +457,22 @@ function renderVentas(ventas) {
         <span class="badge ${v.estado==='enviada'?'b-ok':'b-off'}">${v.estado==='enviada'?'Enviada':'Con error'}</span>
         ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
       </td>
-      <td>${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}</td>
+      <td>
+        ${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}
+        ${v.estado==='enviada' ? `<button class="btn btn-sm danger" data-forzar="${v.id}" title="Úsalo solo si esta venta en realidad NO llegó a Odoo (ej. cayó en una venta cancelada)">Reenviar (forzar)</button>` : ''}
+      </td>
     </tr>`).join('')}
   </tbody></table>`;
   $('vt-list').querySelectorAll('[data-reintentar]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Enviando…';
     try { await api('/ventas/' + b.dataset.reintentar + '/reintentar', { method: 'POST' }); loadVentas(); }
     catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Reintentar'; }
+  });
+  $('vt-list').querySelectorAll('[data-forzar]').forEach(b => b.onclick = async () => {
+    if (!confirm('Esto vuelve a mandar estos productos a Odoo (nueva venta o la que esté abierta), aunque esta fila ya figura como "Enviada". Úsalo solo si estás segura de que en realidad NO llegó (por ejemplo, quedó en una venta cancelada). ¿Continuar?')) return;
+    b.disabled = true; b.textContent = 'Enviando…';
+    try { await api('/ventas/' + b.dataset.forzar + '/reintentar?force=1', { method: 'POST' }); loadVentas(); }
+    catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Reenviar (forzar)'; }
   });
 }
 $('vt-consolidar').onclick = async () => {

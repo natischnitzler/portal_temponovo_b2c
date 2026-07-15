@@ -494,10 +494,22 @@ async function tempoAgregarProductos(idVenta, productos) {
   });
   return (r && r.data) || r || {};
 }
+// GET /api/sale — para verificar el estado real de una venta antes de
+// confiarle más productos (por ejemplo, /sale/update puede responder
+// "éxito" aunque la venta ya esté cancelada en Odoo, así que no basta con
+// mirar el código de respuesta).
+async function tempoConsultarVenta(idVenta) {
+  const r = await tempoApiCall('GET', '/api/sale', { headers: { Idventa: String(idVenta) } });
+  return (r && r.data) || r || {};
+}
+function ventaPareceCancelada(info) {
+  try { return /cancel/i.test(JSON.stringify(info)); } catch { return false; }
+}
 // Intenta agregar la venta a la ÚNICA "venta abierta" global (compartida por
 // todas las vendedoras, porque todas facturan al mismo partner). Si esa
 // venta ya no admite cambios (por ejemplo porque ya fue pickeada/despachada
-// y la API tira error), abre una venta nueva automáticamente.
+// y la API tira error), o si aparece cancelada en Odoo, abre una venta nueva
+// automáticamente.
 //
 // Usa un lock a nivel de fila (SELECT ... FOR UPDATE) sobre "configuracion"
 // mientras dura la llamada a la API, para que si dos vendedoras mandan un
@@ -513,14 +525,24 @@ async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
     let nombreOdoo = rows[0]?.venta_abierta_nombre || null;
 
     if (idVenta) {
+      let reutilizable = true;
       try {
-        const r = await tempoAgregarProductos(idVenta, productosApi);
-        await client.query('COMMIT');
-        return { idVenta, nombreOdoo: r.Nombre || nombreOdoo };
+        const info = await tempoConsultarVenta(idVenta);
+        if (ventaPareceCancelada(info)) { reutilizable = false; console.warn(`⚠ venta abierta ${idVenta} aparece CANCELADA en Odoo, se abre una nueva`); }
       } catch (e) {
-        console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
-        idVenta = null;
+        // Si ni se puede consultar su estado, mejor no arriesgarse a sumarle productos a ciegas.
+        reutilizable = false; console.warn(`⚠ no se pudo verificar el estado de la venta ${idVenta} (${shortErr(e)}), se abre una nueva`);
       }
+      if (reutilizable) {
+        try {
+          const r = await tempoAgregarProductos(idVenta, productosApi);
+          await client.query('COMMIT');
+          return { idVenta, nombreOdoo: r.Nombre || nombreOdoo };
+        } catch (e) {
+          console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
+        }
+      }
+      idVenta = null;
     }
     const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
     const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
@@ -979,7 +1001,13 @@ app.post('/api/admin/ventas/:id/reintentar', requireAdmin, async (req, res) => {
   try {
     const { rows } = await sql`SELECT * FROM ventas_pendientes WHERE id = ${req.params.id}`;
     const venta = rows[0]; if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
-    if (venta.estado === 'enviada') return res.status(400).json({ error: 'Esta venta ya fue enviada a Odoo' });
+    // Por defecto solo se reintentan las que quedaron con error. Pero a veces una
+    // venta quedó "enviada" sin serlo de verdad (ej. la API aceptó el /sale/update
+    // aunque la venta ya estaba cancelada en Odoo) — para esos casos el admin puede
+    // forzar un reenvío explícito con ?force=1.
+    if (venta.estado === 'enviada' && req.query.force !== '1') {
+      return res.status(400).json({ error: 'Esta venta ya fue enviada a Odoo. Si de verdad no llegó (por ejemplo, cayó en una venta cancelada), reenvíala con "force".' });
+    }
     const { rows: vrows } = await sql`SELECT * FROM vendedoras WHERE id = ${venta.vendedora_id}`;
     const v = vrows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
 
