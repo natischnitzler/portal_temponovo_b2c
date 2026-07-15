@@ -13,14 +13,15 @@ través de la API de ventas de Temponovo (no XML-RPC directo).
   propio usuario/clave, su propio multiplicador de precio, sus propias
   categorías habilitadas y, si quiere, precios fijos por producto.
 - **Venta** — cada pedido que hace una vendedora se envía de inmediato a
-  Odoo por la API: el primer pedido de una "tanda" abre una venta nueva
-  (`POST /sale/create`) y los siguientes se van agregando a esa misma venta
-  (`POST /sale/update`) mientras Odoo lo permita. En cuanto la API rechaza
-  el `/sale/update` (por ejemplo porque la venta ya fue pickeada/despachada),
-  el portal abre sola una venta nueva para el próximo pedido. Si el envío
-  falla por completo (sin conexión, etc.), el pedido queda guardado con
-  estado **"Con error"** y se puede reintentar desde el Panel de Admin →
-  **Ventas**.
+  Odoo por la API: el primer pedido de **cualquier** vendedora abre una
+  venta nueva (`POST /sale/create`) y los siguientes — de esa misma
+  vendedora o de cualquier otra, ya que todas facturan al mismo partner —
+  se van agregando a esa misma venta (`POST /sale/update`) mientras Odoo lo
+  permita. En cuanto la API rechaza el `/sale/update` (por ejemplo porque la
+  venta ya fue pickeada/despachada), el portal abre sola una venta nueva
+  para el próximo pedido. Si el envío falla por completo (sin conexión,
+  etc.), el pedido queda guardado con estado **"Con error"** y se puede
+  reintentar desde el Panel de Admin → **Ventas**.
 
 Todo esto se administra desde el **Panel de Admin** (`/admin`), con su
 propia clave — ahí se configura la empresa, se crean/editan Vendedoras
@@ -73,8 +74,10 @@ vende). Ahí mismo puedes:
   columnas de código y precio) para fijar precios de venta específicos por
   producto, que mandan por sobre el multiplicador.
 - **Quitar precios fijos** — vuelve todo al cálculo por multiplicador.
-- **Cerrar venta abierta** — si quieres forzar que el próximo pedido de esa
-  vendedora abra una venta nueva en Odoo en vez de sumarse a la actual.
+
+También en Configuración puedes ver la **venta abierta** (la única, compartida
+por todas las vendedoras) y forzar que se cierre si quieres que el próximo
+pedido de cualquiera abra una venta nueva en Odoo.
 
 ### 4. Despliegue
 
@@ -96,7 +99,7 @@ vercel --prod
 | POST   | /api/admin/login                | Login del panel de admin                             |
 | GET/PUT /api/admin/config       | Nombre y Partner ID de la empresa (una sola)        |
 | GET/POST/PUT/DELETE /api/admin/vendedoras   | CRUD de Vendedoras                     |
-| POST   | /api/admin/vendedoras/:id/cerrar-venta | Cierra la venta abierta de esa vendedora        |
+| POST   | /api/admin/cerrar-venta          | Cierra la única venta abierta (compartida por todas)  |
 | GET    | /api/admin/vendedoras/:id/precios/base | Excel base de precios (para descargar)          |
 | POST   | /api/admin/vendedoras/:id/precios      | Sube precios fijos {sku: precio}                |
 | DELETE | /api/admin/vendedoras/:id/precios      | Quita todos los precios fijos                   |
@@ -117,6 +120,11 @@ vercel --prod
   precios fijos** de cada vendedora se guardan como antes, como un archivo
   adjunto en el partner de Odoo (`vitrina-cfg-<código>`) — no se movieron a
   la base de datos nueva.
+- La venta abierta es una sola fila (`configuracion`, id=1) protegida con
+  `SELECT ... FOR UPDATE` mientras dura la llamada a la API: si dos
+  vendedoras mandan un pedido casi al mismo tiempo, el segundo espera a que
+  termine el primero, para que nunca se abran dos ventas nuevas en paralelo
+  por accidente.
 - El catálogo se cachea 30 min y se puede limpiar con
   `DELETE /api/productos/cache` (requiere sesión de admin).
 - Ya no existe la importación de `clientes.csv` ni el concepto de varias

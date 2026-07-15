@@ -3,7 +3,7 @@ const xmlrpc   = require('xmlrpc');
 const cors     = require('cors');
 const archiver = require('archiver');
 const crypto   = require('crypto');
-const { sql }  = require('./db');
+const { sql, pool } = require('./db');
 // nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (e) { console.warn('⚠ nodemailer no instalado — el formulario de contacto quedará solo en logs'); }
@@ -123,12 +123,18 @@ function ensureDb() {
     // "entrega": 'despacho' | 'retiro' — con qué método se acordó la entrega de la venta.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS entrega TEXT DEFAULT 'despacho'`;
     // Email de la vendedora (queda solo como dato de referencia — las ventas
-    // se crean siempre con el remitente admin, ver TEMPO_VENDOR_EMAIL) y
-    // la "venta abierta" en Odoo donde se van agregando sus próximos pedidos,
-    // hasta que la API la rechace (ya pickeada) y haya que abrir una nueva.
+    // se crean siempre con el remitente admin, ver TEMPO_VENDOR_EMAIL).
     await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''`;
-    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS venta_abierta_id INTEGER`;
-    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS venta_abierta_nombre TEXT`;
+    // "Venta abierta": es UNA sola, compartida por TODAS las vendedoras (todas
+    // facturan al mismo partner). El primer pedido de cualquiera la abre con
+    // /sale/create; los pedidos siguientes de cualquier vendedora se agregan
+    // a esa misma venta con /sale/update, hasta que la API la rechace (ya
+    // pickeada) y se abra una nueva automáticamente.
+    await sql`ALTER TABLE configuracion ADD COLUMN IF NOT EXISTS venta_abierta_id INTEGER`;
+    await sql`ALTER TABLE configuracion ADD COLUMN IF NOT EXISTS venta_abierta_nombre TEXT`;
+    // Columnas viejas de cuando la venta abierta era por vendedora (ya no se usan, se quitan)
+    await sql`ALTER TABLE vendedoras DROP COLUMN IF EXISTS venta_abierta_id`;
+    await sql`ALTER TABLE vendedoras DROP COLUMN IF EXISTS venta_abierta_nombre`;
     // Nombre de la venta en Odoo (ej. "S06819") y detalle del error si la API falló.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS odoo_venta_nombre TEXT`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS error_msg TEXT`;
@@ -488,26 +494,45 @@ async function tempoAgregarProductos(idVenta, productos) {
   });
   return (r && r.data) || r || {};
 }
-// Intenta agregar la venta a la "venta abierta" de la vendedora; si esa venta
-// ya no admite cambios (por ejemplo porque ya fue pickeada/despachada y la
-// API tira error), abre una venta nueva automáticamente y la deja como la
-// nueva "venta abierta" de esa vendedora.
+// Intenta agregar la venta a la ÚNICA "venta abierta" global (compartida por
+// todas las vendedoras, porque todas facturan al mismo partner). Si esa
+// venta ya no admite cambios (por ejemplo porque ya fue pickeada/despachada
+// y la API tira error), abre una venta nueva automáticamente.
+//
+// Usa un lock a nivel de fila (SELECT ... FOR UPDATE) sobre "configuracion"
+// mientras dura la llamada a la API, para que si dos vendedoras mandan un
+// pedido casi al mismo tiempo, el segundo espere a que termine el primero
+// en vez de leer el mismo estado viejo y terminar abriendo 2 ventas nuevas.
 async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
   const productosApi = (productos || []).map(p => ({ sku: p.sku, quantity: parseFloat(p.quantity) || 1 }));
-  if (v.venta_abierta_id) {
-    try {
-      const r = await tempoAgregarProductos(v.venta_abierta_id, productosApi);
-      return { idVenta: v.venta_abierta_id, nombreOdoo: r.Nombre || v.venta_abierta_nombre };
-    } catch (e) {
-      console.warn(`⚠ venta abierta ${v.venta_abierta_id} de ${v.codigo} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT venta_abierta_id, venta_abierta_nombre FROM configuracion WHERE id = 1 FOR UPDATE');
+    let idVenta = rows[0]?.venta_abierta_id || null;
+    let nombreOdoo = rows[0]?.venta_abierta_nombre || null;
+
+    if (idVenta) {
+      try {
+        const r = await tempoAgregarProductos(idVenta, productosApi);
+        await client.query('COMMIT');
+        return { idVenta, nombreOdoo: r.Nombre || nombreOdoo };
+      } catch (e) {
+        console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios (${shortErr(e)}), se abre una nueva`);
+        idVenta = null;
+      }
     }
+    const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
+    const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
+    await client.query('UPDATE configuracion SET venta_abierta_id = $1, venta_abierta_nombre = $2 WHERE id = 1', [r.Id_Venta, r.Nombre]);
+    await client.query('COMMIT');
+    return { idVenta: r.Id_Venta, nombreOdoo: r.Nombre };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw e;
+  } finally {
+    client.release();
   }
-  // vendor_email SIEMPRE es el de la cuenta admin (no el de la vendedora) —
-  // el nombre/código de la vendedora va dentro de la observación.
-  const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
-  const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
-  await sql`UPDATE vendedoras SET venta_abierta_id = ${r.Id_Venta}, venta_abierta_nombre = ${r.Nombre} WHERE id = ${v.id}`;
-  return { idVenta: r.Id_Venta, nombreOdoo: r.Nombre };
 }
 
 const GEOCODE_UA = 'VitrinaTemponovo/1.0 (+https://temponovo.odoo.com)';
@@ -825,7 +850,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
 // ── Vendedoras ──
 app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at, venta_abierta_id, venta_abierta_nombre FROM vendedoras ORDER BY nombre`;
+    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -859,7 +884,7 @@ app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
         sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
         activo = COALESCE(${activo}, activo)
       WHERE id = ${req.params.id}
-      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at, venta_abierta_id, venta_abierta_nombre`;
+      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at`;
     if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
     delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
     res.json(rows[0]);
@@ -870,13 +895,12 @@ app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-// La "venta abierta" es donde se van agregando los próximos pedidos de la
-// vendedora vía /sale/update. Cerrarla fuerza que el próximo pedido abra
-// una venta nueva en Odoo con /sale/create.
-app.post('/api/admin/vendedoras/:id/cerrar-venta', requireAdmin, async (req, res) => {
+// La "venta abierta" es UNA sola, compartida por todas las vendedoras (todas
+// facturan al mismo partner). Cerrarla a mano fuerza que el próximo pedido de
+// CUALQUIER vendedora abra una venta nueva en Odoo con /sale/create.
+app.post('/api/admin/cerrar-venta', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`UPDATE vendedoras SET venta_abierta_id = NULL, venta_abierta_nombre = NULL WHERE id = ${req.params.id} RETURNING id`;
-    if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
+    await sql`UPDATE configuracion SET venta_abierta_id = NULL, venta_abierta_nombre = NULL WHERE id = 1`;
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });

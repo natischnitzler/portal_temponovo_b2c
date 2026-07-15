@@ -10,7 +10,9 @@
 CREATE TABLE IF NOT EXISTS configuracion (
   id INTEGER PRIMARY KEY DEFAULT 1,
   nombre TEXT NOT NULL DEFAULT '',
-  partner_id INTEGER,            -- ID del partner en Odoo al que se le factura
+  partner_id INTEGER,             -- ID del partner en Odoo al que se le factura
+  venta_abierta_id INTEGER,       -- Id_Venta en Odoo — UNA sola, compartida por todas las vendedoras
+  venta_abierta_nombre TEXT,      -- Nombre de esa venta (ej. "S06819"), solo para mostrar
   updated_at TIMESTAMPTZ DEFAULT now(),
   CHECK (id = 1)
 );
@@ -20,13 +22,11 @@ CREATE TABLE IF NOT EXISTS vendedoras (
   codigo TEXT NOT NULL UNIQUE,     -- usuario con el que entra a la vitrina
   clave_hash TEXT NOT NULL,        -- nunca se guarda la clave en texto plano
   nombre TEXT NOT NULL,
-  email TEXT DEFAULT '',           -- se manda como vendor_email a la API de ventas de Temponovo
+  email TEXT DEFAULT '',           -- solo dato de referencia (no se usa para autenticar contra la API)
   multiplicador NUMERIC DEFAULT 2,
   categorias JSONB DEFAULT '[]',   -- [] = todas las categorías; si no, lista blanca de familias
   sucursales JSONB DEFAULT '[]',
   activo BOOLEAN DEFAULT true,
-  venta_abierta_id INTEGER,        -- Id_Venta en Odoo donde se agregan sus próximos pedidos (vía /sale/update)
-  venta_abierta_nombre TEXT,       -- Nombre de esa venta (ej. "S06819"), solo para mostrar
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

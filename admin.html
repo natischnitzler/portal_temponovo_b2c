@@ -135,6 +135,12 @@ tr:last-child td{border-bottom:none;}
           <p class="note">Cada venta se crea en Odoo a través de la API de ventas de Temponovo (POST /sale/create y /sale/update), a nombre de este Partner ID.</p>
           <div class="msg" id="cfg-msg"></div>
         </div>
+
+        <div class="card">
+          <div class="card-h">Venta abierta</div>
+          <p class="note" style="margin-bottom:12px">Es UNA sola, compartida por todas las vendedoras: el primer pedido de cualquiera la abre, y los pedidos siguientes de cualquier vendedora se le van agregando — hasta que Odoo la rechace (por ejemplo, porque ya fue pickeada) y se abra una nueva sola.</p>
+          <div id="venta-abierta-box"><span class="note">Cargando…</span></div>
+        </div>
       </section>
 
       <!-- VENDEDORAS -->
@@ -273,7 +279,19 @@ async function loadConfig() {
     const cfg = await api('/config');
     $('cfg-nombre').value = cfg.nombre || '';
     $('cfg-partner').value = cfg.partner_id || '';
+    renderVentaAbierta(cfg);
   } catch (e) { showMsg('cfg-msg', e.message, false); }
+}
+function renderVentaAbierta(cfg) {
+  $('venta-abierta-box').innerHTML = cfg.venta_abierta_nombre
+    ? `<span class="badge b-ok mono">${esc(cfg.venta_abierta_nombre)}</span> <button class="btn btn-sm" id="cerrar-venta-btn">Cerrar venta abierta</button>`
+    : '<span class="note">— (se abre una sola en cuanto alguna vendedora venda)</span>';
+  const btn = $('cerrar-venta-btn');
+  if (btn) btn.onclick = async () => {
+    if (!confirm('¿Cerrar la venta abierta? El próximo pedido de cualquier vendedora abrirá una venta nueva en Odoo.')) return;
+    try { await api('/cerrar-venta', { method: 'POST' }); loadConfig(); }
+    catch (e) { alert(e.message); }
+  };
 }
 $('cfg-guardar').onclick = async () => {
   const nombre = $('cfg-nombre').value.trim();
@@ -314,16 +332,13 @@ async function loadVendedoras() {
 }
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Categorías</th><th>Venta abierta</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
       <td class="mono">${esc(v.email)||'<span class="note">—</span>'}</td>
       <td class="mono">×${v.multiplicador}</td>
       <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
-      <td>${v.venta_abierta_nombre
-          ? `<span class="badge b-ok mono">${esc(v.venta_abierta_nombre)}</span> <button class="btn btn-sm" data-cerrar="${v.id}">Cerrar</button>`
-          : '<span class="note">— (se abre una al vender)</span>'}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
         <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
@@ -343,11 +358,6 @@ function renderVendedoras() {
     const nueva = prompt('Nueva clave para esta vendedora:');
     if (!nueva) return;
     try { await api('/vendedoras/' + b.dataset.reset, { method: 'PUT', body: JSON.stringify({ clave: nueva }) }); alert('Clave actualizada. Avísale la nueva clave.'); }
-    catch (e) { alert(e.message); }
-  });
-  $('v-list').querySelectorAll('[data-cerrar]').forEach(b => b.onclick = async () => {
-    if (!confirm('¿Cerrar la venta abierta de esta vendedora? Su próximo pedido abrirá una venta nueva en Odoo.')) return;
-    try { await api('/vendedoras/' + b.dataset.cerrar + '/cerrar-venta', { method: 'POST' }); loadVendedoras(); }
     catch (e) { alert(e.message); }
   });
   $('v-list').querySelectorAll('[data-del-v]').forEach(b => b.onclick = async () => {
