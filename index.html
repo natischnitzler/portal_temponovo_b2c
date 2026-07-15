@@ -799,7 +799,7 @@ body.public .priv{display:none!important;}
 <div class="sheet-back" id="onboard-back"></div>
 <div class="onboard-card" id="onboard-card">
   <div class="onboard-emoji">✨</div>
-  <h2 class="onboard-t">¡Bienvenida a tu vitrina!</h2>
+  <h2 class="onboard-t" id="onboard-t">¡Bienvenida a tu vitrina!</h2>
   <p class="onboard-s">Antes de mostrarle esto a tus clientas, dale tu toque: tu nombre, tu logo y tus colores. Toma menos de un minuto.</p>
   <button class="big-btn dark" id="onboard-disenar">Diseñar mi vitrina ✨</button>
   <button class="onboard-skip" id="onboard-skip">Ahora no, uso el diseño por defecto</button>
@@ -1614,6 +1614,8 @@ $('btn-cfg').onclick = openCfg;
 
 /* ── Bienvenida / onboarding (primera vez que una vendedora entra) ── */
 function openOnboarding(){
+  const primerNombre = (ME?.name || '').trim().split(' ')[0] || '';
+  $('onboard-t').textContent = primerNombre ? `¡Hola, ${primerNombre}!` : '¡Bienvenida a tu vitrina!';
   $('onboard-back').classList.add('open'); $('onboard-card').classList.add('open');
   document.body.style.overflow='hidden';
 }
