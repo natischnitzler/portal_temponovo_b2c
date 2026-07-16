@@ -51,3 +51,13 @@ CREATE TABLE IF NOT EXISTS ventas_pendientes (
   created_at TIMESTAMPTZ DEFAULT now(),
   consolidado_at TIMESTAMPTZ       -- momento en que quedó 'enviada' (se mantiene el nombre de columna por compatibilidad)
 );
+
+-- Información libre de producto, cargada por el admin desde un Excel.
+-- Odoo aporta código/precio/stock/foto; esto aporta la info comercial que
+-- Odoo no tiene, con columnas 100% libres. Una fila por SKU, "campos" es un
+-- JSON { "Título de columna": "valor" } tal como venía en el Excel.
+CREATE TABLE IF NOT EXISTS producto_info (
+  sku TEXT PRIMARY KEY,
+  campos JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

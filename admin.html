@@ -122,6 +122,7 @@ tr:last-child td{border-bottom:none;}
     <div class="sidebar-title">Admin</div>
     <button class="nav-item active" data-sec="config">⚙ Configuración</button>
     <button class="nav-item" data-sec="vendedoras">👤 Vendedoras</button>
+    <button class="nav-item" data-sec="productos">📋 Info productos</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
     <div class="sidebar-foot">
@@ -188,6 +189,51 @@ tr:last-child td{border-bottom:none;}
           <div id="v-list"><div class="empty">Cargando…</div></div>
         </div>
         <input type="file" id="v-precios-input" accept=".xlsx,.xls,.csv" style="display:none"/>
+      </section>
+
+      <!-- INFO PRODUCTOS -->
+      <section class="section" id="sec-productos">
+        <h2 class="page-t">Info de productos</h2>
+        <p class="page-s">Odoo aporta el código, precio, stock y foto. Aquí subes un Excel con la información que Odoo no tiene (características, garantía, cómo venderlo…) y aparece en la ficha de cada producto, igual para todas las vendedoras.</p>
+
+        <div class="card">
+          <div class="card-h">Cómo armar tu Excel</div>
+          <p class="note" style="margin-bottom:10px">
+            La <b>primera columna</b> debe ser el <b>Código</b> (el mismo SKU de Odoo). Las <b>demás columnas son libres</b>: tú les pones el título que quieras, y cada una aparece como un dato en la ficha. Puedes subir varios Excel distintos (uno para relojes, otro para calculadoras, etc.).
+          </p>
+          <div style="overflow-x:auto">
+            <table style="min-width:520px">
+              <thead><tr><th>Código</th><th>Resistencia al agua</th><th>Correa</th><th>Garantía</th><th>Cómo venderlo</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">MTP-1234</td><td>5 ATM</td><td>Acero</td><td>2 años</td><td>Ideal para la oficina y el día a día.</td></tr>
+                <tr><td class="mono">GA-2100</td><td>20 ATM</td><td>Resina</td><td>2 años</td><td>Resistente a golpes, perfecto para deporte.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <button class="btn" id="pi-plantilla" style="margin-top:12px">Descargar plantilla de ejemplo</button>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Subir Excel</div>
+          <div class="row" style="align-items:flex-end">
+            <div class="fld" style="max-width:260px">
+              <label class="fld-l">Al subir, ¿qué hago con lo anterior?</label>
+              <select class="fld-select" id="pi-modo">
+                <option value="sumar">Sumar / actualizar (recomendado)</option>
+                <option value="reemplazar">Reemplazar todo lo anterior</option>
+              </select>
+            </div>
+            <button class="btn dark" id="pi-subir">Elegir Excel y subir</button>
+            <input type="file" id="pi-input" accept=".xlsx,.xls,.csv" style="display:none"/>
+          </div>
+          <p class="note" style="margin-top:8px"><b>Sumar / actualizar:</b> mantiene la info que ya tenías y agrega o pisa solo los productos que trae este Excel. <b>Reemplazar:</b> borra toda la info anterior y deja únicamente la de este archivo.</p>
+          <div class="msg" id="pi-msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Estado actual</div>
+          <div id="pi-estado"><div class="empty">Cargando…</div></div>
+        </div>
       </section>
 
       <!-- VENTAS -->
@@ -292,6 +338,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
+  if (btn.dataset.sec === 'productos') loadProductoInfo();
 });
 
 /* ── CONFIGURACIÓN (una sola empresa) ── */
@@ -588,6 +635,72 @@ async function loadReporte() {
     </tbody></table>`;
   } catch (e) { $('rep-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
+
+/* ── INFO PRODUCTOS ── */
+async function loadProductoInfo() {
+  const box = $('pi-estado');
+  try {
+    const d = await api('/producto-info');
+    if (!d.total) { box.innerHTML = '<div class="empty">Aún no has subido información de productos. Sube tu primer Excel arriba.</div>'; return; }
+    box.innerHTML = `
+      <div class="row" style="gap:24px;margin-bottom:6px">
+        <div><div class="fld-l">Productos con info</div><div class="mono" style="font-size:20px">${d.total}</div></div>
+        <div style="flex:1"><div class="fld-l">Columnas que usaste</div><div class="chip-list">${d.columnas.map(c => `<span class="chk on">${esc(c)}</span>`).join('') || '<span class="note">—</span>'}</div></div>
+      </div>
+      <button class="btn danger btn-sm" id="pi-borrar" style="margin-top:12px">Borrar toda la info de productos</button>`;
+    $('pi-borrar').onclick = async () => {
+      if (!confirm('¿Borrar TODA la información de productos? Las fichas volverán a mostrar solo lo que viene de Odoo. Esto no se puede deshacer.')) return;
+      try { await api('/producto-info', { method: 'DELETE' }); showMsg('pi-msg', '✓ Información borrada', true); loadProductoInfo(); }
+      catch (e) { showMsg('pi-msg', e.message, false); }
+    };
+  } catch (e) { box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+loadProductoInfo();
+
+$('pi-plantilla').onclick = () => {
+  const rows = [
+    { 'Código': 'MTP-1234', 'Resistencia al agua': '5 ATM', 'Correa': 'Acero', 'Garantía': '2 años', 'Cómo venderlo': 'Ideal para la oficina y el día a día.' },
+    { 'Código': 'GA-2100', 'Resistencia al agua': '20 ATM', 'Correa': 'Resina', 'Garantía': '2 años', 'Cómo venderlo': 'Resistente a golpes, perfecto para deporte.' }
+  ];
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 40 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Info productos');
+  XLSX.writeFile(wb, 'plantilla-info-productos.xlsx');
+};
+
+$('pi-subir').onclick = () => { $('pi-input').value = ''; $('pi-input').click(); };
+$('pi-input').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const modo = $('pi-modo').value;
+  try {
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf);
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    if (!raw.length) return showMsg('pi-msg', 'El archivo está vacío.', false);
+
+    // La primera columna es el Código; el resto son campos libres.
+    const cols = Object.keys(raw[0]);
+    const kSku = cols.find(k => /c[oó]d|sku/i.test(k)) || cols[0];
+    const filas = [];
+    raw.forEach(r => {
+      const sku = String(r[kSku] || '').trim();
+      if (!sku) return;
+      const campos = {};
+      cols.forEach(c => {
+        if (c === kSku) return;
+        const val = String(r[c] ?? '').trim();
+        if (val) campos[String(c).trim()] = val;
+      });
+      filas.push({ sku, campos });
+    });
+    if (!filas.length) return showMsg('pi-msg', 'No se encontró ninguna fila con Código válido. Revisa que la primera columna sea el código del producto.', false);
+
+    const r = await api('/producto-info', { method: 'POST', body: JSON.stringify({ data: { modo, filas } }) });
+    showMsg('pi-msg', `✓ ${r.cargados} producto(s) cargado(s) (${r.modo === 'reemplazar' ? 'reemplazando todo' : 'sumando/actualizando'}).`, true);
+    loadProductoInfo();
+  } catch (err) { showMsg('pi-msg', 'No se pudo leer el archivo: ' + err.message, false); }
+  e.target.value = '';
+};
 </script>
 </body>
 </html>

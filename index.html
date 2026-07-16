@@ -396,6 +396,17 @@ body.public .hbtn,body.public .nav-bottom{display:none!important;}
 body.public .main{padding-bottom:24px;}
 body.public .priv{display:none!important;}
 
+/* ── INFO LIBRE DE PRODUCTO (en la ficha) ── */
+.ficha-info-block{border-top:1px solid var(--line);margin:4px 0 20px;}
+.ficha-info-block .fib-h{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--steel);margin:18px 0 10px;}
+.info-row{display:flex;justify-content:space-between;gap:16px;padding:10px 2px;border-bottom:1px solid var(--line);font-size:14px;}
+.info-row:last-child{border-bottom:none;}
+.info-row .ik{color:var(--steel);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;padding-top:1px;flex-shrink:0;max-width:45%;}
+.info-row .iv{text-align:right;line-height:1.5;color:var(--ink);}
+/* si el valor es largo, se muestra apilado y a la izquierda */
+.info-row.long{flex-direction:column;gap:4px;}
+.info-row.long .iv{text-align:left;color:var(--ink-soft);white-space:pre-line;line-height:1.7;}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
 </style>
 </head>
@@ -1237,7 +1248,7 @@ function filtrados(){
       if(r && (v < r.min || v >= r.max)) return false;
     }
     if(FILTRO_TXT){
-      const hay = (p.nombre+' '+p.sku+' '+(p.categoria||'')+' '+(p.atributos||[]).map(a=>(a.attr||'')+' '+(a.val||'')).join(' ')).toLowerCase();
+      const hay = (p.nombre+' '+p.sku+' '+(p.categoria||'')+' '+(p.atributos||[]).map(a=>(a.attr||'')+' '+(a.val||'')).join(' ')+' '+(p.info||[]).map(f=>f.k+' '+f.v).join(' ')).toLowerCase();
       const palabras = FILTRO_TXT.split(/\s+/).filter(Boolean);
       if(!palabras.every(w=>hay.includes(w))) return false;
     }
@@ -1271,6 +1282,10 @@ function openFicha(id){
   FICHA_PROD = p; FICHA_QTY = 1;
   $('ficha-cat').textContent = famSub(p).fam || 'Ficha';
   const attrs = (p.atributos||[]).map(a=>`<div class="attr-row"><span class="k">${esc(a.attr||'Detalle')}</span><span class="v">${esc(a.val)}</span></div>`).join('');
+  const info = (p.info||[]).map(f=>{
+    const largo = String(f.v).length > 40 || String(f.v).includes('\n');
+    return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
+  }).join('');
   $('sheet-body').innerHTML = `
     <div class="ficha-img"><img src="${imgUrl(p.id,true)}" alt="${esc(p.nombre)}"/></div>
     <div class="ficha-info">
@@ -1283,6 +1298,7 @@ function openFicha(id){
       <div class="ficha-stockline priv"><span class="dot"></span> Disponible · ${p.stock} un.</div>
       ${attrs?`<div class="ficha-attrs">${attrs}</div>`:''}
       ${p.descripcion?`<p class="ficha-desc">${esc(p.descripcion)}</p>`:''}
+      ${info?`<div class="ficha-info-block"><div class="fib-h">Información del producto</div>${info}</div>`:''}
       <div class="qty-row priv">
         <button class="qty-btn" id="f-menos">−</button>
         <span class="qty-val" id="f-qty">1</span>
@@ -1477,11 +1493,11 @@ $('vr-enviar').onclick = async ()=>{
     ROWS = []; ensureRows(12); saveRows(); renderRows();
     $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-depto').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
-    $('vr-ok').textContent = '✓ ¡Venta enviada a Odoo (' + (r.ventaOdoo || ('#'+r.orderId)) + ')! ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
+    $('vr-ok').textContent = '✓ ¡Venta recibida! Tu número de venta es ' + (r.numero || ('#'+r.orderId)) + '. ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
     $('vr-ok').style.display='block';
     PEDIDOS = null; // refrescar mis ventas
   } catch(e){
-    $('vr-err').textContent = 'No se pudo enviar: ' + e.message;
+    $('vr-err').textContent = e.message;
     $('vr-err').style.display='block';
   }
   $('vr-enviar').disabled = false; $('vr-enviar').textContent='Pagar y enviar';

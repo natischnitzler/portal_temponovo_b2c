@@ -88,6 +88,24 @@ function numeroVenta(codigo, secuencia) {
   return inicial + String(secuencia || 1).padStart(5, '0');
 }
 
+// ── ACADEMIA: normalizar links de video a formato embebible ──────
+// Acepta lo que sea que pegue el admin (link normal de YouTube, youtu.be,
+// Shorts, o Vimeo) y devuelve la URL para el <iframe>. Si no reconoce el
+// formato, devuelve la URL tal cual (por si ya es un embed válido).
+function embedVideoUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  try {
+    // YouTube: youtu.be/ID, watch?v=ID, /shorts/ID, /embed/ID
+    let m = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+    if (m) return 'https://www.youtube.com/embed/' + m[1];
+    // Vimeo: vimeo.com/ID  o player.vimeo.com/video/ID
+    m = u.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (m) return 'https://player.vimeo.com/video/' + m[1];
+  } catch {}
+  return u;
+}
+
 // ════════════════════════════════════════════════════════════════
 // BASE DE DATOS — configuración (una sola empresa), vendedoras, ventas pendientes
 // ════════════════════════════════════════════════════════════════
@@ -164,6 +182,45 @@ function ensureDb() {
     // 'recibido' → 'preparando' → 'en_transito' → 'entregado'
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento TEXT NOT NULL DEFAULT 'recibido'`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento_at TIMESTAMPTZ DEFAULT now()`;
+
+    // ── ACADEMIA ───────────────────────────────────────────────────
+    // Contenido de formación para las vendedoras. Lo crea solo el admin.
+    // Un curso agrupa lecciones; cada lección puede ser un video (link de
+    // YouTube/Vimeo), texto, o imagen + texto. "categoria" separa los dos
+    // grandes tipos: 'vender' (cómo vender) y 'producto' (conocer lo que vende).
+    await sql`CREATE TABLE IF NOT EXISTS academia_cursos (
+      id SERIAL PRIMARY KEY,
+      titulo TEXT NOT NULL,
+      descripcion TEXT DEFAULT '',
+      categoria TEXT NOT NULL DEFAULT 'vender',  -- 'vender' | 'producto'
+      portada TEXT DEFAULT '',                    -- URL o dataURL de imagen de portada (opcional)
+      orden INTEGER DEFAULT 0,
+      publicado BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`;
+    await sql`CREATE TABLE IF NOT EXISTS academia_lecciones (
+      id SERIAL PRIMARY KEY,
+      curso_id INTEGER NOT NULL REFERENCES academia_cursos(id) ON DELETE CASCADE,
+      titulo TEXT NOT NULL,
+      tipo TEXT NOT NULL DEFAULT 'video',         -- 'video' | 'texto' | 'imagen'
+      video_url TEXT DEFAULT '',                  -- link de YouTube/Vimeo si tipo='video'
+      cuerpo TEXT DEFAULT '',                      -- texto de la lección (markdown-lite / plano)
+      imagen TEXT DEFAULT '',                      -- URL o dataURL si tipo='imagen'
+      sku_ref TEXT DEFAULT '',                     -- SKU de producto de Odoo asociado (opcional)
+      orden INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )`;
+
+    // ── INFO LIBRE DE PRODUCTO (desde Excel del admin) ─────────────
+    // Odoo aporta lo operativo (código, precio, stock, foto). Este Excel
+    // aporta la info comercial que Odoo no tiene, con columnas 100% libres:
+    // una fila por SKU, y "campos" es un JSON { "Título de columna": "valor" }
+    // tal como venían en el Excel. La ficha del producto muestra esos campos.
+    await sql`CREATE TABLE IF NOT EXISTS producto_info (
+      sku TEXT PRIMARY KEY,
+      campos JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
     // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
     const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
     if (oldEmpresas.rows[0]?.t) {
@@ -294,6 +351,26 @@ function famOf(categoria) {
   const parts = (categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
   return parts[0] || 'Otros';
 }
+// Carga la info libre de producto (del Excel del admin) como mapa
+// { SKU_MAYUS: { "Título": "valor", ... } }. Cacheado en memoria.
+async function getProductoInfoMap() {
+  const hit = cacheGet('prod_info'); if (hit) return hit;
+  let map = {};
+  try {
+    const { rows } = await sql`SELECT sku, campos FROM producto_info`;
+    rows.forEach(r => { map[(r.sku || '').toUpperCase()] = r.campos || {}; });
+  } catch (e) { console.warn('⚠ producto_info:', e.message); }
+  cacheSet('prod_info', map, 5 * 60 * 1000);
+  return map;
+}
+// Devuelve los campos libres como lista ordenada [{k, v}], omitiendo vacíos.
+function infoToList(campos) {
+  if (!campos || typeof campos !== 'object') return [];
+  return Object.entries(campos)
+    .filter(([k, v]) => String(k).trim() && String(v).trim())
+    .map(([k, v]) => ({ k: String(k).trim(), v: String(v).trim() }));
+}
+
 async function productosCliente(cliente) {
   let prods = await fetchProductos();
   const plId = await getPricelistId(cliente.partnerId);
@@ -305,6 +382,14 @@ async function productosCliente(cliente) {
       prods = prods.map(p => ({ ...p, precio: parseFloat(precios[p.id] || p.precio) }));
     } catch (e) { console.warn('⚠ pricelist:', e.message); }
   }
+  // Adjunta la info libre del Excel (si existe para ese SKU)
+  try {
+    const infoMap = await getProductoInfoMap();
+    prods = prods.map(p => {
+      const campos = infoMap[(p.sku || '').toUpperCase()];
+      return campos ? { ...p, info: infoToList(campos) } : p;
+    });
+  } catch (e) { console.warn('⚠ merge producto_info:', e.message); }
   return prods;
 }
 
@@ -789,7 +874,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
       .filter(p => !hSkus.has((p.sku || '').toUpperCase()))
       .map(p => ({
         id: p.id, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
-        categoria: p.categoria, atributos: p.atributos,
+        categoria: p.categoria, atributos: p.atributos, info: p.info || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
     cacheSet('pub_' + req.params.slug, result, 10 * 60 * 1000);
@@ -818,7 +903,38 @@ app.get('/api/public/:slug/imagen/:id', async (req, res) => {
   } catch (e) { res.status(500).send(shortErr(e)); }
 });
 
-// ── QUIERO VENDER — formulario público → correo ─────────────────
+// ════════════════════════════════════════════════════════════════
+// ACADEMIA — la vendedora ve los cursos publicados y sus lecciones
+// (solo lectura). El contenido lo crea el admin.
+// ════════════════════════════════════════════════════════════════
+app.get('/api/academia', requireClient, async (_req, res) => {
+  try {
+    const { rows: cursos } = await sql`
+      SELECT id, titulo, descripcion, categoria, portada, orden
+      FROM academia_cursos WHERE publicado = true
+      ORDER BY categoria, orden, id`;
+    if (!cursos.length) return res.json([]);
+    const ids = cursos.map(c => c.id);
+    const { rows: lecciones } = await sql`
+      SELECT id, curso_id, titulo, tipo, video_url, cuerpo, imagen, sku_ref, orden
+      FROM academia_lecciones WHERE curso_id = ANY(${ids})
+      ORDER BY orden, id`;
+    const byCurso = {};
+    lecciones.forEach(l => {
+      (byCurso[l.curso_id] = byCurso[l.curso_id] || []).push({
+        id: l.id, titulo: l.titulo, tipo: l.tipo,
+        videoUrl: l.tipo === 'video' ? embedVideoUrl(l.video_url) : '',
+        cuerpo: l.cuerpo || '', imagen: l.imagen || '', skuRef: l.sku_ref || ''
+      });
+    });
+    res.json(cursos.map(c => ({
+      id: c.id, titulo: c.titulo, descripcion: c.descripcion,
+      categoria: c.categoria, portada: c.portada,
+      lecciones: byCurso[c.id] || []
+    })));
+  } catch (e) { console.error('❌ /api/academia', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+
 const CONTACT_EMAIL = process.env.CONTACT_EMAIL || '';
 const mailer = (nodemailer && process.env.SMTP_HOST) ? nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -1013,6 +1129,73 @@ app.delete('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) =
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
+// ── INFO LIBRE DE PRODUCTO (Excel del admin) ─────────────────────
+// Limpia el caché para que la ficha muestre lo nuevo de inmediato.
+function limpiarCacheProductoInfo() {
+  Object.keys(cache).filter(k => k === 'prod_info' || k.startsWith('cat_') || k.startsWith('pub_'))
+    .forEach(k => delete cache[k]);
+}
+// Resumen: cuántos SKU tienen info y qué columnas se han usado.
+app.get('/api/admin/producto-info', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await sql`SELECT sku, campos FROM producto_info ORDER BY sku`;
+    const columnas = new Set();
+    rows.forEach(r => Object.keys(r.campos || {}).forEach(k => columnas.add(k)));
+    res.json({ total: rows.length, columnas: [...columnas], skus: rows.map(r => r.sku) });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+// Sube info libre. body.data = { modo: 'sumar'|'reemplazar', filas: [ {sku, campos:{...}}, ... ] }
+// - 'sumar': actualiza/inserta cada SKU que venga (mantiene los demás).
+// - 'reemplazar': borra TODO lo anterior y deja solo lo que viene.
+app.post('/api/admin/producto-info', requireAdmin, async (req, res) => {
+  try {
+    const { modo, filas } = req.body?.data || {};
+    if (!Array.isArray(filas) || !filas.length) return res.status(400).json({ error: 'No hay filas para cargar' });
+
+    const limpias = [];
+    for (const f of filas) {
+      const sku = String(f?.sku || '').trim().toUpperCase();
+      if (!sku) continue;
+      const campos = {};
+      Object.entries(f.campos || {}).forEach(([k, v]) => {
+        const key = String(k).trim();
+        const val = String(v ?? '').trim();
+        if (key && val) campos[key] = val;
+      });
+      limpias.push({ sku, campos });
+    }
+    if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un Código válido' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (modo === 'reemplazar') await client.query('DELETE FROM producto_info');
+      for (const { sku, campos } of limpias) {
+        await client.query(
+          `INSERT INTO producto_info (sku, campos, updated_at) VALUES ($1, $2, now())
+           ON CONFLICT (sku) DO UPDATE SET campos = $2, updated_at = now()`,
+          [sku, JSON.stringify(campos)]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw e;
+    } finally { client.release(); }
+
+    limpiarCacheProductoInfo();
+    res.json({ ok: true, cargados: limpias.length, modo: modo === 'reemplazar' ? 'reemplazar' : 'sumar' });
+  } catch (e) { console.error('❌ /api/admin/producto-info', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+// Borra toda la info libre de producto.
+app.delete('/api/admin/producto-info', requireAdmin, async (_req, res) => {
+  try {
+    await sql`DELETE FROM producto_info`;
+    limpiarCacheProductoInfo();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
 // ── Ventas + reintentos (la API de Temponovo ya las crea al instante;
 //    esto es solo para las que fallaron y quedaron con estado 'error') ──
 app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
@@ -1119,6 +1302,95 @@ app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
       ORDER BY v.nombre`;
     res.json(rows);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// ════════════════════════════════════════════════════════════════
+// ADMIN · ACADEMIA — crear/editar cursos y lecciones
+// ════════════════════════════════════════════════════════════════
+// Lista todos los cursos (publicados o no) con sus lecciones.
+app.get('/api/admin/academia', requireAdmin, async (_req, res) => {
+  try {
+    const { rows: cursos } = await sql`
+      SELECT * FROM academia_cursos ORDER BY categoria, orden, id`;
+    const { rows: lecciones } = await sql`
+      SELECT * FROM academia_lecciones ORDER BY orden, id`;
+    const byCurso = {};
+    lecciones.forEach(l => { (byCurso[l.curso_id] = byCurso[l.curso_id] || []).push(l); });
+    res.json(cursos.map(c => ({ ...c, lecciones: byCurso[c.id] || [] })));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.post('/api/admin/academia/cursos', requireAdmin, async (req, res) => {
+  try {
+    const { titulo, descripcion, categoria, portada, orden, publicado } = req.body || {};
+    if (!titulo) return res.status(400).json({ error: 'El título es obligatorio' });
+    const cat = ['vender', 'producto'].includes(categoria) ? categoria : 'vender';
+    const { rows } = await sql`
+      INSERT INTO academia_cursos (titulo, descripcion, categoria, portada, orden, publicado)
+      VALUES (${titulo}, ${descripcion || ''}, ${cat}, ${portada || ''}, ${orden || 0}, ${publicado !== false})
+      RETURNING *`;
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.put('/api/admin/academia/cursos/:id', requireAdmin, async (req, res) => {
+  try {
+    const { titulo, descripcion, categoria, portada, orden, publicado } = req.body || {};
+    const cat = categoria && ['vender', 'producto'].includes(categoria) ? categoria : null;
+    const { rows } = await sql`
+      UPDATE academia_cursos SET
+        titulo = COALESCE(${titulo}, titulo),
+        descripcion = COALESCE(${descripcion}, descripcion),
+        categoria = COALESCE(${cat}, categoria),
+        portada = COALESCE(${portada}, portada),
+        orden = COALESCE(${orden}, orden),
+        publicado = COALESCE(${typeof publicado === 'boolean' ? publicado : null}, publicado)
+      WHERE id = ${req.params.id} RETURNING *`;
+    if (!rows.length) return res.status(404).json({ error: 'Curso no encontrado' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.delete('/api/admin/academia/cursos/:id', requireAdmin, async (req, res) => {
+  try { await sql`DELETE FROM academia_cursos WHERE id = ${req.params.id}`; res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.post('/api/admin/academia/lecciones', requireAdmin, async (req, res) => {
+  try {
+    const { curso_id, titulo, tipo, video_url, cuerpo, imagen, sku_ref, orden } = req.body || {};
+    if (!curso_id || !titulo) return res.status(400).json({ error: 'Curso y título son obligatorios' });
+    const t = ['video', 'texto', 'imagen'].includes(tipo) ? tipo : 'video';
+    const { rows } = await sql`
+      INSERT INTO academia_lecciones (curso_id, titulo, tipo, video_url, cuerpo, imagen, sku_ref, orden)
+      VALUES (${curso_id}, ${titulo}, ${t}, ${video_url || ''}, ${cuerpo || ''}, ${imagen || ''}, ${(sku_ref || '').toUpperCase()}, ${orden || 0})
+      RETURNING *`;
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.put('/api/admin/academia/lecciones/:id', requireAdmin, async (req, res) => {
+  try {
+    const { titulo, tipo, video_url, cuerpo, imagen, sku_ref, orden } = req.body || {};
+    const t = tipo && ['video', 'texto', 'imagen'].includes(tipo) ? tipo : null;
+    const { rows } = await sql`
+      UPDATE academia_lecciones SET
+        titulo = COALESCE(${titulo}, titulo),
+        tipo = COALESCE(${t}, tipo),
+        video_url = COALESCE(${video_url}, video_url),
+        cuerpo = COALESCE(${cuerpo}, cuerpo),
+        imagen = COALESCE(${imagen}, imagen),
+        sku_ref = COALESCE(${sku_ref !== undefined ? String(sku_ref).toUpperCase() : null}, sku_ref),
+        orden = COALESCE(${orden}, orden)
+      WHERE id = ${req.params.id} RETURNING *`;
+    if (!rows.length) return res.status(404).json({ error: 'Lección no encontrada' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+app.delete('/api/admin/academia/lecciones/:id', requireAdmin, async (req, res) => {
+  try { await sql`DELETE FROM academia_lecciones WHERE id = ${req.params.id}`; res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/health', async (_req, res) => {
