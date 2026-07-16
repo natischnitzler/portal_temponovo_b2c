@@ -77,6 +77,17 @@ function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
 const SEGUIMIENTO_ORDEN = ['recibido', 'preparando', 'en_transito', 'entregado'];
 const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_transito: 'En tránsito', entregado: 'Entregado' };
 
+// ── NÚMERO DE VENTA (interno, nunca es el de Odoo) ───────────────
+// Cada vendedora tiene su propio correlativo, partiendo en 1, con la
+// inicial de su código adelante — ej. la vendedora "CAROLINA" ve sus
+// ventas como C00001, C00002, C00003... El correlativo se calcula al
+// vuelo (cuántas ventas de ESA vendedora tienen id <= esta), así que no
+// hace falta guardar ni mantener ningún contador aparte.
+function numeroVenta(codigo, secuencia) {
+  const inicial = String(codigo || 'V').trim().charAt(0).toUpperCase() || 'V';
+  return inicial + String(secuencia || 1).padStart(5, '0');
+}
+
 // ════════════════════════════════════════════════════════════════
 // BASE DE DATOS — configuración (una sola empresa), vendedoras, ventas pendientes
 // ════════════════════════════════════════════════════════════════
@@ -697,27 +708,33 @@ app.post('/api/pedido', requireClient, async (req, res) => {
       RETURNING id`;
 
     if (errorMsg) {
+      const { rows: seqRows } = await sql`
+        SELECT COUNT(*)::int AS n FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} AND id <= ${rows[0].id}`;
       return res.status(502).json({
-        error: 'La venta quedó guardada, pero no se pudo enviar a Odoo todavía: ' + errorMsg,
+        error: 'Tu venta quedó guardada (N° ' + numeroVenta(req.vendedora.codigo, seqRows[0].n) + '), pero no pudimos terminar de procesarla todavía. La estamos reintentando — te avisamos apenas quede lista.',
         orderId: rows[0].id, pending: true
       });
     }
-    res.json({ ok: true, orderId: rows[0].id, ventaOdoo: nombreOdoo, seguimiento: 'recibido', message: 'Venta enviada a Odoo (' + nombreOdoo + ')' });
+    const { rows: seqRowsOk } = await sql`
+      SELECT COUNT(*)::int AS n FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} AND id <= ${rows[0].id}`;
+    res.json({ ok: true, orderId: rows[0].id, numero: numeroVenta(req.vendedora.codigo, seqRowsOk[0].n), seguimiento: 'recibido', message: 'Venta recibida' });
   } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 app.get('/api/pedidos', requireClient, async (req, res) => {
   try {
     const { rows } = await sql`
-      SELECT * FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} ORDER BY created_at DESC LIMIT 200`;
+      SELECT *, ROW_NUMBER() OVER (ORDER BY id)::int AS secuencia
+      FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id}
+      ORDER BY created_at DESC LIMIT 200`;
     res.json(rows.map(o => ({
       id: o.id,
-      nombre: o.odoo_venta_nombre || ('V' + String(o.id).padStart(6, '0')),
+      nombre: numeroVenta(req.vendedora.codigo, o.secuencia),
       fecha: o.created_at,
       estado: o.estado, // 'enviada' | 'error'
       total: parseFloat(o.total || 0),
       neto: parseFloat(o.total || 0),
-      nota: o.estado === 'error' && o.error_msg ? ('⚠ No se pudo enviar: ' + o.error_msg) : (o.nota || ''),
+      nota: o.estado === 'error' ? '⚠ Estamos terminando de procesar esta venta.' : (o.nota || ''),
       ref: o.nombre_venta || '',
       entrega: o.entrega || 'despacho',
       seguimiento: o.seguimiento || 'recibido',
@@ -1003,15 +1020,18 @@ app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
     const estado = req.query.estado;
     const { rows } = estado
       ? await sql`
-          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
+                 ROW_NUMBER() OVER (PARTITION BY vp.vendedora_id ORDER BY vp.id)::int AS secuencia
           FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
           WHERE vp.estado = ${estado} ORDER BY vp.created_at DESC`
       : await sql`
-          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
+          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
+                 ROW_NUMBER() OVER (PARTITION BY vp.vendedora_id ORDER BY vp.id)::int AS secuencia
           FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
           ORDER BY vp.created_at DESC LIMIT 500`;
     const seguimiento = req.query.seguimiento;
-    const list = seguimiento ? rows.filter(r => (r.seguimiento || 'recibido') === seguimiento) : rows;
+    const list = (seguimiento ? rows.filter(r => (r.seguimiento || 'recibido') === seguimiento) : rows)
+      .map(r => ({ ...r, numero_venta: numeroVenta(r.vendedora_codigo, r.secuencia) }));
     res.json(list);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
