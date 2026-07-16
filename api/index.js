@@ -70,6 +70,13 @@ const cache = {};
 function cacheGet(k) { const e = cache[k]; if (!e) return null; if (Date.now() - e.ts > e.ttl) { delete cache[k]; return null; } return e.data; }
 function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
 
+// ── SEGUIMIENTO LOGÍSTICO DE VENTAS ──────────────────────────────
+// Único estado por el que pasa cada venta, en orden. Lo cambia solo el
+// admin (Panel de Admin → Ventas). La vitrina de la vendedora solo lee
+// este valor por el id interno de la venta — nunca toca Odoo para esto.
+const SEGUIMIENTO_ORDEN = ['recibido', 'preparando', 'en_transito', 'entregado'];
+const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_transito: 'En tránsito', entregado: 'Entregado' };
+
 // ════════════════════════════════════════════════════════════════
 // BASE DE DATOS — configuración (una sola empresa), vendedoras, ventas pendientes
 // ════════════════════════════════════════════════════════════════
@@ -138,6 +145,14 @@ function ensureDb() {
     // Nombre de la venta en Odoo (ej. "S06819") y detalle del error si la API falló.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS odoo_venta_nombre TEXT`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS error_msg TEXT`;
+    // ── SEGUIMIENTO LOGÍSTICO ──────────────────────────────────────
+    // Independiente de si la venta llegó o no a Odoo ("estado"): esto es el
+    // avance físico del pedido, que solo el admin cambia a mano — la vitrina
+    // (y la vendedora) nunca sabe nada de Odoo, solo lee este estado por el
+    // id interno de ventas_pendientes.
+    // 'recibido' → 'preparando' → 'en_transito' → 'entregado'
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento TEXT NOT NULL DEFAULT 'recibido'`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento_at TIMESTAMPTZ DEFAULT now()`;
     // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
     const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
     if (oldEmpresas.rows[0]?.t) {
@@ -687,7 +702,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
         orderId: rows[0].id, pending: true
       });
     }
-    res.json({ ok: true, orderId: rows[0].id, ventaOdoo: nombreOdoo, message: 'Venta enviada a Odoo (' + nombreOdoo + ')' });
+    res.json({ ok: true, orderId: rows[0].id, ventaOdoo: nombreOdoo, seguimiento: 'recibido', message: 'Venta enviada a Odoo (' + nombreOdoo + ')' });
   } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -705,6 +720,10 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       nota: o.estado === 'error' && o.error_msg ? ('⚠ No se pudo enviar: ' + o.error_msg) : (o.nota || ''),
       ref: o.nombre_venta || '',
       entrega: o.entrega || 'despacho',
+      seguimiento: o.seguimiento || 'recibido',
+      seguimientoLabel: SEGUIMIENTO_LABEL[o.seguimiento] || SEGUIMIENTO_LABEL.recibido,
+      seguimientoPaso: Math.max(0, SEGUIMIENTO_ORDEN.indexOf(o.seguimiento || 'recibido')),
+      seguimientoAt: o.seguimiento_at,
       lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: '', cantidad: p.quantity, total: 0 }))
     })));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
@@ -991,7 +1010,26 @@ app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
           SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo
           FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
           ORDER BY vp.created_at DESC LIMIT 500`;
-    res.json(rows);
+    const seguimiento = req.query.seguimiento;
+    const list = seguimiento ? rows.filter(r => (r.seguimiento || 'recibido') === seguimiento) : rows;
+    res.json(list);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// Cambia el avance logístico de una venta (lo hace solo el admin, a mano).
+// La vendedora y la vitrina lo leen después por /api/pedidos, usando el
+// mismo id interno — nunca hablan con Odoo para saber esto.
+app.put('/api/admin/ventas/:id/seguimiento', requireAdmin, async (req, res) => {
+  try {
+    const estado = req.body?.estado;
+    if (!SEGUIMIENTO_ORDEN.includes(estado)) {
+      return res.status(400).json({ error: 'Estado de seguimiento inválido. Usa: ' + SEGUIMIENTO_ORDEN.join(', ') });
+    }
+    const { rows } = await sql`
+      UPDATE ventas_pendientes SET seguimiento = ${estado}, seguimiento_at = now()
+      WHERE id = ${req.params.id} RETURNING id, seguimiento, seguimiento_at`;
+    if (!rows.length) return res.status(404).json({ error: 'Venta no encontrada' });
+    res.json({ ok: true, id: rows[0].id, seguimiento: rows[0].seguimiento, seguimientoAt: rows[0].seguimiento_at });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS ventas_pendientes (
   odoo_order_id INTEGER,           -- Id_Venta devuelto por la API (POST /sale/create o /sale/update)
   odoo_venta_nombre TEXT,          -- Nombre de la venta en Odoo (ej. "S06819")
   error_msg TEXT,                  -- detalle del error si estado = 'error'
+  seguimiento TEXT NOT NULL DEFAULT 'recibido', -- avance logístico: 'recibido'|'preparando'|'en_transito'|'entregado' — lo cambia solo el admin, la vitrina nunca sabe de Odoo
+  seguimiento_at TIMESTAMPTZ DEFAULT now(),     -- cuándo cambió por última vez el seguimiento
   created_at TIMESTAMPTZ DEFAULT now(),
   consolidado_at TIMESTAMPTZ       -- momento en que quedó 'enviada' (se mantiene el nombre de columna por compatibilidad)
 );

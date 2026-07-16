@@ -23,6 +23,19 @@ través de la API de ventas de Temponovo (no XML-RPC directo).
   etc.), el pedido queda guardado con estado **"Con error"** y se puede
   reintentar desde el Panel de Admin → **Ventas**.
 
+### Seguimiento logístico de cada venta
+
+Cada pedido tiene un **id interno** propio (el mismo que se le muestra a la
+vendedora como número de venta) y un estado de **seguimiento**, totalmente
+aparte de si ya llegó o no a Odoo:
+
+`recibido` → `preparando` → `en_transito` → `entregado`
+
+Este estado lo cambia **solo el admin**, desde el Panel de Admin → **Ventas**
+(un selector por fila). La vendedora lo ve reflejado al instante en
+**Mis Ventas**, siempre consultando por ese mismo id interno — la vitrina
+nunca necesita saber nada de Odoo para mostrar el seguimiento.
+
 Todo esto se administra desde el **Panel de Admin** (`/admin`), con su
 propia clave — ahí se configura la empresa, se crean/editan Vendedoras
 (incluyendo sus precios fijos en Excel), se ven las ventas y se reintentan
@@ -105,6 +118,7 @@ vercel --prod
 | DELETE | /api/admin/vendedoras/:id/precios      | Quita todos los precios fijos                   |
 | GET    | /api/admin/ventas               | Ventas, filtrables por estado (enviada/error)        |
 | POST   | /api/admin/ventas/:id/reintentar | Reintenta el envío a Odoo de una venta con error     |
+| PUT    | /api/admin/ventas/:id/seguimiento | Cambia el avance logístico de una venta: recibido → preparando → en_transito → entregado |
 | POST   | /api/admin/reintentar-todas      | Reintenta todas las ventas con error                 |
 | GET    | /api/admin/reporte               | Ventas por vendedora                                  |
 | GET    | /health                          | Health check (incluye si la base de datos conecta)   |

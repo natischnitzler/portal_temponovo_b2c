@@ -72,6 +72,12 @@ tr:last-child td{border-bottom:none;}
 .b-ok{background:var(--green-light);color:var(--green);}
 .b-warn{background:var(--amber-light);color:var(--amber);}
 .b-off{background:var(--red-light);color:var(--red);}
+.b-recibido{background:#eef1f4;color:#4a5a6b;}
+.b-preparando{background:var(--amber-light);color:var(--amber);}
+.b-en_transito{background:#e3ecf5;color:#3d5a80;}
+.b-entregado{background:var(--green-light);color:var(--green);}
+.seg-select{height:30px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:11.5px;padding:0 8px;}
+.seg-select:focus{border-color:var(--hdr);}
 .empty{text-align:center;padding:34px 12px;color:var(--steel);font-size:13px;}
 .chip-list{display:flex;gap:6px;flex-wrap:wrap;}
 .chk{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--paper);cursor:pointer;}
@@ -185,11 +191,20 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="row">
-            <div class="fld" style="max-width:180px"><label class="fld-l">Estado</label>
+            <div class="fld" style="max-width:180px"><label class="fld-l">Estado envío</label>
               <select class="fld-select" id="vt-estado">
                 <option value="">Todas</option>
                 <option value="enviada">Enviadas</option>
                 <option value="error">Con error</option>
+              </select>
+            </div>
+            <div class="fld" style="max-width:180px"><label class="fld-l">Seguimiento</label>
+              <select class="fld-select" id="vt-seguimiento">
+                <option value="">Todos</option>
+                <option value="recibido">Recibido</option>
+                <option value="preparando">Preparando</option>
+                <option value="en_transito">En tránsito</option>
+                <option value="entregado">Entregado</option>
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
@@ -432,16 +447,21 @@ $('v-crear').onclick = async () => {
 $('vt-buscar').onclick = loadVentas;
 async function loadVentas() {
   const estado = $('vt-estado').value;
+  const seguimiento = $('vt-seguimiento').value;
   try {
-    const q = estado ? '?estado=' + estado : '';
+    const params = [];
+    if (estado) params.push('estado=' + estado);
+    if (seguimiento) params.push('seguimiento=' + seguimiento);
+    const q = params.length ? '?' + params.join('&') : '';
     const ventas = await api('/ventas' + q);
     renderVentas(ventas);
   } catch (e) { $('vt-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
 loadVentas();
+const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_transito: 'En tránsito', entregado: 'Entregado' };
 function renderVentas(ventas) {
   if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
-  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>N° Odoo</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('vt-list').innerHTML = `<table><thead><tr><th>Fecha</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>N° Odoo</th><th>Envío</th><th>Seguimiento</th><th></th></tr></thead><tbody>
     ${ventas.map(v => `<tr>
       <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
       <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
@@ -458,11 +478,31 @@ function renderVentas(ventas) {
         ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
       </td>
       <td>
+        <span class="badge b-${v.seguimiento||'recibido'}" style="margin-bottom:6px;display:inline-block">${SEGUIMIENTO_LABEL[v.seguimiento]||'Recibido'}</span>
+        <select class="seg-select" data-seg="${v.id}">
+          <option value="recibido" ${v.seguimiento==='recibido'?'selected':''}>Recibido</option>
+          <option value="preparando" ${v.seguimiento==='preparando'?'selected':''}>Preparando</option>
+          <option value="en_transito" ${v.seguimiento==='en_transito'?'selected':''}>En tránsito</option>
+          <option value="entregado" ${v.seguimiento==='entregado'?'selected':''}>Entregado</option>
+        </select>
+      </td>
+      <td>
         ${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}
         ${v.estado==='enviada' ? `<button class="btn btn-sm danger" data-forzar="${v.id}" title="Úsalo solo si esta venta en realidad NO llegó a Odoo (ej. cayó en una venta cancelada)">Reenviar (forzar)</button>` : ''}
       </td>
     </tr>`).join('')}
   </tbody></table>`;
+  $('vt-list').querySelectorAll('[data-seg]').forEach(sel => sel.onchange = async () => {
+    const prev = sel.dataset.prev || sel.value;
+    sel.disabled = true;
+    try {
+      await api('/ventas/' + sel.dataset.seg + '/seguimiento', { method: 'PUT', body: JSON.stringify({ estado: sel.value }) });
+      const badge = sel.previousElementSibling;
+      badge.className = 'badge b-' + sel.value;
+      badge.textContent = SEGUIMIENTO_LABEL[sel.value];
+    } catch (e) { alert(e.message); sel.value = prev; }
+    sel.disabled = false; sel.dataset.prev = sel.value;
+  });
   $('vt-list').querySelectorAll('[data-reintentar]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Enviando…';
     try { await api('/ventas/' + b.dataset.reintentar + '/reintentar', { method: 'POST' }); loadVentas(); }

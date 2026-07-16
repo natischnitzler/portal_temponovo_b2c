@@ -111,6 +111,21 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .b-sale{background:var(--green-light);color:var(--green);}
 .b-done{background:#efe9dc;color:#8a6d3d;}
 .b-cancel{background:var(--red-light);color:var(--red);}
+.b-recibido{background:#eef1f4;color:#4a5a6b;}
+.b-preparando{background:#efe9dc;color:#8a6d3d;}
+.b-en_transito{background:#e3ecf5;color:#3d5a80;}
+.b-entregado{background:var(--green-light);color:var(--green);}
+.seg-wrap{margin-top:11px;padding-top:11px;border-top:1px solid var(--line);}
+.seg-bar{display:flex;align-items:center;gap:0;}
+.seg-dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex-shrink:0;}
+.seg-dot.on{background:var(--hdr);}
+.seg-line{flex:1;height:2px;background:var(--line);}
+.seg-line.on{background:var(--hdr);}
+.seg-labels{display:flex;justify-content:space-between;margin-top:7px;}
+.seg-labels span{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--steel);max-width:25%;text-align:center;line-height:1.4;}
+.seg-labels span:first-child{text-align:left}
+.seg-labels span:last-child{text-align:right}
+.seg-labels span.on{color:var(--ink);font-weight:600;}
 .his-lines{display:none;border-top:1px solid var(--line);margin-top:11px;padding-top:9px;}
 .his-item.open .his-lines{display:block;}
 .hl{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;color:var(--ink-soft);}
@@ -1485,10 +1500,12 @@ function demoPedidos(){
     for(let k=0;k<plan[5-i];k++){
       const cat = cats[(i+k)%cats.length];
       const tot = 14990 + ((i*3+k)%5)*9000;
+      const segDemo = ['entregado','entregado','en_transito','preparando','preparando','recibido'];
       out.push({
         id:'d'+i+k, nombre:'S000'+(90-i*9-k), ref:'Venta de ejemplo '+(k+1),
         fecha: new Date(d.getFullYear(), d.getMonth(), 4+k*6).toISOString(),
         estado: 'enviada',
+        seguimiento: segDemo[(i+k)%segDemo.length],
         total: tot, neto: Math.round(tot/1.19), nota:'',
         lineas: [{ sku:'DEMO-'+(100+i*10+k), categoria:cat, cantidad:1+(k%2), total:tot }]
       });
@@ -1565,8 +1582,15 @@ async function loadVentas(){
   });
   const legend = series.map((f,si)=>`<span class="leg-i"><i style="background:${CHART_COLORS[si%CHART_COLORS.length]}"></i>${f==='_otros'?'Otros':esc(f)}</span>`).join('');
 
-  const cls = { enviada:'b-sale', error:'b-cancel' };
-  const lbl = { enviada:'Enviada a Odoo', error:'Con error' };
+  const SEG_ORDEN = ['recibido','preparando','en_transito','entregado'];
+  const SEG_LABEL = { recibido:'Recibido', preparando:'Preparando', en_transito:'En tránsito', entregado:'Entregado' };
+  function segStepper(o){
+    const seg = o.seguimiento || 'recibido';
+    const paso = SEG_ORDEN.indexOf(seg) >= 0 ? SEG_ORDEN.indexOf(seg) : 0;
+    const dots = SEG_ORDEN.map((_,i)=>`<div class="seg-dot ${i<=paso?'on':''}"></div>` + (i<SEG_ORDEN.length-1?`<div class="seg-line ${i<paso?'on':''}"></div>`:'')).join('');
+    const labels = SEG_ORDEN.map((s,i)=>`<span class="${i===paso?'on':''}">${esc(SEG_LABEL[s])}</span>`).join('');
+    return `<div class="seg-wrap"><div class="seg-bar">${dots}</div><div class="seg-labels">${labels}</div></div>`;
+  }
   const detalle = pedidos.map(o=>`
     <div class="his-item" data-id="${o.id}">
       <div class="his-top">
@@ -1576,12 +1600,13 @@ async function loadVentas(){
         </div>
         <div class="his-right">
           <div class="his-total">${fmt(o.total)}</div>
-          <span class="badge ${cls[o.estado]||'b-done'}">${lbl[o.estado]||o.estado}</span>
+          <span class="badge ${o.estado==='error'?'b-cancel':'b-'+(o.seguimiento||'recibido')}">${o.estado==='error'?'Con error':(SEG_LABEL[o.seguimiento]||'Recibido')}</span>
         </div>
       </div>
       <div class="his-lines">
         ${o.lineas.map(l=>`<div class="hl"><span>${esc(l.sku)}</span><span class="q">×${l.cantidad}</span><span>${fmt(l.total)}</span></div>`).join('') || '<div class="hl"><span>Sin detalle</span></div>'}
         ${o.nota?`<div class="hl" style="color:var(--steel)"><span>${esc(o.nota)}</span></div>`:''}
+        ${o.estado!=='error' ? segStepper(o) : ''}
       </div>
     </div>`).join('');
 
