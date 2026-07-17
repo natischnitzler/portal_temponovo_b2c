@@ -271,6 +271,17 @@ function ensureDb() {
     await sql`ALTER TABLE ventas_pendientes ADD CONSTRAINT ventas_pendientes_proveedor_id_fkey
       FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)`;
 
+    // ── CONFIG DE VENDEDORA (fase 1 del portal multi-proveedor) ──────
+    // Antes vivía como un adjunto en el Odoo de Temponovo (vitrina-cfg-<código>),
+    // colgado del único partner_id global — ya no tiene sentido en cuanto hay
+    // más de un proveedor (o uno sin Odoo). Se guarda acá de ahora en más;
+    // ver readCfgDb/writeCfgDb para el backfill desde el adjunto viejo.
+    await sql`CREATE TABLE IF NOT EXISTS vendedora_config (
+      vendedora_id INTEGER PRIMARY KEY REFERENCES vendedoras(id) ON DELETE CASCADE,
+      cfg JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
+
     // Migración única: si nunca se creó ningún proveedor y existen las
     // variables de entorno de Temponovo, se crea como el primer proveedor
     // — llevándose el partner_id y la venta abierta que hoy viven en
@@ -447,7 +458,7 @@ async function publicClienteBySlug(slug) {
   if (!v) return null;
   const cfg = await getConfig();
   if (!cfg.partner_id) return null;
-  return { code: v.codigo, partnerId: cfg.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
+  return { id: v.id, code: v.codigo, partnerId: cfg.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
 }
 
 // ── ACCESO DE VENDEDORA (código + clave) ──────────────────────────
@@ -481,30 +492,49 @@ async function requireClient(req, res, next) {
   } catch (e) { console.error('❌ requireClient', e.message); res.status(500).json({ error: shortErr(e) }); }
 }
 
-// ── LINK PÚBLICO + CONFIG (guardada en Odoo, por vendedora) ──────
-async function readCfg(code, partnerId) {
-  const hit = cacheGet('cfg_' + code); if (hit !== null) return hit;
+// ── LINK PÚBLICO + CONFIG DE VENDEDORA ────────────────────────────
+// Hasta esta fase, la config visual (logo, colores...) y los precios fijos
+// de cada vendedora vivían como un adjunto en el Odoo de Temponovo. Ahora
+// se guardan en Postgres (tabla vendedora_config) — readCfgOdooLegacy queda
+// SOLO para el backfill de lectura única de abajo, nunca se vuelve a
+// escribir en Odoo por esto.
+async function readCfgOdooLegacy(code, partnerId) {
   const name = 'vitrina-cfg-' + code;
   const ids = await xmlrpcCall('ir.attachment', 'search',
     [[['name', '=', name], ['res_model', '=', 'res.partner'], ['res_id', '=', partnerId]]], { limit: 1 });
-  let cfg = {};
-  if (ids.length) {
-    const rec = await xmlrpcCall('ir.attachment', 'read', [ids, ['datas']]);
-    try { cfg = JSON.parse(Buffer.from(rec[0].datas, 'base64').toString('utf8')) || {}; } catch {}
-  }
-  cacheSet('cfg_' + code, cfg, 5 * 60 * 1000);
-  return cfg;
+  if (!ids.length) return {};
+  const rec = await xmlrpcCall('ir.attachment', 'read', [ids, ['datas']]);
+  try { return JSON.parse(Buffer.from(rec[0].datas, 'base64').toString('utf8')) || {}; } catch { return {}; }
 }
-async function writeCfg(code, partnerId, cfg) {
-  const name = 'vitrina-cfg-' + code;
-  const datas = Buffer.from(JSON.stringify(cfg)).toString('base64');
-  const ids = await xmlrpcCall('ir.attachment', 'search',
-    [[['name', '=', name], ['res_model', '=', 'res.partner'], ['res_id', '=', partnerId]]], { limit: 1 });
-  if (ids.length) await xmlrpcCall('ir.attachment', 'write', [ids, { datas }]);
-  else await xmlrpcCall('ir.attachment', 'create', [{
-    name, res_model: 'res.partner', res_id: partnerId, type: 'binary', datas, mimetype: 'application/json'
-  }]);
-  cacheSet('cfg_' + code, cfg, 5 * 60 * 1000);
+// vendedora: objeto con al menos {id, codigo}. partnerId: solo se usa para
+// el backfill de la primera lectura (si no hay partner_id, el backfill
+// simplemente no encuentra nada y arranca de un config vacío).
+async function readCfgDb(vendedora, partnerId) {
+  const hit = cacheGet('cfg_' + vendedora.codigo); if (hit !== null) return hit;
+  const { rows } = await sql`SELECT cfg FROM vendedora_config WHERE vendedora_id = ${vendedora.id}`;
+  if (rows.length) {
+    cacheSet('cfg_' + vendedora.codigo, rows[0].cfg || {}, 5 * 60 * 1000);
+    return rows[0].cfg || {};
+  }
+  // Primera vez que se pide la config de esta vendedora desde que existe
+  // vendedora_config: se trae una única vez del adjunto viejo de Odoo (si
+  // hay partner_id) y se guarda ya en Postgres, para no volver a tocar Odoo.
+  let legacy = {};
+  if (partnerId) {
+    try { legacy = await readCfgOdooLegacy(vendedora.codigo, partnerId); }
+    catch (e) { console.warn('⚠ backfill config de ' + vendedora.codigo + ':', e.message); }
+  }
+  try {
+    await sql`INSERT INTO vendedora_config (vendedora_id, cfg) VALUES (${vendedora.id}, ${JSON.stringify(legacy)})
+      ON CONFLICT (vendedora_id) DO NOTHING`;
+  } catch (e) { console.warn('⚠ no se pudo guardar el backfill de ' + vendedora.codigo + ':', e.message); }
+  cacheSet('cfg_' + vendedora.codigo, legacy, 5 * 60 * 1000);
+  return legacy;
+}
+async function writeCfgDb(vendedora, cfg) {
+  await sql`INSERT INTO vendedora_config (vendedora_id, cfg, updated_at) VALUES (${vendedora.id}, ${JSON.stringify(cfg)}, now())
+    ON CONFLICT (vendedora_id) DO UPDATE SET cfg = ${JSON.stringify(cfg)}, updated_at = now()`;
+  cacheSet('cfg_' + vendedora.codigo, cfg, 5 * 60 * 1000);
 }
 function famOf(categoria) {
   const parts = (categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
@@ -1002,14 +1032,14 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
 
 // ── CONFIG DE LA VENDEDORA (persistente, multi-dispositivo) ─────
 app.get('/api/config', requireClient, async (req, res) => {
-  try { res.json(await readCfg(req.vendedora.codigo, req.partnerId)); }
+  try { res.json(await readCfgDb(req.vendedora, req.partnerId)); }
   catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.post('/api/config', requireClient, async (req, res) => {
   try {
     const cfg = req.body?.data || {};
     if (JSON.stringify(cfg).length > 300000) return res.status(413).json({ error: 'Configuración demasiado grande (logo muy pesado)' });
-    await writeCfg(req.vendedora.codigo, req.partnerId, cfg);
+    await writeCfgDb(req.vendedora, cfg);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1019,7 +1049,7 @@ app.get('/api/public/:slug/config', async (req, res) => {
   try {
     const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
-    const cfg = await readCfg(c.code, c.partnerId);
+    const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
     const { nombre, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap } = cfg;
     res.json({ nombre: nombre || c.name, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap });
   } catch (e) { console.error('❌ /api/public/config', e.message); res.status(500).json({ error: 'No se pudo cargar la vitrina' }); }
@@ -1030,7 +1060,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
     const hit = cacheGet('pub_' + req.params.slug); if (hit) return res.json(hit);
-    const cfg = await readCfg(c.code, c.partnerId);
+    const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
     const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
     const ov = cfg.overrides || {};
     const hFams = new Set(cfg.hiddenFams || []);
@@ -1203,16 +1233,15 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
-// Logo de cada vendedora (vive en su config visual, guardada en Odoo) — para
-// mostrarlo como miniatura en la lista de Admin. { CODIGO: dataURL|url }
+// Logo de cada vendedora (vive en su config visual, guardada en Postgres) —
+// para mostrarlo como miniatura en la lista de Admin. { CODIGO: dataURL|url }
 app.get('/api/admin/vendedoras/logos', requireAdmin, async (_req, res) => {
   try {
     const cfg0 = await getConfig();
-    if (!cfg0.partner_id) return res.json({});
-    const { rows } = await sql`SELECT codigo FROM vendedoras WHERE activo = true`;
+    const { rows } = await sql`SELECT id, codigo FROM vendedoras WHERE activo = true`;
     const out = {};
     await Promise.all(rows.map(async r => {
-      try { const cfg = await readCfg(r.codigo, cfg0.partner_id); if (cfg.logo) out[r.codigo] = cfg.logo; }
+      try { const cfg = await readCfgDb(r, cfg0.partner_id); if (cfg.logo) out[r.codigo] = cfg.logo; }
       catch (e) { console.warn('⚠ logo de ' + r.codigo + ':', e.message); }
     }));
     res.json(out);
@@ -1273,7 +1302,7 @@ app.post('/api/admin/cerrar-venta', requireAdmin, async (_req, res) => {
 });
 
 // ── Precios fijos por vendedora (Excel) — se guardan como "overrides" en
-// su misma configuración visual (vitrina-cfg-<codigo>), igual que antes ──
+// su misma configuración visual (vendedora_config en Postgres) ──
 app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res) => {
   try {
     const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
@@ -1283,7 +1312,7 @@ app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res)
     let prods = await productosCliente({ partnerId: cfg0.partner_id });
     const categorias = v.categorias || [];
     if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
-    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    const cfg = await readCfgDb(v, cfg0.partner_id);
     const ov = cfg.overrides || {};
     const mult = parseFloat(v.multiplicador) || 2;
     res.json(prods.map(p => ({
@@ -1299,14 +1328,14 @@ app.post('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => 
     const cfg0 = await getConfig();
     const precios = req.body?.data || {};
     if (!precios || typeof precios !== 'object') return res.status(400).json({ error: 'Formato inválido' });
-    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    const cfg = await readCfgDb(v, cfg0.partner_id);
     cfg.overrides = { ...(cfg.overrides || {}) };
     let n = 0;
     Object.entries(precios).forEach(([sku, precio]) => {
       const pr = parseFloat(precio);
       if (sku && pr > 0) { cfg.overrides[String(sku).toUpperCase()] = Math.round(pr); n++; }
     });
-    await writeCfg(v.codigo, cfg0.partner_id, cfg);
+    await writeCfgDb(v, cfg);
     delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
     res.json({ ok: true, actualizados: n });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
@@ -1316,9 +1345,9 @@ app.delete('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) =
     const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
     const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
     const cfg0 = await getConfig();
-    const cfg = await readCfg(v.codigo, cfg0.partner_id);
+    const cfg = await readCfgDb(v, cfg0.partner_id);
     cfg.overrides = {};
-    await writeCfg(v.codigo, cfg0.partner_id, cfg);
+    await writeCfgDb(v, cfg);
     delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }

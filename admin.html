@@ -85,7 +85,10 @@ tr:last-child td{border-bottom:none;}
 .seg-select{height:30px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:11.5px;padding:0 8px;}
 .seg-select:focus{border-color:var(--hdr);}
 .grupo-odoo{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden;background:var(--white);}
-.grupo-head{background:var(--paper);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px;border-bottom:1px solid var(--line);}
+.grupo-head{background:var(--paper);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;}
+.grupo-head .gh-left{display:flex;align-items:center;gap:10px;}
+.grupo-head .gh-arrow{display:inline-block;transition:transform .15s;color:var(--steel);font-size:11px;}
+.grupo-head.open .gh-arrow{transform:rotate(90deg);}
 .grupo-head .gh-name{font-family:var(--mono);font-size:14.5px;font-weight:600;}
 .grupo-head .gh-meta{font-size:11.5px;color:var(--steel);display:flex;gap:14px;flex-wrap:wrap;}
 .grupo-body{overflow-x:auto;}
@@ -615,7 +618,8 @@ function renderVentas(ventas) {
     const vendedorasUnicas = [...new Set(g.ventas.map(v => v.vendedora_nombre))];
     return `<div class="grupo-odoo">
       <div class="grupo-head">
-        <div>
+        <div class="gh-left">
+          <span class="gh-arrow">▸</span>
           ${g.key === 'sin_odoo'
             ? '<span class="gh-name" style="color:var(--red)">⚠ Sin enviar, con error o canceladas</span>'
             : `<span class="gh-name">${esc(g.odoo_venta_nombre || '(sin nombre)')}</span>`}
@@ -626,7 +630,7 @@ function renderVentas(ventas) {
           <span class="mono">${fmt(total)}</span>
         </div>
       </div>
-      <div class="grupo-body">
+      <div class="grupo-body" style="display:none">
         <table><thead><tr><th>Fecha</th><th>N° venta</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Envío</th><th>Seguimiento</th><th></th></tr></thead><tbody>
         ${g.ventas.map(v => `<tr>
           <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
@@ -663,6 +667,16 @@ function renderVentas(ventas) {
       </div>
     </div>`;
   }).join('');
+  // Cada tarjeta arranca colapsada — clic en el header muestra/oculta el
+  // detalle, para no llenar la página de tablas cuando hay muchas ventas.
+  $('vt-list').querySelectorAll('.grupo-head').forEach(head => {
+    head.onclick = () => {
+      const body = head.nextElementSibling;
+      const abrir = body.style.display === 'none';
+      body.style.display = abrir ? '' : 'none';
+      head.classList.toggle('open', abrir);
+    };
+  });
   $('vt-list').querySelectorAll('[data-seg]').forEach(sel => sel.onchange = async () => {
     const prev = sel.dataset.prev || sel.value;
     sel.disabled = true;

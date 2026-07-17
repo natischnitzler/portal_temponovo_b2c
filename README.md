@@ -90,6 +90,11 @@ cambio grande que se entrega por fases:
   simplemente no corre todavía (se reintenta sola en el próximo request en
   cuanto se configure) — el resto del portal sigue funcionando igual que
   antes con las variables de entorno de siempre.
+- ✅ **Fase 1 (ya en este código)**: la config visual y los precios fijos de
+  cada vendedora se movieron de un adjunto de Odoo a Postgres
+  (`vendedora_config`), con backfill automático de lectura única — ver nota
+  en "Notas técnicas" más abajo. Tampoco cambia nada visible: cada vendedora
+  sigue viendo su misma vitrina, logo y precios de siempre.
 - ⏳ Pendiente: pestaña Admin → Proveedores (alta/edición de proveedores sin
   redeploy), catálogo combinado de varios proveedores, separación automática
   de un pedido mixto en una venta por proveedor, y carga manual de catálogo
@@ -172,9 +177,14 @@ vercel --prod
   perder ese historial) — hay que desactivarla en su lugar desde el
   interruptor de Estado.
 - La personalización visual (logo, colores, tipografía, etiquetas) **y los
-  precios fijos** de cada vendedora se guardan como antes, como un archivo
-  adjunto en el partner de Odoo (`vitrina-cfg-<código>`) — no se movieron a
-  la base de datos nueva.
+  precios fijos** de cada vendedora se guardan en Postgres (tabla
+  `vendedora_config`). Antes vivían como un archivo adjunto en el partner de
+  Odoo (`vitrina-cfg-<código>`) — la primera vez que se pide la config de
+  cada vendedora después de este cambio, se trae una única vez de ese
+  adjunto viejo y se guarda ya en la base de datos; de ahí en más nunca más
+  se vuelve a tocar Odoo por esto. No hace falta correr ninguna migración a
+  mano — pasa solo, por vendedora, la primera vez que entra o que el admin
+  la abre en el Panel.
 - La venta abierta es una sola fila (`configuracion`, id=1) protegida con
   `SELECT ... FOR UPDATE` mientras dura la llamada a la API: si dos
   vendedoras mandan un pedido casi al mismo tiempo, el segundo espera a que
