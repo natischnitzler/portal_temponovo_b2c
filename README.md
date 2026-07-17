@@ -95,10 +95,19 @@ cambio grande que se entrega por fases:
   (`vendedora_config`), con backfill automático de lectura única — ver nota
   en "Notas técnicas" más abajo. Tampoco cambia nada visible: cada vendedora
   sigue viendo su misma vitrina, logo y precios de siempre.
-- ⏳ Pendiente: pestaña Admin → Proveedores (alta/edición de proveedores sin
-  redeploy), catálogo combinado de varios proveedores, separación automática
-  de un pedido mixto en una venta por proveedor, y carga manual de catálogo
-  y ventas para un proveedor sin Odoo.
+- ✅ **Fase 2 (ya en este código)**: la pestaña "Info productos" del Panel de
+  Admin pasó a llamarse **Proveedores** — ahí se pueden agregar, editar,
+  activar/desactivar y eliminar proveedores (Odoo o "Manual", sin Odoo), y
+  probar que las credenciales de un proveedor Odoo funcionan ("Probar
+  conexión") antes de guardar. El Excel de información adicional de
+  producto (con código de barra) sigue ahí mismo, como sub-sección. **Ojo:**
+  agregar un proveedor acá todavía no hace nada más — no aparece en ninguna
+  vitrina ni se puede vender hasta la fase siguiente, que conecta el
+  catálogo de verdad.
+- ⏳ Pendiente: catálogo combinado de varios proveedores (namespacing de
+  producto), separación automática de un pedido mixto en una venta por
+  proveedor, y la pantalla de catálogo/ventas manuales para un proveedor sin
+  Odoo.
 
 ### 2. Base de datos (obligatorio)
 
@@ -149,6 +158,8 @@ vercel --prod
 | POST   | /api/admin/login                | Login del panel de admin                             |
 | GET/PUT /api/admin/config       | Nombre y Partner ID de la empresa (una sola)        |
 | GET/POST/PUT/DELETE /api/admin/vendedoras   | CRUD de Vendedoras                     |
+| GET/POST/PUT/DELETE /api/admin/proveedores  | CRUD de Proveedores (fase 2 — todavía no conecta el catálogo) |
+| POST   | /api/admin/proveedores/:id/probar | Prueba la conexión Odoo de un proveedor |
 | POST   | /api/admin/cerrar-venta          | Cierra la única venta abierta (compartida por todas)  |
 | GET    | /api/admin/vendedoras/:id/precios/base | Excel base de precios (para descargar)          |
 | POST   | /api/admin/vendedoras/:id/precios      | Sube precios fijos {sku: precio}                |

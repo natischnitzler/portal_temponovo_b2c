@@ -1291,6 +1291,105 @@ app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════
+// PROVEEDORES (fase 2 del portal multi-proveedor)
+// ════════════════════════════════════════════════════════════════
+// Fase 2 es solo el CRUD: alta/edición/borrado de proveedores y probar que
+// sus credenciales de Odoo funcionan. Todavía NO se usa esto para el
+// catálogo ni para armar ventas (eso es una fase siguiente) — un proveedor
+// nuevo que se agregue acá no aparece todavía en la vitrina de nadie.
+function proveedorPublico(p) {
+  return {
+    id: p.id, codigo: p.codigo, nombre: p.nombre, tipo: p.tipo, activo: p.activo,
+    partnerId: p.partner_id, odooUrl: p.odoo_url, odooDb: p.odoo_db, odooUser: p.odoo_user,
+    odooPasswordSet: !!p.odoo_password_enc,
+    ventaApiUrl: p.venta_api_url, ventaApiKeySet: !!p.venta_api_key_enc, ventaVendorEmail: p.venta_vendor_email,
+    ventaAbiertaNombre: p.venta_abierta_nombre, categoriasFiltro: p.categorias_filtro || [], orden: p.orden
+  };
+  // nunca se incluyen odoo_password_enc / venta_api_key_enc, ni descifrados
+}
+app.get('/api/admin/proveedores', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await sql`SELECT * FROM proveedores ORDER BY orden, id`;
+    res.json(rows.map(proveedorPublico));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.post('/api/admin/proveedores', requireAdmin, async (req, res) => {
+  try {
+    const { codigo, nombre, tipo, partnerId, odooUrl, odooDb, odooUser, odooPassword,
+      ventaApiUrl, ventaApiKey, ventaVendorEmail, categoriasFiltro } = req.body || {};
+    if (!codigo || !nombre) return res.status(400).json({ error: 'Código y nombre son obligatorios' });
+    const t = tipo === 'manual' ? 'manual' : 'odoo';
+    const { rows } = await sql`
+      INSERT INTO proveedores
+        (codigo, nombre, tipo, partner_id, odoo_url, odoo_db, odoo_user, odoo_password_enc,
+         venta_api_url, venta_api_key_enc, venta_vendor_email, categorias_filtro)
+      VALUES (${String(codigo).toLowerCase().trim()}, ${nombre}, ${t}, ${partnerId || null},
+        ${odooUrl || null}, ${odooDb || null}, ${odooUser || null}, ${odooPassword ? encryptCred(odooPassword) : null},
+        ${ventaApiUrl || null}, ${ventaApiKey ? encryptCred(ventaApiKey) : null}, ${ventaVendorEmail || null},
+        ${JSON.stringify(categoriasFiltro || [])})
+      RETURNING *`;
+    res.json(proveedorPublico(rows[0]));
+  } catch (e) {
+    if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de proveedor ya existe' });
+    res.status(500).json({ error: shortErr(e) });
+  }
+});
+app.put('/api/admin/proveedores/:id', requireAdmin, async (req, res) => {
+  try {
+    const { nombre, tipo, activo, partnerId, odooUrl, odooDb, odooUser, odooPassword,
+      ventaApiUrl, ventaApiKey, ventaVendorEmail, categoriasFiltro, orden } = req.body || {};
+    const t = tipo && ['odoo', 'manual'].includes(tipo) ? tipo : null;
+    const { rows } = await sql`
+      UPDATE proveedores SET
+        nombre = COALESCE(${nombre}, nombre),
+        tipo = COALESCE(${t}, tipo),
+        activo = COALESCE(${activo}, activo),
+        partner_id = COALESCE(${partnerId}, partner_id),
+        odoo_url = COALESCE(${odooUrl}, odoo_url),
+        odoo_db = COALESCE(${odooDb}, odoo_db),
+        odoo_user = COALESCE(${odooUser}, odoo_user),
+        odoo_password_enc = COALESCE(${odooPassword ? encryptCred(odooPassword) : null}, odoo_password_enc),
+        venta_api_url = COALESCE(${ventaApiUrl}, venta_api_url),
+        venta_api_key_enc = COALESCE(${ventaApiKey ? encryptCred(ventaApiKey) : null}, venta_api_key_enc),
+        venta_vendor_email = COALESCE(${ventaVendorEmail}, venta_vendor_email),
+        categorias_filtro = COALESCE(${categoriasFiltro ? JSON.stringify(categoriasFiltro) : null}, categorias_filtro),
+        orden = COALESCE(${orden}, orden),
+        updated_at = now()
+      WHERE id = ${req.params.id} RETURNING *`;
+    if (!rows.length) return res.status(404).json({ error: 'Proveedor no encontrado' });
+    res.json(proveedorPublico(rows[0]));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.delete('/api/admin/proveedores/:id', requireAdmin, async (req, res) => {
+  try { await sql`DELETE FROM proveedores WHERE id = ${req.params.id}`; res.json({ ok: true }); }
+  catch (e) {
+    if (e.code === '23503') return res.status(409).json({ error: 'Este proveedor tiene ventas registradas y no se puede eliminar. Desactívalo en su lugar.' });
+    res.status(500).json({ error: shortErr(e) });
+  }
+});
+// Prueba las credenciales de Odoo de un proveedor con una llamada aislada
+// (no toca getUID/xmlrpcCall globales, que hasta la fase siguiente siguen
+// siendo solo para el Odoo de Temponovo).
+app.post('/api/admin/proveedores/:id/probar', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`SELECT * FROM proveedores WHERE id = ${req.params.id}`;
+    const p = rows[0]; if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
+    if (p.tipo !== 'odoo') return res.status(400).json({ error: 'Este proveedor no usa Odoo, no hay conexión que probar' });
+    if (!p.odoo_url || !p.odoo_db || !p.odoo_user || !p.odoo_password_enc) {
+      return res.status(400).json({ error: 'Falta completar URL, base de datos, usuario o clave de Odoo' });
+    }
+    let password;
+    try { password = decryptCred(p.odoo_password_enc); } catch (e) { return res.status(500).json({ error: e.message }); }
+    const client = xmlrpc.createSecureClient({ host: new URL(p.odoo_url).hostname, port: 443, path: '/xmlrpc/2/common' });
+    const uid = await new Promise((resolve, reject) => {
+      client.methodCall('authenticate', [p.odoo_db, p.odoo_user, password, {}], (err, uid) => err ? reject(err) : resolve(uid));
+    });
+    if (!uid) return res.status(401).json({ error: 'Odoo rechazó las credenciales (usuario, clave o base de datos incorrectos)' });
+    res.json({ ok: true, uid });
+  } catch (e) { res.status(502).json({ error: 'No se pudo conectar: ' + shortErr(e) }); }
+});
+
 // La "venta abierta" es UNA sola, compartida por todas las vendedoras (todas
 // facturan al mismo partner). Cerrarla a mano fuerza que el próximo pedido de
 // CUALQUIER vendedora abra una venta nueva en Odoo con /sale/create.

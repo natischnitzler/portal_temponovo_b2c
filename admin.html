@@ -130,7 +130,7 @@ tr:last-child td{border-bottom:none;}
   <nav class="sidebar">
     <div class="sidebar-title">Admin</div>
     <button class="nav-item active" data-sec="vendedoras">👤 Vendedoras</button>
-    <button class="nav-item" data-sec="productos">📋 Info productos</button>
+    <button class="nav-item" data-sec="productos">🏭 Proveedores</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
     <button class="nav-item" data-sec="config">⚙ Configuración</button>
@@ -200,10 +200,54 @@ tr:last-child td{border-bottom:none;}
         <input type="file" id="v-precios-input" accept=".xlsx,.xls,.csv" style="display:none"/>
       </section>
 
-      <!-- INFO PRODUCTOS -->
+      <!-- PROVEEDORES -->
       <section class="section" id="sec-productos">
-        <h2 class="page-t">Info de productos</h2>
-        <p class="page-s">Odoo aporta el código, precio, stock y foto. Aquí subes un Excel con la información que Odoo no tiene (características, garantía, cómo venderlo…) y aparece en la ficha de cada producto, igual para todas las vendedoras.</p>
+        <h2 class="page-t">Proveedores</h2>
+        <p class="page-s">Cada proveedor conecta el portal a su propio catálogo — hoy vía Odoo (URL, base de datos, usuario y clave), o "Manual" para uno que todavía no tiene Odoo. Agregar un proveedor acá no cambia nada solo — hasta que se conecte el catálogo, no aparece en ninguna vitrina.</p>
+
+        <div class="card">
+          <div class="card-h">Nuevo proveedor</div>
+          <div class="row">
+            <div class="fld"><label class="fld-l">Código (interno)</label><input class="fld-in" id="pv-codigo" placeholder="Ej: aviv" style="text-transform:lowercase"/></div>
+            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="pv-nombre" placeholder="Ej: Aviv"/></div>
+            <div class="fld" style="max-width:170px"><label class="fld-l">Tipo</label>
+              <select class="fld-select" id="pv-tipo">
+                <option value="odoo">Odoo</option>
+                <option value="manual">Manual (sin Odoo)</option>
+              </select>
+            </div>
+          </div>
+          <div id="pv-odoo-fields">
+            <div class="row" style="margin-top:10px">
+              <div class="fld"><label class="fld-l">URL de Odoo</label><input class="fld-in" id="pv-odoo-url" placeholder="https://aviv.odoo.com"/></div>
+              <div class="fld"><label class="fld-l">Base de datos</label><input class="fld-in" id="pv-odoo-db" placeholder="aviv"/></div>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <div class="fld"><label class="fld-l">Usuario admin</label><input class="fld-in" id="pv-odoo-user" placeholder="admin@aviv.cl"/></div>
+              <div class="fld"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pv-odoo-pass" type="password" placeholder="Clave de Odoo"/></div>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <div class="fld"><label class="fld-l">Partner ID (a quién se factura)</label><input class="fld-in" id="pv-partner" type="number" placeholder="Ej: 42"/></div>
+              <div class="fld"><label class="fld-l">Categorías a mostrar (opcional)</label><input class="fld-in" id="pv-categorias" placeholder="Separadas por |"/></div>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <div class="fld"><label class="fld-l">URL de la API de ventas (opcional)</label><input class="fld-in" id="pv-venta-url" placeholder="https://cmcorpcl-aviv.odoo.com"/></div>
+              <div class="fld"><label class="fld-l">API key de ventas (opcional)</label><input class="fld-in" id="pv-venta-key" type="password" placeholder="API key"/></div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn dark" id="pv-crear">Crear proveedor</button>
+          </div>
+          <div class="msg" id="pv-msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Proveedores</div>
+          <div id="pv-list"><div class="empty">Cargando…</div></div>
+        </div>
+
+        <h2 class="page-t" style="margin-top:36px">Información adicional de producto</h2>
+        <p class="page-s">Odoo (o el catálogo manual) aporta el código, precio, stock y foto. Aquí subes un Excel con la información que no tiene (características, garantía, cómo venderlo…) y aparece en la ficha de cada producto, igual para todas las vendedoras.</p>
 
         <div class="card">
           <div class="card-h">Cómo armar tu Excel</div>
@@ -367,7 +411,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
-  if (btn.dataset.sec === 'productos') loadProductoInfo();
+  if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
 });
 
 /* ── CONFIGURACIÓN (una sola empresa) ── */
@@ -765,6 +809,128 @@ async function loadReporte() {
   } catch (e) {
     $('rep-list').innerHTML = $('rep-mes').innerHTML = $('rep-cat').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
   }
+}
+
+/* ── PROVEEDORES ── */
+// Fase 2: solo alta/edición/borrado + probar conexión. Todavía no conecta
+// el catálogo de nadie (eso es una fase siguiente) — agregar un proveedor
+// acá no cambia nada en la vitrina de las vendedoras.
+let PROVEEDORES = [];
+async function loadProveedores() {
+  try { PROVEEDORES = await api('/proveedores'); renderProveedores(); }
+  catch (e) { $('pv-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+$('pv-tipo').onchange = () => {
+  $('pv-odoo-fields').style.display = $('pv-tipo').value === 'manual' ? 'none' : '';
+};
+$('pv-crear').onclick = async () => {
+  const codigo = $('pv-codigo').value.trim().toLowerCase();
+  const nombre = $('pv-nombre').value.trim();
+  const tipo = $('pv-tipo').value;
+  if (!codigo || !nombre) return showMsg('pv-msg', 'Código y nombre son obligatorios', false);
+  const body = {
+    codigo, nombre, tipo,
+    partnerId: parseInt($('pv-partner').value) || null,
+    odooUrl: $('pv-odoo-url').value.trim(), odooDb: $('pv-odoo-db').value.trim(), odooUser: $('pv-odoo-user').value.trim(),
+    odooPassword: $('pv-odoo-pass').value,
+    ventaApiUrl: $('pv-venta-url').value.trim(), ventaApiKey: $('pv-venta-key').value,
+    categoriasFiltro: $('pv-categorias').value.split('|').map(s => s.trim()).filter(Boolean)
+  };
+  try {
+    await api('/proveedores', { method: 'POST', body: JSON.stringify(body) });
+    ['pv-codigo', 'pv-nombre', 'pv-odoo-url', 'pv-odoo-db', 'pv-odoo-user', 'pv-odoo-pass', 'pv-partner', 'pv-categorias', 'pv-venta-url', 'pv-venta-key']
+      .forEach(id => { $(id).value = ''; });
+    showMsg('pv-msg', '✓ Proveedor creado', true);
+    loadProveedores();
+  } catch (e) { showMsg('pv-msg', e.message, false); }
+};
+function renderProveedores() {
+  if (!PROVEEDORES.length) { $('pv-list').innerHTML = '<div class="empty">No hay proveedores todavía.</div>'; return; }
+  $('pv-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Odoo</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${PROVEEDORES.map(p => `<tr>
+      <td class="mono">${esc(p.codigo)}</td>
+      <td>${esc(p.nombre)}</td>
+      <td>${p.tipo === 'manual' ? 'Manual' : 'Odoo'}</td>
+      <td>${p.tipo === 'odoo' ? (p.odooPasswordSet ? '<span class="note">conectado</span>' : '<span class="note" style="color:var(--red)">sin clave</span>') : '<span class="note">—</span>'}</td>
+      <td><button class="toggle ${p.activo ? 'on' : ''}" data-pv-toggle="${p.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
+      <td>
+        ${p.tipo === 'odoo' ? `<button class="btn btn-sm" data-pv-probar="${p.id}">Probar conexión</button>` : ''}
+        <button class="btn btn-sm" data-pv-editar="${p.id}">Editar</button>
+        <button class="btn btn-sm danger" data-pv-del="${p.id}">Eliminar</button>
+      </td>
+    </tr>
+    <tr class="pv-edit-row" data-pv-edit-row="${p.id}" style="display:none"><td colspan="6"></td></tr>`).join('')}
+  </tbody></table>`;
+  $('pv-list').querySelectorAll('[data-pv-toggle]').forEach(b => b.onclick = async () => {
+    const p = PROVEEDORES.find(x => x.id == b.dataset.pvToggle);
+    try { await api('/proveedores/' + p.id, { method: 'PUT', body: JSON.stringify({ activo: !p.activo }) }); loadProveedores(); }
+    catch (e) { alert(e.message); }
+  });
+  $('pv-list').querySelectorAll('[data-pv-probar]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Probando…';
+    try { const r = await api('/proveedores/' + b.dataset.pvProbar + '/probar', { method: 'POST' }); alert('✓ Conexión correcta (uid ' + r.uid + ')'); }
+    catch (e) { alert('✕ ' + e.message); }
+    b.disabled = false; b.textContent = 'Probar conexión';
+  });
+  $('pv-list').querySelectorAll('[data-pv-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Eliminar este proveedor?')) return;
+    try { await api('/proveedores/' + b.dataset.pvDel, { method: 'DELETE' }); loadProveedores(); }
+    catch (e) { alert(e.message); }
+  });
+  $('pv-list').querySelectorAll('[data-pv-editar]').forEach(b => b.onclick = () => toggleProveedorEdit(b.dataset.pvEditar));
+}
+function toggleProveedorEdit(id) {
+  const row = document.querySelector('[data-pv-edit-row="' + id + '"]');
+  if (!row) return;
+  const abrir = row.style.display === 'none';
+  document.querySelectorAll('.pv-edit-row').forEach(r => r.style.display = 'none');
+  if (!abrir) return;
+  const p = PROVEEDORES.find(x => x.id == id);
+  const cell = row.children[0];
+  cell.innerHTML = `
+    <div class="row">
+      <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="pve-nombre" value="${esc(p.nombre)}"/></div>
+      <div class="fld" style="max-width:170px"><label class="fld-l">Tipo</label>
+        <select class="fld-select" id="pve-tipo">
+          <option value="odoo" ${p.tipo === 'odoo' ? 'selected' : ''}>Odoo</option>
+          <option value="manual" ${p.tipo === 'manual' ? 'selected' : ''}>Manual (sin Odoo)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label class="fld-l">URL de Odoo</label><input class="fld-in" id="pve-odoo-url" value="${esc(p.odooUrl || '')}"/></div>
+      <div class="fld"><label class="fld-l">Base de datos</label><input class="fld-in" id="pve-odoo-db" value="${esc(p.odooDb || '')}"/></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label class="fld-l">Usuario admin</label><input class="fld-in" id="pve-odoo-user" value="${esc(p.odooUser || '')}"/></div>
+      <div class="fld"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pve-odoo-pass" type="password" placeholder="${p.odooPasswordSet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label class="fld-l">Partner ID</label><input class="fld-in" id="pve-partner" type="number" value="${p.partnerId || ''}"/></div>
+      <div class="fld"><label class="fld-l">Categorías a mostrar</label><input class="fld-in" id="pve-categorias" value="${esc((p.categoriasFiltro || []).join('|'))}"/></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="fld"><label class="fld-l">URL de la API de ventas</label><input class="fld-in" id="pve-venta-url" value="${esc(p.ventaApiUrl || '')}"/></div>
+      <div class="fld"><label class="fld-l">API key de ventas</label><input class="fld-in" id="pve-venta-key" type="password" placeholder="${p.ventaApiKeySet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/></div>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn btn-sm dark" data-pv-guardar="${id}">Guardar cambios</button></div>`;
+  cell.querySelector('[data-pv-guardar]').onclick = async () => {
+    const body = {
+      nombre: $('pve-nombre').value.trim(), tipo: $('pve-tipo').value,
+      odooUrl: $('pve-odoo-url').value.trim(), odooDb: $('pve-odoo-db').value.trim(), odooUser: $('pve-odoo-user').value.trim(),
+      partnerId: parseInt($('pve-partner').value) || null,
+      categoriasFiltro: $('pve-categorias').value.split('|').map(s => s.trim()).filter(Boolean),
+      ventaApiUrl: $('pve-venta-url').value.trim()
+    };
+    if ($('pve-odoo-pass').value) body.odooPassword = $('pve-odoo-pass').value;
+    if ($('pve-venta-key').value) body.ventaApiKey = $('pve-venta-key').value;
+    try {
+      await api('/proveedores/' + id, { method: 'PUT', body: JSON.stringify(body) });
+      row.style.display = 'none';
+      loadProveedores();
+    } catch (e) { alert(e.message); }
+  };
+  row.style.display = '';
 }
 
 /* ── INFO PRODUCTOS ── */
