@@ -57,6 +57,9 @@ input,select,textarea{font-family:var(--f2);}
 .fld-l{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);display:block;margin-bottom:6px;}
 .fld-in,.fld-select{width:100%;height:42px;border:1px solid var(--line);padding:0 12px;font-size:13.5px;outline:none;border-radius:7px;background:var(--paper);}
 .fld-in:focus,.fld-select:focus{border-color:var(--hdr);}
+.fld-pass{position:relative;}
+.fld-pass .fld-in{padding-right:40px;}
+.pw-eye{position:absolute;right:4px;top:0;height:42px;width:34px;border:none;background:none;cursor:pointer;font-size:15px;color:var(--steel);}
 .btn{height:42px;padding:0 18px;border:1px solid var(--line);background:var(--white);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);border-radius:7px;white-space:nowrap;}
 .btn.dark{background:var(--hdr);color:var(--hdr-tx);border-color:var(--hdr);}
 .btn.danger{color:var(--red);border-color:#eccfcb;}
@@ -224,7 +227,7 @@ tr:last-child td{border-bottom:none;}
             </div>
             <div class="row" style="margin-top:10px">
               <div class="fld"><label class="fld-l">Usuario admin</label><input class="fld-in" id="pv-odoo-user" placeholder="admin@aviv.cl"/></div>
-              <div class="fld"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pv-odoo-pass" type="password" placeholder="Clave de Odoo"/></div>
+              <div class="fld fld-pass"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pv-odoo-pass" type="password" placeholder="Clave de Odoo"/><button type="button" class="pw-eye" data-eye-for="pv-odoo-pass">👁</button></div>
             </div>
             <div class="row" style="margin-top:10px">
               <div class="fld"><label class="fld-l">Partner ID (a quién se factura)</label><input class="fld-in" id="pv-partner" type="number" placeholder="Ej: 42"/></div>
@@ -232,7 +235,7 @@ tr:last-child td{border-bottom:none;}
             </div>
             <div class="row" style="margin-top:10px">
               <div class="fld"><label class="fld-l">URL de la API de ventas (opcional)</label><input class="fld-in" id="pv-venta-url" placeholder="https://cmcorpcl-aviv.odoo.com"/></div>
-              <div class="fld"><label class="fld-l">API key de ventas (opcional)</label><input class="fld-in" id="pv-venta-key" type="password" placeholder="API key"/></div>
+              <div class="fld fld-pass"><label class="fld-l">API key de ventas (opcional)</label><input class="fld-in" id="pv-venta-key" type="password" placeholder="API key"/><button type="button" class="pw-eye" data-eye-for="pv-venta-key">👁</button></div>
             </div>
           </div>
           <div class="row" style="margin-top:14px">
@@ -816,6 +819,16 @@ async function loadReporte() {
 // el catálogo de nadie (eso es una fase siguiente) — agregar un proveedor
 // acá no cambia nada en la vitrina de las vendedoras.
 let PROVEEDORES = [];
+// Un solo listener delegado sirve para los campos de clave estáticos (alta)
+// y los que se arman recién al abrir el editor (dinámicos).
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.pw-eye');
+  if (!btn) return;
+  const input = document.getElementById(btn.dataset.eyeFor);
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+  btn.textContent = input.type === 'password' ? '👁' : '🙈';
+});
 async function loadProveedores() {
   try { PROVEEDORES = await api('/proveedores'); renderProveedores(); }
   catch (e) { $('pv-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
@@ -903,7 +916,7 @@ function toggleProveedorEdit(id) {
     </div>
     <div class="row" style="margin-top:10px">
       <div class="fld"><label class="fld-l">Usuario admin</label><input class="fld-in" id="pve-odoo-user" value="${esc(p.odooUser || '')}"/></div>
-      <div class="fld"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pve-odoo-pass" type="password" placeholder="${p.odooPasswordSet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/></div>
+      <div class="fld fld-pass"><label class="fld-l">Clave / API key de Odoo</label><input class="fld-in" id="pve-odoo-pass" type="password" placeholder="${p.odooPasswordSet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/><button type="button" class="pw-eye" data-eye-for="pve-odoo-pass">👁</button></div>
     </div>
     <div class="row" style="margin-top:10px">
       <div class="fld"><label class="fld-l">Partner ID</label><input class="fld-in" id="pve-partner" type="number" value="${p.partnerId || ''}"/></div>
@@ -911,7 +924,7 @@ function toggleProveedorEdit(id) {
     </div>
     <div class="row" style="margin-top:10px">
       <div class="fld"><label class="fld-l">URL de la API de ventas</label><input class="fld-in" id="pve-venta-url" value="${esc(p.ventaApiUrl || '')}"/></div>
-      <div class="fld"><label class="fld-l">API key de ventas</label><input class="fld-in" id="pve-venta-key" type="password" placeholder="${p.ventaApiKeySet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/></div>
+      <div class="fld fld-pass"><label class="fld-l">API key de ventas</label><input class="fld-in" id="pve-venta-key" type="password" placeholder="${p.ventaApiKeySet ? '•••• (dejar vacío para no cambiar)' : 'Sin configurar'}"/><button type="button" class="pw-eye" data-eye-for="pve-venta-key">👁</button></div>
     </div>
     <div class="row" style="margin-top:14px"><button class="btn btn-sm dark" data-pv-guardar="${id}">Guardar cambios</button></div>`;
   cell.querySelector('[data-pv-guardar]').onclick = async () => {
