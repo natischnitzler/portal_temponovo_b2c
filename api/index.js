@@ -60,6 +60,62 @@ function xmlrpcCall(model, method, args, kwargs) {
   });
 }
 
+// ── ODOO AUTH GENÉRICO (multi-proveedor) ──────────────────────────
+// getUID/xmlrpcCall de arriba quedan intactos y siguen hablando SOLO con el
+// Odoo de Temponovo (los sigue usando readCfgOdooLegacy para el backfill de
+// vendedora_config — no se puede tocar esa conexión). Estas versiones toman
+// una conexión explícita {url, db, user, password} y sirven para cualquier
+// proveedor, incluido Temponovo (que para el catálogo/ventas nuevas se
+// resuelve igual que cualquier otro, leyendo su fila de "proveedores").
+const uidCache = {}; // cacheKey -> {uid, ts}
+function getUidFor(conn, cacheKey) {
+  if (!conn.user || !conn.password) {
+    return Promise.reject(new Error('Faltan credenciales de Odoo para este proveedor'));
+  }
+  const cached = uidCache[cacheKey];
+  if (cached && (Date.now() - cached.ts) < 3600000) return Promise.resolve(cached.uid);
+  const client = xmlrpc.createSecureClient({ host: new URL(conn.url).hostname, port: 443, path: '/xmlrpc/2/common' });
+  return new Promise((resolve, reject) => {
+    client.methodCall('authenticate', [conn.db, conn.user, conn.password, {}], (err, uid) => {
+      if (err) return reject(new Error('No se pudo conectar a Odoo (' + conn.db + '): ' + err.message));
+      if (!uid) return reject(new Error('Odoo rechazó las credenciales (usuario, clave o base "' + conn.db + '" equivocada).'));
+      uidCache[cacheKey] = { uid, ts: Date.now() };
+      resolve(uid);
+    });
+  });
+}
+function xmlrpcCallFor(conn, cacheKey, model, method, args, kwargs) {
+  return getUidFor(conn, cacheKey).then(uid => {
+    const client = xmlrpc.createSecureClient({ host: new URL(conn.url).hostname, port: 443, path: '/xmlrpc/2/object' });
+    return new Promise((resolve, reject) => {
+      client.methodCall('execute_kw', [conn.db, uid, conn.password, model, method, args, kwargs || {}],
+        (err, r) => err ? reject(err) : resolve(r));
+    });
+  });
+}
+// Conexión Odoo resuelta desde una fila de "proveedores" (con la clave ya descifrada).
+function connFor(proveedor) {
+  return { url: proveedor.odoo_url, db: proveedor.odoo_db, user: proveedor.odoo_user, password: proveedor.odoo_password_enc ? decryptCred(proveedor.odoo_password_enc) : '' };
+}
+async function getProveedorActivo(id) {
+  const { rows } = await sql`SELECT * FROM proveedores WHERE id = ${id} AND activo = true`;
+  if (!rows.length) throw new Error('Proveedor no encontrado o inactivo');
+  return rows[0];
+}
+async function getActiveProveedores() {
+  const { rows } = await sql`SELECT * FROM proveedores WHERE activo = true ORDER BY orden, id`;
+  return rows;
+}
+// Resuelve el proveedor de una fila de ventas_pendientes para reintentos.
+// Filas de antes del split no tienen proveedor_id — se asume "temponovo"
+// (el único proveedor que existía cuando se crearon).
+async function getProveedorDeVenta(venta) {
+  if (venta.proveedor_id) return getProveedorActivo(venta.proveedor_id);
+  const { rows } = await sql`SELECT * FROM proveedores WHERE codigo = 'temponovo' AND activo = true`;
+  if (!rows.length) throw new Error('No se pudo determinar el proveedor de esta venta');
+  return rows[0];
+}
+
 // ── CACHÉ EN MEMORIA ─────────────────────────────────────────────
 function shortErr(e) {
   const msg = (e && e.message) || String(e);
@@ -80,9 +136,12 @@ const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_t
 // ── NÚMERO DE VENTA (interno, nunca es el de Odoo) ───────────────
 // Cada vendedora tiene su propio correlativo, partiendo en 1, con la
 // inicial de su código adelante — ej. la vendedora "CAROLINA" ve sus
-// ventas como C00001, C00002, C00003... El correlativo se calcula al
-// vuelo (cuántas ventas de ESA vendedora tienen id <= esta), así que no
-// hace falta guardar ni mantener ningún contador aparte.
+// ventas como C00001, C00002, C00003... Desde el split por proveedor, UN
+// pedido de cliente puede generar varias filas en ventas_pendientes (una
+// por proveedor, mismo grupo_id) — así que el correlativo ya no se puede
+// calcular contando filas al vuelo (se desalinearía). Se calcula y se graba
+// UNA vez por grupo_id en orden_secuencia al insertar (ver /api/pedido), y
+// acá solo se formatea.
 function numeroVenta(codigo, secuencia) {
   const inicial = String(codigo || 'V').trim().charAt(0).toUpperCase() || 'V';
   return inicial + String(secuencia || 1).padStart(5, '0');
@@ -205,6 +264,21 @@ function ensureDb() {
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS proveedor_id INTEGER`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS orden_secuencia INTEGER`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS estado_manual TEXT`;
+    // Backfill único: las filas de antes del split (sin orden_secuencia)
+    // se numeran respetando el orden histórico por vendedora — mismo
+    // criterio que el ROW_NUMBER() que se usaba antes de guardar esto en
+    // una columna. Sin esto, el próximo pedido de una vendedora con
+    // historial volvería a arrancar en el N°1 y chocaría con sus números
+    // viejos (ver /api/pedido, que calcula el siguiente número como
+    // MAX(orden_secuencia)+1). Es idempotente — no toca filas que ya
+    // tengan orden_secuencia (todas las creadas después del split).
+    await sql`
+      UPDATE ventas_pendientes vp SET orden_secuencia = sub.rn
+      FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY vendedora_id ORDER BY id) AS rn
+        FROM ventas_pendientes WHERE orden_secuencia IS NULL
+      ) sub
+      WHERE vp.id = sub.id AND vp.orden_secuencia IS NULL`;
 
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
@@ -456,9 +530,11 @@ async function vendedoraBySlug(slug) {
 async function publicClienteBySlug(slug) {
   const v = await vendedoraBySlug(slug);
   if (!v) return null;
+  // partnerId (si existe) solo ayuda al backfill único de la config visual
+  // vieja — el catálogo/precios de la vitrina pública ya no dependen del
+  // Partner ID global de "configuracion" (cada proveedor tiene el suyo).
   const cfg = await getConfig();
-  if (!cfg.partner_id) return null;
-  return { id: v.id, code: v.codigo, partnerId: cfg.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
+  return { id: v.id, code: v.codigo, partnerId: cfg.partner_id || null, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
 }
 
 // ── ACCESO DE VENDEDORA (código + clave) ──────────────────────────
@@ -484,8 +560,11 @@ async function requireClient(req, res, next) {
   try {
     const { v, error } = await authenticateVendedora(req);
     if (error) return res.status(401).json({ error });
+    // El Partner ID global de "configuracion" ya no es requisito para nada
+    // del catálogo/carrito (cada proveedor tiene el suyo) — solo se sigue
+    // usando, si existe, como ayuda para el backfill único de la config
+    // visual vieja (ver readCfgDb). Por eso ya no bloquea acá si falta.
     const cfg = await getConfig();
-    if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
     req.vendedora = v; req.config = cfg;
     req.partnerId = cfg.partner_id; req.clientName = v.nombre; req.multiplicador = parseFloat(v.multiplicador) || 2;
     next();
@@ -560,54 +639,46 @@ function infoToList(campos) {
     .map(([k, v]) => ({ k: String(k).trim(), v: String(v).trim() }));
 }
 
-async function productosCliente(cliente) {
-  let prods = await fetchProductos();
-  const plId = await getPricelistId(cliente.partnerId);
-  if (plId && prods.length) {
-    try {
-      const ids = prods.map(p => p.id);
-      const precios = await xmlrpcCall('product.pricelist', 'get_products_price',
-        [[plId], ids, ids.map(() => 1), new Date().toISOString().slice(0, 10)]);
-      prods = prods.map(p => ({ ...p, precio: parseFloat(precios[p.id] || p.precio) }));
-    } catch (e) { console.warn('⚠ pricelist:', e.message); }
-  }
-  // Adjunta la info libre del Excel (si existe para ese SKU)
-  try {
-    const infoMap = await getProductoInfoMap();
-    prods = prods.map(p => {
-      const campos = infoMap[(p.sku || '').toUpperCase()];
-      return campos ? { ...p, info: infoToList(campos) } : p;
-    });
-  } catch (e) { console.warn('⚠ merge producto_info:', e.message); }
-  return prods;
-}
-
-// ── PRICELIST DEL CLIENTE ────────────────────────────────────────
-async function getPricelistId(partnerId) {
-  const cached = cacheGet('pl_' + partnerId); if (cached !== null) return cached;
-  const r = await xmlrpcCall('res.partner', 'read', [[partnerId], ['property_product_pricelist']]);
+// ── CATÁLOGO POR PROVEEDOR + MERGE (multi-proveedor) ──────────────
+// Reemplaza a las viejas fetchProductos()/getPricelistId()/productosCliente()
+// (single-Odoo) — ahora TODO proveedor activo (Temponovo incluido) se
+// resuelve de la misma forma, leyendo su propia fila de "proveedores".
+async function getPricelistIdProveedor(proveedor) {
+  if (!proveedor.partner_id) return null;
+  const cacheKey = 'pl_' + proveedor.id + '_' + proveedor.partner_id;
+  const cached = cacheGet(cacheKey); if (cached !== null) return cached;
+  const conn = connFor(proveedor);
+  const r = await xmlrpcCallFor(conn, 'prov_' + proveedor.id, 'res.partner', 'read', [[proveedor.partner_id], ['property_product_pricelist']]);
   const pl = r[0]?.property_product_pricelist;
   const plId = Array.isArray(pl) ? pl[0] : null;
-  cacheSet('pl_' + partnerId, plId, 3600000); return plId;
+  cacheSet(cacheKey, plId, 3600000);
+  return plId;
 }
 
-// ── FETCH RELOJES BASE ───────────────────────────────────────────
-async function fetchProductos() {
-  const cached = cacheGet('productos'); if (cached) return cached;
+// Catálogo base de UN proveedor (sin precio de lista todavía). Cada producto
+// lleva proveedorId/proveedorCodigo — necesario porque el id numérico de
+// Odoo y hasta el sku pueden repetirse entre dos proveedores distintos.
+async function fetchProductosProveedor(proveedor) {
+  const cacheKey = 'productos_' + proveedor.id;
+  const cached = cacheGet(cacheKey); if (cached) return cached;
+  if (proveedor.tipo !== 'odoo') { cacheSet(cacheKey, [], 30 * 60 * 1000); return []; } // 'manual': fase 5, catálogo propio pendiente
+  const conn = connFor(proveedor);
+  const key = 'prov_' + proveedor.id;
 
   const domain = [['sale_ok', '=', true], ['active', '=', true]];
-  if (CATEGORIAS_OK.length) {
-    const categIds = await xmlrpcCall('product.category', 'search', [[['complete_name', 'in', CATEGORIAS_OK]]]);
+  const categoriasFiltro = proveedor.categorias_filtro || [];
+  if (categoriasFiltro.length) {
+    const categIds = await xmlrpcCallFor(conn, key, 'product.category', 'search', [[['complete_name', 'in', categoriasFiltro]]]);
     if (categIds.length) domain.push(['categ_id', 'in', categIds]);
   }
 
-  const prodIds = await xmlrpcCall('product.product', 'search', [domain]);
-  if (!prodIds.length) return [];
+  const prodIds = await xmlrpcCallFor(conn, key, 'product.product', 'search', [domain]);
+  if (!prodIds.length) { cacheSet(cacheKey, [], 30 * 60 * 1000); return []; }
 
   const result = [];
   for (let i = 0; i < prodIds.length; i += 200) {
     const chunk = prodIds.slice(i, i + 200);
-    const prods = await xmlrpcCall('product.product', 'read', [chunk, [
+    const prods = await xmlrpcCallFor(conn, key, 'product.product', 'read', [chunk, [
       'id', 'default_code', 'name', 'list_price', 'categ_id',
       'barcode', 'qty_available',
       'product_template_attribute_value_ids', 'product_tmpl_id'
@@ -616,14 +687,14 @@ async function fetchProductos() {
     const tmplIds = [...new Set(prods.map(p => Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id))];
     let tmplMap = {};
     if (tmplIds.length) {
-      const tmpls = await xmlrpcCall('product.template', 'read', [tmplIds, ['id', 'description_sale']]);
+      const tmpls = await xmlrpcCallFor(conn, key, 'product.template', 'read', [tmplIds, ['id', 'description_sale']]);
       tmpls.forEach(t => { tmplMap[t.id] = t; });
     }
 
     const attrValIds = [...new Set(prods.flatMap(p => p.product_template_attribute_value_ids || []))];
     let attrMap = {};
     if (attrValIds.length) {
-      const attrVals = await xmlrpcCall('product.template.attribute.value', 'read',
+      const attrVals = await xmlrpcCallFor(conn, key, 'product.template.attribute.value', 'read',
         [attrValIds, ['id', 'name', 'attribute_id']]);
       attrVals.forEach(v => {
         const attrName = Array.isArray(v.attribute_id) ? v.attribute_id[1] : '';
@@ -638,6 +709,8 @@ async function fetchProductos() {
         .map(id => attrMap[id]).filter(Boolean);
       result.push({
         id: p.id,
+        proveedorId: proveedor.id,
+        proveedorCodigo: proveedor.codigo,
         sku: p.default_code || '',
         nombre: p.name || '',
         descripcion: tmpl.description_sale || '',
@@ -649,8 +722,50 @@ async function fetchProductos() {
       });
     });
   }
-  cacheSet('productos', result, 30 * 60 * 1000);
+  cacheSet(cacheKey, result, 30 * 60 * 1000);
   return result;
+}
+
+// Catálogo de UN proveedor, con su precio de lista aplicado (si tiene partner_id/pricelist).
+async function productosClienteProveedor(proveedor) {
+  let prods = await fetchProductosProveedor(proveedor);
+  if (proveedor.partner_id && prods.length) {
+    try {
+      const plId = await getPricelistIdProveedor(proveedor);
+      if (plId) {
+        const conn = connFor(proveedor);
+        const ids = prods.map(p => p.id);
+        const precios = await xmlrpcCallFor(conn, 'prov_' + proveedor.id, 'product.pricelist', 'get_products_price',
+          [[plId], ids, ids.map(() => 1), new Date().toISOString().slice(0, 10)]);
+        prods = prods.map(p => ({ ...p, precio: parseFloat(precios[p.id] || p.precio) }));
+      }
+    } catch (e) { console.warn('⚠ pricelist de ' + proveedor.codigo + ':', e.message); }
+  }
+  return prods;
+}
+
+// Catálogo combinado de TODOS los proveedores activos. Si uno falla (Odoo
+// caído, credenciales vencidas), se loguea y se salta — no tumba a los demás.
+async function productosClienteMulti() {
+  const proveedores = await getActiveProveedores();
+  let todos = [];
+  for (const proveedor of proveedores) {
+    try {
+      const prods = await productosClienteProveedor(proveedor);
+      todos = todos.concat(prods);
+    } catch (e) { console.warn('⚠ catálogo de ' + proveedor.codigo + ':', e.message); }
+  }
+  // Info libre del Excel del admin — keyeada por SKU puro (no por proveedor,
+  // simplificación deliberada: Temponovo y Aviv usan formatos de código
+  // visiblemente distintos, ver plan).
+  try {
+    const infoMap = await getProductoInfoMap();
+    todos = todos.map(p => {
+      const campos = infoMap[(p.sku || '').toUpperCase()];
+      return campos ? { ...p, info: infoToList(campos) } : p;
+    });
+  } catch (e) { console.warn('⚠ merge producto_info:', e.message); }
+  return todos;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -660,12 +775,10 @@ app.get('/api/productos', async (req, res) => {
   try {
     const { v, error } = await authenticateVendedora(req);
     if (error) return res.status(401).json({ error });
-    const cfg = await getConfig();
-    if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
 
     const cached = cacheGet('cat_' + v.codigo); if (cached) return res.json(cached);
 
-    let prods = await productosCliente({ partnerId: cfg.partner_id });
+    let prods = await productosClienteMulti();
     const categorias = v.categorias || [];
     if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
 
@@ -684,25 +797,33 @@ app.delete('/api/productos/cache', requireAdmin, (_req, res) => {
 });
 
 // ── IMAGEN INDIVIDUAL (miniatura o grande) ───────────────────────
-// GET /api/imagen/:id?c=CODIGO&t=TOKEN&s=g   → image_1024 (detalle / probar)
+// GET /api/imagen/:proveedorId/:id?c=CODIGO&t=TOKEN&s=g → image_1024 (detalle / probar)
+// El id numérico de Odoo NO es único entre proveedores (cada Odoo tiene su
+// propia numeración) — va namespaced por proveedorId en la URL y en el
+// caché, para no mezclar/pisar imágenes de dos proveedores distintos.
 // Usa el token de imagen (ver imgToken), nunca la clave real — un <img src>
 // no puede mandar headers, y una clave en la URL queda en logs/historial.
-app.get('/api/imagen/:id', async (req, res) => {
+app.get('/api/imagen/:proveedorId/:id', async (req, res) => {
   try {
     const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
     const token  = req.headers['x-client-token'] || req.query.t || '';
     const v = await getVendedora(codigo);
     if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).send('No autorizado');
+    const proveedorId = parseInt(req.params.proveedorId);
     const id = parseInt(req.params.id);
-    if (!id) return res.status(400).send('ID inválido');
+    if (!proveedorId || !id) return res.status(400).send('ID inválido');
     const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
 
-    const key = 'img_' + field + '_' + id;
+    const key = 'img_' + proveedorId + '_' + field + '_' + id;
     let b64 = cacheGet(key);
     if (!b64) {
-      const prods = await xmlrpcCall('product.product', 'read', [[id], [field]]);
-      b64 = prods && prods[0] ? prods[0][field] : null;
-      if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (proveedor && proveedor.tipo === 'odoo') {
+        const conn = connFor(proveedor);
+        const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
+        b64 = prods && prods[0] ? prods[0][field] : null;
+        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      }
     }
     if (!b64) {
       const px = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -714,7 +835,7 @@ app.get('/api/imagen/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
     res.send(buf);
   } catch (e) {
-    console.error('❌ /api/imagen/' + req.params.id, e.message);
+    console.error('❌ /api/imagen/' + req.params.proveedorId + '/' + req.params.id, e.message);
     res.status(500).send('No se pudo cargar la imagen');
   }
 });
@@ -737,12 +858,15 @@ function httpsGetJson(url, headers) {
   });
 }
 
-// ── CLIENTE DE LA API DE VENTAS TEMPONOVO ────────────────────────
-function tempoApiCall(method, path, { headers = {}, body } = {}) {
+// ── CLIENTE DE API DE VENTAS PROPIA DE UN PROVEEDOR (estilo Temponovo) ──
+// Generalizado: toma el proveedor (con su venta_api_url/venta_api_key_enc/
+// venta_vendor_email propios) en vez de las constantes de módulo TEMPO_*.
+function tempoApiCall(proveedor, method, path, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
-    if (!TEMPO_API_KEY) return reject(new Error('Falta TEMPONOVO_API_KEY en las variables de entorno del servidor'));
+    const apiKey = proveedor.venta_api_key_enc ? decryptCred(proveedor.venta_api_key_enc) : '';
+    if (!apiKey) return reject(new Error('Falta la API key de ventas de ' + proveedor.nombre));
     let url;
-    try { url = new URL(TEMPO_API_URL + path); } catch { return reject(new Error('TEMPONOVO_API_URL inválida')); }
+    try { url = new URL((proveedor.venta_api_url || '').replace(/\/$/, '') + path); } catch { return reject(new Error('URL de la API de ventas de ' + proveedor.nombre + ' inválida')); }
     const data = body ? JSON.stringify(body) : null;
     const req = https.request({
       method,
@@ -750,7 +874,7 @@ function tempoApiCall(method, path, { headers = {}, body } = {}) {
       port: 443,
       path: url.pathname + url.search,
       headers: {
-        'Authorization': TEMPO_API_KEY,
+        'Authorization': apiKey,
         'Content-Type': 'application/json',
         ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
         ...headers
@@ -768,14 +892,14 @@ function tempoApiCall(method, path, { headers = {}, body } = {}) {
         reject(err);
       });
     });
-    req.on('timeout', () => req.destroy(new Error('Tiempo de espera agotado llamando a la API de Temponovo')));
+    req.on('timeout', () => req.destroy(new Error('Tiempo de espera agotado llamando a la API de ventas de ' + proveedor.nombre)));
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
   });
 }
-async function tempoCrearVenta({ vendorEmail, observacion, tipoVenta, productos }) {
-  const r = await tempoApiCall('POST', '/sale/create', {
+async function tempoCrearVenta(proveedor, { vendorEmail, observacion, tipoVenta, productos }) {
+  const r = await tempoApiCall(proveedor, 'POST', '/sale/create', {
     body: { data: {
       vendor_email: vendorEmail || undefined,
       tempo_observation: observacion || '',
@@ -784,11 +908,11 @@ async function tempoCrearVenta({ vendorEmail, observacion, tipoVenta, productos 
     } }
   });
   const d = (r && r.data) || r || {};
-  if (!d.Id_Venta) throw new Error('La API de Temponovo no devolvió Id_Venta');
+  if (!d.Id_Venta) throw new Error('La API de ' + proveedor.nombre + ' no devolvió Id_Venta');
   return d; // { Id_Venta, Nombre }
 }
-async function tempoAgregarProductos(idVenta, productos) {
-  const r = await tempoApiCall('POST', '/sale/update', {
+async function tempoAgregarProductos(proveedor, idVenta, productos) {
+  const r = await tempoApiCall(proveedor, 'POST', '/sale/update', {
     headers: { Idventa: String(idVenta) },
     body: { data: { productos } }
   });
@@ -799,8 +923,8 @@ async function tempoAgregarProductos(idVenta, productos) {
 // (200, con Id_Venta y Nombre) sin haber agregado nada de verdad — por
 // ejemplo si la venta ya está cancelada, bloqueada o facturada — así que no
 // alcanza con mirar el código de respuesta, hay que releer la venta.
-async function tempoConsultarVenta(idVenta) {
-  const r = await tempoApiCall('GET', '/api/sale', { headers: { Idventa: String(idVenta) } });
+async function tempoConsultarVenta(proveedor, idVenta) {
+  const r = await tempoApiCall(proveedor, 'GET', '/api/sale', { headers: { Idventa: String(idVenta) } });
   return (r && r.data) || r || {};
 }
 // Devuelve los SKU que se intentaron agregar pero que NO aparecen en la
@@ -810,28 +934,29 @@ function productosFaltantes(productosEnviados, ventaInfo) {
   const skusEnVenta = new Set(lineas.map(l => String(l.Sku || l.sku || '').toUpperCase()));
   return productosEnviados.filter(p => !skusEnVenta.has(String(p.sku).toUpperCase()));
 }
-// Intenta agregar la venta a la ÚNICA "venta abierta" global (compartida por
-// todas las vendedoras, porque todas facturan al mismo partner). Si esa
-// venta ya no admite cambios de verdad (aunque la API haya respondido
-// "éxito"), abre una venta nueva automáticamente.
+// Intenta agregar la venta a la ÚNICA "venta abierta" de ESTE proveedor
+// (compartida por todas las vendedoras que le venden, porque todas facturan
+// al mismo partner). Si esa venta ya no admite cambios de verdad (aunque la
+// API haya respondido "éxito"), abre una venta nueva automáticamente.
 //
-// Usa un lock a nivel de fila (SELECT ... FOR UPDATE) sobre "configuracion"
+// Usa un lock a nivel de fila (SELECT ... FOR UPDATE) sobre la fila del
+// proveedor en "proveedores" (antes era la fila única de "configuracion")
 // mientras dura la llamada a la API, para que si dos vendedoras mandan un
 // pedido casi al mismo tiempo, el segundo espere a que termine el primero
 // en vez de leer el mismo estado viejo y terminar abriendo 2 ventas nuevas.
-async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
+async function intentarEnviarVentaApi(proveedor, { productos, observacion, tipoVenta }, v) {
   const productosApi = (productos || []).map(p => ({ sku: p.sku, quantity: parseFloat(p.quantity) || 1 }));
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows } = await client.query('SELECT venta_abierta_id, venta_abierta_nombre FROM configuracion WHERE id = 1 FOR UPDATE');
+    const { rows } = await client.query('SELECT venta_abierta_id, venta_abierta_nombre FROM proveedores WHERE id = $1 FOR UPDATE', [proveedor.id]);
     let idVenta = rows[0]?.venta_abierta_id || null;
     let nombreOdoo = rows[0]?.venta_abierta_nombre || null;
 
     if (idVenta) {
       try {
-        await tempoAgregarProductos(idVenta, productosApi);
-        const info = await tempoConsultarVenta(idVenta);
+        await tempoAgregarProductos(proveedor, idVenta, productosApi);
+        const info = await tempoConsultarVenta(proveedor, idVenta);
         const faltan = productosFaltantes(productosApi, info);
         if (faltan.length) {
           throw new Error('La venta no reflejó los productos agregados (' + faltan.map(p => p.sku).join(', ') + ') — probablemente está bloqueada, facturada o cancelada en Odoo');
@@ -839,12 +964,13 @@ async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
         await client.query('COMMIT');
         return { idVenta, nombreOdoo: info.Nombre || nombreOdoo };
       } catch (e) {
-        console.warn(`⚠ venta abierta ${idVenta} ya no admite cambios de verdad (${shortErr(e)}), se abre una nueva`);
+        console.warn(`⚠ venta abierta ${idVenta} de ${proveedor.nombre} ya no admite cambios de verdad (${shortErr(e)}), se abre una nueva`);
       }
     }
     const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
-    const r = await tempoCrearVenta({ vendorEmail: TEMPO_VENDOR_EMAIL, observacion: obsConVendedora, tipoVenta, productos: productosApi });
-    await client.query('UPDATE configuracion SET venta_abierta_id = $1, venta_abierta_nombre = $2 WHERE id = 1', [r.Id_Venta, r.Nombre]);
+    const vendorEmail = proveedor.venta_vendor_email || undefined;
+    const r = await tempoCrearVenta(proveedor, { vendorEmail, observacion: obsConVendedora, tipoVenta, productos: productosApi });
+    await client.query('UPDATE proveedores SET venta_abierta_id = $1, venta_abierta_nombre = $2 WHERE id = $3', [r.Id_Venta, r.Nombre, proveedor.id]);
     await client.query('COMMIT');
     return { idVenta: r.Id_Venta, nombreOdoo: r.Nombre };
   } catch (e) {
@@ -853,6 +979,70 @@ async function intentarEnviarVenta({ productos, observacion, tipoVenta }, v) {
   } finally {
     client.release();
   }
+}
+
+// ── VENTA DIRECTA EN ODOO (proveedor sin API de ventas propia, ej. Aviv) ──
+// Mismo patrón de lock + "agregar a la venta abierta, si ya no se puede
+// abrir una nueva" que intentarEnviarVentaApi, pero contra Odoo directo:
+// resuelve los product.product por default_code y crea/edita un sale.order
+// estándar por XML-RPC (no hay middleware REST de por medio).
+async function odooIntentarVentaDirecta(proveedor, { productos, observacion }, v) {
+  const conn = connFor(proveedor);
+  const key = 'prov_' + proveedor.id;
+  const skus = (productos || []).map(p => p.sku);
+  const encontrados = await xmlrpcCallFor(conn, key, 'product.product', 'search_read',
+    [[['default_code', 'in', skus]]], { fields: ['id', 'default_code'] });
+  const idPorSku = {}; encontrados.forEach(r => { idPorSku[r.default_code] = r.id; });
+  const faltantes = (productos || []).filter(p => !idPorSku[p.sku]);
+  if (faltantes.length) {
+    throw new Error('SKU no encontrado en Odoo de ' + proveedor.nombre + ': ' + faltantes.map(p => p.sku).join(', '));
+  }
+  const obsConVendedora = `Vendedora: ${v.nombre} (${v.codigo})` + (observacion ? ' | ' + observacion : '');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT venta_abierta_id, venta_abierta_nombre FROM proveedores WHERE id = $1 FOR UPDATE', [proveedor.id]);
+    let idVenta = rows[0]?.venta_abierta_id || null;
+    let nombreOdoo = rows[0]?.venta_abierta_nombre || null;
+
+    if (idVenta) {
+      try {
+        const [venta] = await xmlrpcCallFor(conn, key, 'sale.order', 'read', [[idVenta], ['state']]);
+        if (!venta || !['draft', 'sent'].includes(venta.state)) throw new Error('la venta ya no está editable (estado: ' + (venta ? venta.state : 'no existe') + ')');
+        for (const p of productos) {
+          await xmlrpcCallFor(conn, key, 'sale.order.line', 'create',
+            [{ order_id: idVenta, product_id: idPorSku[p.sku], product_uom_qty: parseFloat(p.quantity) || 1 }]);
+        }
+        await client.query('COMMIT');
+        return { idVenta, nombreOdoo };
+      } catch (e) {
+        console.warn(`⚠ venta abierta ${idVenta} de ${proveedor.nombre} ya no admite cambios de verdad (${shortErr(e)}), se abre una nueva`);
+      }
+    }
+    const orderLines = productos.map(p => [0, 0, { product_id: idPorSku[p.sku], product_uom_qty: parseFloat(p.quantity) || 1 }]);
+    const nuevoId = await xmlrpcCallFor(conn, key, 'sale.order', 'create',
+      [{ partner_id: proveedor.partner_id, order_line: orderLines, client_order_ref: obsConVendedora }]);
+    const [rec] = await xmlrpcCallFor(conn, key, 'sale.order', 'read', [[nuevoId], ['name']]);
+    await client.query('UPDATE proveedores SET venta_abierta_id = $1, venta_abierta_nombre = $2 WHERE id = $3', [nuevoId, rec.name, proveedor.id]);
+    await client.query('COMMIT');
+    return { idVenta: nuevoId, nombreOdoo: rec.name };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// Elige cómo mandar la venta según si el proveedor tiene su propia API de
+// ventas (venta_api_url + venta_api_key_enc, estilo Temponovo) o no (se crea
+// un sale.order directo en su Odoo, estilo Aviv).
+function enviarVentaProveedor(proveedor, payload, v) {
+  if (proveedor.venta_api_url && proveedor.venta_api_key_enc) {
+    return intentarEnviarVentaApi(proveedor, payload, v);
+  }
+  return odooIntentarVentaDirecta(proveedor, payload, v);
 }
 
 const GEOCODE_UA = 'VitrinaTemponovo/1.0 (+https://temponovo.odoo.com)';
@@ -911,7 +1101,7 @@ app.get('/api/fotos', async (req, res) => {
     if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).json({ error: 'No autorizado' });
 
     const familia = (req.query.familia || '').trim().toLowerCase();
-    let prods = await fetchProductos();
+    let prods = await productosClienteMulti();
     if (familia) prods = prods.filter(p => famOf(p.categoria).toLowerCase() === familia);
     if (!prods.length) return res.status(404).json({ error: 'Sin productos para esa familia' });
 
@@ -922,16 +1112,30 @@ app.get('/api/fotos', async (req, res) => {
     archive.on('error', e => { console.error('❌ zip', e.message); try { res.end(); } catch {} });
     archive.pipe(res);
 
-    const ids = prods.map(p => p.id);
-    const bySku = {}; prods.forEach(p => { bySku[p.id] = p.sku || String(p.id); });
-    for (let i = 0; i < ids.length; i += 50) {
-      const chunk = ids.slice(i, i + 50);
-      const imgs = await xmlrpcCall('product.product', 'read', [chunk, ['id', 'image_512']]);
-      imgs.forEach(r => {
-        if (!r.image_512) return;
-        const name = String(bySku[r.id]).replace(/[^a-zA-Z0-9_-]/g, '_') + '.png';
-        archive.append(Buffer.from(r.image_512, 'base64'), { name });
-      });
+    // Agrupa por proveedor — cada Odoo tiene su propia numeración de id, así
+    // que hay que leer las imágenes por separado de cada uno (y el nombre
+    // del archivo en el zip lleva el código del proveedor, para no pisar
+    // fotos de dos proveedores con el mismo sku o id).
+    const porProveedor = new Map();
+    prods.forEach(p => {
+      if (!porProveedor.has(p.proveedorId)) porProveedor.set(p.proveedorId, { proveedorCodigo: p.proveedorCodigo, items: [] });
+      porProveedor.get(p.proveedorId).items.push(p);
+    });
+    for (const [proveedorId, grupo] of porProveedor) {
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (!proveedor || proveedor.tipo !== 'odoo') continue;
+      const conn = connFor(proveedor);
+      const bySku = {}; grupo.items.forEach(p => { bySku[p.id] = p.sku || String(p.id); });
+      const ids = grupo.items.map(p => p.id);
+      for (let i = 0; i < ids.length; i += 50) {
+        const chunk = ids.slice(i, i + 50);
+        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [chunk, ['id', 'image_512']]);
+        imgs.forEach(r => {
+          if (!r.image_512) return;
+          const name = grupo.proveedorCodigo + '-' + String(bySku[r.id]).replace(/[^a-zA-Z0-9_-]/g, '_') + '.png';
+          archive.append(Buffer.from(r.image_512, 'base64'), { name });
+        });
+      }
     }
     await archive.finalize();
   } catch (e) {
@@ -951,82 +1155,175 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     const { productos, nombreVenta, direccion, comuna, entrega, telefono, email, nota, metodoPago } = req.body?.data || {};
     if (!productos?.length) return res.status(400).json({ error: 'Sin productos' });
 
-    // total estimado — solo para mostrar en "Mis Ventas"/reporte local, no se manda a Odoo
-    let prods = [];
-    try { prods = await productosCliente({ partnerId: req.partnerId }); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
-    const bySku = {}; prods.forEach(p => { bySku[p.sku] = p; });
+    // Catálogo combinado — sirve para el precio/categoría por línea y para
+    // saber a qué proveedor pertenece cada producto (si una línea no trae
+    // proveedorId, ej. una pestaña vieja abierta durante el deploy, se
+    // resuelve por sku contra este catálogo como compatibilidad).
+    let catalogo = [];
+    try { catalogo = await productosClienteMulti(); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
+    const porPid = {}; catalogo.forEach(p => { porPid[p.proveedorId + '::' + p.sku] = p; });
+    const primeroPorSku = {}; catalogo.forEach(p => { if (!primeroPorSku[p.sku]) primeroPorSku[p.sku] = p; });
     const mult = req.multiplicador || 2;
-    // Se guarda categoría y total POR LÍNEA (no solo el sku/cantidad que pide
-    // Odoo) para poder reportar después por tipo de producto sin tener que
-    // volver a leer el catálogo — que puede haber cambiado o perdido ese SKU.
-    let total = 0;
-    const productosConDetalle = productos.map(p => {
-      const info = bySku[p.sku];
-      const qty = parseFloat(p.quantity) || 1;
-      const lineaTotal = Math.round((info ? info.precio : 0) * mult * qty);
-      total += lineaTotal;
-      return { sku: p.sku, quantity: qty, categoria: info ? famOf(info.categoria) : '', total: lineaTotal };
-    });
+
+    // Agrupa el carrito por proveedor — de acá sale el split real.
+    const grupos = new Map(); // proveedorId -> [{sku, quantity}]
+    for (const p of productos) {
+      const fallback = primeroPorSku[p.sku];
+      const proveedorId = p.proveedorId || (fallback ? fallback.proveedorId : null);
+      if (!proveedorId) return res.status(400).json({ error: 'No se pudo identificar el proveedor del producto "' + p.sku + '" — refrescá la página e intentá de nuevo.' });
+      if (!grupos.has(proveedorId)) grupos.set(proveedorId, []);
+      grupos.get(proveedorId).push(p);
+    }
 
     const entregaFinal = entrega === 'retiro' ? 'retiro' : 'despacho';
     const notaFinal = [nombreVenta, telefono, email, nota, metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
+    const grupoId = crypto.randomUUID();
+    const resultados = [];
 
-    let idVenta = null, nombreOdoo = null, errorMsg = null;
-    try {
-      const r = await intentarEnviarVenta({
-        productos: productosConDetalle, observacion: notaFinal,
-        tipoVenta: entregaFinal === 'retiro' ? 'Retiro' : 'Despacho'
-      }, req.vendedora);
-      idVenta = r.idVenta; nombreOdoo = r.nombreOdoo;
-    } catch (e) { errorMsg = shortErr(e); console.error('❌ envío a API Temponovo', e.message); }
+    for (const [proveedorId, lineas] of grupos) {
+      let proveedor = null;
+      try { proveedor = await getProveedorActivo(proveedorId); } catch {}
 
-    const estado = (idVenta && !errorMsg) ? 'enviada' : 'error';
-    const { rows } = await sql`
-      INSERT INTO ventas_pendientes
-        (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at)
-      VALUES
-        (${req.vendedora.id}, ${JSON.stringify(productosConDetalle)}, ${nombreVenta || ''},
-         ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(total)},
-         ${estado}, ${idVenta}, ${nombreOdoo}, ${errorMsg}, ${estado === 'enviada' ? new Date() : null})
-      RETURNING id`;
+      // Se guarda categoría y total POR LÍNEA (no solo el sku/cantidad que
+      // pide Odoo) para poder reportar después por tipo de producto sin
+      // tener que volver a leer el catálogo — que puede haber cambiado.
+      let total = 0;
+      const productosConDetalle = lineas.map(l => {
+        const info = porPid[proveedorId + '::' + l.sku] || primeroPorSku[l.sku];
+        const qty = parseFloat(l.quantity) || 1;
+        const lineaTotal = Math.round((info ? info.precio : 0) * mult * qty);
+        total += lineaTotal;
+        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info.categoria) : '', total: lineaTotal };
+      });
 
-    if (errorMsg) {
-      const { rows: seqRows } = await sql`
-        SELECT COUNT(*)::int AS n FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} AND id <= ${rows[0].id}`;
-      return res.status(502).json({
-        error: 'Tu venta quedó guardada (N° ' + numeroVenta(req.vendedora.codigo, seqRows[0].n) + '), pero no pudimos terminar de procesarla todavía. La estamos reintentando — te avisamos apenas quede lista.',
-        orderId: rows[0].id, pending: true
+      let idVenta = null, nombreOdoo = null, errorMsg = null;
+      if (!proveedor) {
+        errorMsg = 'Proveedor no disponible';
+      } else {
+        try {
+          const r = await enviarVentaProveedor(proveedor, {
+            productos: productosConDetalle, observacion: notaFinal,
+            tipoVenta: entregaFinal === 'retiro' ? 'Retiro' : 'Despacho'
+          }, req.vendedora);
+          idVenta = r.idVenta; nombreOdoo = r.nombreOdoo;
+        } catch (e) { errorMsg = shortErr(e); console.error('❌ envío a proveedor ' + (proveedor?.codigo || proveedorId), e.message); }
+      }
+
+      resultados.push({
+        proveedorId, proveedorNombre: proveedor ? proveedor.nombre : ('proveedor #' + proveedorId),
+        estado: (idVenta && !errorMsg) ? 'enviada' : 'error',
+        idVenta, nombreOdoo, errorMsg, productosConDetalle, total
       });
     }
-    const { rows: seqRowsOk } = await sql`
-      SELECT COUNT(*)::int AS n FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id} AND id <= ${rows[0].id}`;
-    res.json({ ok: true, orderId: rows[0].id, numero: numeroVenta(req.vendedora.codigo, seqRowsOk[0].n), seguimiento: 'recibido', message: 'Venta recibida' });
+
+    // Una fila en ventas_pendientes por proveedor, todas con el mismo grupo_id.
+    for (const r of resultados) {
+      await sql`
+        INSERT INTO ventas_pendientes
+          (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at, grupo_id, proveedor_id)
+        VALUES
+          (${req.vendedora.id}, ${JSON.stringify(r.productosConDetalle)}, ${nombreVenta || ''},
+           ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(r.total)},
+           ${r.estado}, ${r.idVenta}, ${r.nombreOdoo}, ${r.errorMsg}, ${r.estado === 'enviada' ? new Date() : null}, ${grupoId}, ${r.proveedorId})`;
+    }
+
+    // orden_secuencia: una sola vez por grupo_id (no por fila — con N filas
+    // por pedido, contar filas al vuelo como antes desalinearía el número).
+    // MAX(orden_secuencia)+1 en vez de COUNT(DISTINCT grupo_id): las ventas
+    // de antes del split no tienen grupo_id (quedarían sin contar) pero SÍ
+    // tienen orden_secuencia gracias al backfill de ensureDb() — así el
+    // número sigue la numeración histórica de la vendedora sin chocar.
+    const { rows: seqRows } = await sql`SELECT COALESCE(MAX(orden_secuencia), 0)::int AS n FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id}`;
+    const secuencia = seqRows[0].n + 1;
+    await sql`UPDATE ventas_pendientes SET orden_secuencia = ${secuencia} WHERE grupo_id = ${grupoId}`;
+    const numero = numeroVenta(req.vendedora.codigo, secuencia);
+
+    const fallidos = resultados.filter(r => r.estado === 'error');
+    if (fallidos.length) {
+      return res.status(502).json({
+        error: 'Tu venta quedó guardada (N° ' + numero + '), pero no pudimos terminar de procesarla con: ' + fallidos.map(r => r.proveedorNombre).join(', ') + '. La estamos reintentando — te avisamos apenas quede lista.',
+        orderId: grupoId, pending: true
+      });
+    }
+    res.json({
+      ok: true, orderId: grupoId, numero, seguimiento: 'recibido',
+      message: resultados.length > 1
+        ? `Venta recibida — se separó en ${resultados.length} envíos (${resultados.map(r => r.proveedorNombre).join(', ')})`
+        : 'Venta recibida'
+    });
   } catch (e) { console.error('❌ /api/pedido', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
+// Un pedido de cliente puede tener varias filas en ventas_pendientes (una
+// por proveedor, mismo grupo_id) desde el split automático. Acá se agrupan
+// de vuelta en un solo objeto por pedido, con un "envios[]" por proveedor —
+// pero también se replican los campos de siempre (estado/seguimiento/
+// lineas...) a nivel superior tomando el primer envío, para que un pedido
+// de un solo proveedor (el 99% de los casos hoy) se siga viendo exactamente
+// igual que antes sin que el frontend tenga que mirar "envios" para nada.
+function pedidoEstadoGeneral(envios) {
+  if (envios.some(e => e.estado === 'error')) return 'error';
+  if (envios.every(e => e.estado === 'cancelada')) return 'cancelada';
+  return 'enviada';
+}
 app.get('/api/pedidos', requireClient, async (req, res) => {
   try {
     const { rows } = await sql`
-      SELECT *, ROW_NUMBER() OVER (ORDER BY id)::int AS secuencia
-      FROM ventas_pendientes WHERE vendedora_id = ${req.vendedora.id}
-      ORDER BY created_at DESC LIMIT 200`;
-    res.json(rows.map(o => ({
-      id: o.id,
-      nombre: numeroVenta(req.vendedora.codigo, o.secuencia),
-      fecha: o.created_at,
-      estado: o.estado, // 'enviada' | 'error' | 'cancelada'
-      total: parseFloat(o.total || 0),
-      neto: parseFloat(o.total || 0),
-      nota: o.estado === 'error' ? '⚠ Estamos terminando de procesar esta venta.'
-        : o.estado === 'cancelada' ? '✕ Esta venta fue cancelada.' : (o.nota || ''),
-      ref: o.nombre_venta || '',
-      entrega: o.entrega || 'despacho',
-      seguimiento: o.seguimiento || 'recibido',
-      seguimientoLabel: SEGUIMIENTO_LABEL[o.seguimiento] || SEGUIMIENTO_LABEL.recibido,
-      seguimientoPaso: Math.max(0, SEGUIMIENTO_ORDEN.indexOf(o.seguimiento || 'recibido')),
-      seguimientoAt: o.seguimiento_at,
-      lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: p.categoria || '', cantidad: p.quantity, total: parseFloat(p.total || 0) }))
-    })));
+      SELECT vp.*, pr.nombre AS proveedor_nombre
+      FROM ventas_pendientes vp
+      LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
+      WHERE vp.vendedora_id = ${req.vendedora.id}
+      ORDER BY vp.created_at DESC LIMIT 400`;
+
+    // Filas de antes del split (sin grupo_id) quedan cada una como su propio
+    // pedido de un solo envío — se agrupan por su propio id para no mezclarlas.
+    const grupos = new Map();
+    rows.forEach(o => {
+      const key = o.grupo_id || ('legacy_' + o.id);
+      if (!grupos.has(key)) grupos.set(key, []);
+      grupos.get(key).push(o);
+    });
+
+    const pedidos = [...grupos.values()].map(envios => {
+      envios.sort((a, b) => (a.proveedor_nombre || '').localeCompare(b.proveedor_nombre || ''));
+      const primero = envios[0];
+      const total = envios.reduce((s, o) => s + parseFloat(o.total || 0), 0);
+      const estadoGeneral = pedidoEstadoGeneral(envios);
+      // orden_secuencia puede faltar en filas viejas (previas a este cambio) — se usa el id como respaldo.
+      const numero = numeroVenta(req.vendedora.codigo, primero.orden_secuencia || primero.id);
+      const envioAObjeto = o => ({
+        proveedor: o.proveedor_nombre || 'Temponovo',
+        estado: o.estado,
+        nota: o.estado === 'error' ? '⚠ Estamos terminando de procesar esta venta.'
+          : o.estado === 'cancelada' ? '✕ Esta venta fue cancelada.' : (o.nota || ''),
+        seguimiento: o.seguimiento || 'recibido',
+        seguimientoLabel: SEGUIMIENTO_LABEL[o.seguimiento] || SEGUIMIENTO_LABEL.recibido,
+        seguimientoPaso: Math.max(0, SEGUIMIENTO_ORDEN.indexOf(o.seguimiento || 'recibido')),
+        seguimientoAt: o.seguimiento_at,
+        lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: p.categoria || '', cantidad: p.quantity, total: parseFloat(p.total || 0) }))
+      });
+      const primerEnvio = envioAObjeto(primero);
+      return {
+        id: primero.grupo_id || primero.id,
+        nombre: numero,
+        fecha: primero.created_at,
+        total, neto: total,
+        entrega: primero.entrega || 'despacho',
+        ref: primero.nombre_venta || '',
+        // compat: mismos campos de siempre, a nivel superior (del primer/único envío)
+        estado: estadoGeneral,
+        nota: primerEnvio.nota,
+        seguimiento: primerEnvio.seguimiento,
+        seguimientoLabel: primerEnvio.seguimientoLabel,
+        seguimientoPaso: primerEnvio.seguimientoPaso,
+        seguimientoAt: primerEnvio.seguimientoAt,
+        lineas: envios.flatMap(o => envioAObjeto(o).lineas),
+        // nuevo: el detalle por proveedor, para cuando el pedido se separó en más de uno
+        envios: envios.map(envioAObjeto)
+      };
+    });
+    pedidos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    res.json(pedidos.slice(0, 200));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -1065,14 +1362,14 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     const ov = cfg.overrides || {};
     const hFams = new Set(cfg.hiddenFams || []);
     const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
-    let prods = await productosCliente(c);
+    let prods = await productosClienteMulti();
     if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p.categoria)));
     const result = prods
       .filter(p => p.stock > 0)
       .filter(p => !hFams.has(famOf(p.categoria)))
       .filter(p => !hSkus.has((p.sku || '').toUpperCase()))
       .map(p => ({
-        id: p.id, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
+        id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
         categoria: p.categoria, atributos: p.atributos, info: p.info || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
@@ -1081,19 +1378,24 @@ app.get('/api/public/:slug/productos', async (req, res) => {
   } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: 'No se pudo cargar el catálogo' }); }
 });
 
-app.get('/api/public/:slug/imagen/:id', async (req, res) => {
+app.get('/api/public/:slug/imagen/:proveedorId/:id', async (req, res) => {
   try {
     const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).send('No encontrada');
+    const proveedorId = parseInt(req.params.proveedorId);
     const id = parseInt(req.params.id);
-    if (!id) return res.status(400).send('ID inválido');
+    if (!proveedorId || !id) return res.status(400).send('ID inválido');
     const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
-    const key = 'img_' + field + '_' + id;
+    const key = 'img_' + proveedorId + '_' + field + '_' + id;
     let b64 = cacheGet(key);
     if (!b64) {
-      const prods = await xmlrpcCall('product.product', 'read', [[id], [field]]);
-      b64 = prods && prods[0] ? prods[0][field] : null;
-      if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (proveedor && proveedor.tipo === 'odoo') {
+        const conn = connFor(proveedor);
+        const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
+        b64 = prods && prods[0] ? prods[0][field] : null;
+        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      }
     }
     if (!b64) return res.status(404).send('Sin imagen');
     res.setHeader('Content-Type', 'image/png');
@@ -1204,7 +1506,7 @@ app.post('/api/admin/login', (req, res) => {
 
 app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
   try {
-    const prods = await fetchProductos();
+    const prods = await productosClienteMulti();
     res.json([...new Set(prods.map(p => famOf(p.categoria)))].sort());
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1392,12 +1694,24 @@ app.post('/api/admin/proveedores/:id/probar', requireAdmin, async (req, res) => 
   } catch (e) { res.status(502).json({ error: 'No se pudo conectar: ' + shortErr(e) }); }
 });
 
-// La "venta abierta" es UNA sola, compartida por todas las vendedoras (todas
-// facturan al mismo partner). Cerrarla a mano fuerza que el próximo pedido de
-// CUALQUIER vendedora abra una venta nueva en Odoo con /sale/create.
+// LEGACY: la "venta abierta" única en "configuracion" ya no la usa ningún
+// flujo real desde el split por proveedor (cada proveedor tiene la suya en
+// "proveedores" — ver el endpoint de abajo). Se deja para no romper la
+// pestaña Configuración vieja, pero no hace nada útil hoy.
 app.post('/api/admin/cerrar-venta', requireAdmin, async (_req, res) => {
   try {
     await sql`UPDATE configuracion SET venta_abierta_id = NULL, venta_abierta_nombre = NULL WHERE id = 1`;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+// La "venta abierta" de UN proveedor es compartida por todas las vendedoras
+// que le venden (todas facturan al mismo partner de ese proveedor).
+// Cerrarla a mano fuerza que el próximo pedido de cualquier vendedora abra
+// una venta nueva en ese proveedor.
+app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`UPDATE proveedores SET venta_abierta_id = NULL, venta_abierta_nombre = NULL WHERE id = ${req.params.id} RETURNING id`;
+    if (!rows.length) return res.status(404).json({ error: 'Proveedor no encontrado' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1409,8 +1723,7 @@ app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res)
     const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
     const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
     const cfg0 = await getConfig();
-    if (!cfg0.partner_id) return res.status(400).json({ error: 'Falta configurar el Partner ID en Configuración' });
-    let prods = await productosCliente({ partnerId: cfg0.partner_id });
+    let prods = await productosClienteMulti();
     const categorias = v.categorias || [];
     if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
     const cfg = await readCfgDb(v, cfg0.partner_id);
@@ -1486,7 +1799,7 @@ app.post('/api/admin/producto-info', requireAdmin, async (req, res) => {
       if (!porBarcode) {
         porBarcode = {};
         try {
-          (await fetchProductos()).forEach(p => { if (p.barcode) porBarcode[String(p.barcode).trim()] = (p.sku || '').toUpperCase(); });
+          (await productosClienteMulti()).forEach(p => { if (p.barcode) porBarcode[String(p.barcode).trim()] = (p.sku || '').toUpperCase(); });
         } catch (e) { console.warn('⚠ producto-info: no se pudo leer el catálogo para resolver por barcode', e.message); }
       }
       return porBarcode[String(barcode).trim()] || null;
@@ -1544,20 +1857,37 @@ app.delete('/api/admin/producto-info', requireAdmin, async (_req, res) => {
 app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
   try {
     const estado = req.query.estado;
+    // COALESCE(orden_secuencia, id): las filas nuevas (post-split) ya traen
+    // orden_secuencia calculado una vez por grupo_id (así dos envíos del
+    // mismo pedido comparten el mismo número de venta); las filas viejas
+    // (antes de este cambio) no lo tienen, usan su propio id de respaldo —
+    // mismo criterio que en GET /api/pedidos.
     const { rows } = estado
       ? await sql`
           SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
-                 ROW_NUMBER() OVER (PARTITION BY vp.vendedora_id ORDER BY vp.id)::int AS secuencia
+                 pr.nombre AS proveedor_nombre,
+                 COALESCE(vp.orden_secuencia, vp.id) AS secuencia
           FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+          LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
           WHERE vp.estado = ${estado} ORDER BY vp.created_at DESC`
       : await sql`
           SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
-                 ROW_NUMBER() OVER (PARTITION BY vp.vendedora_id ORDER BY vp.id)::int AS secuencia
+                 pr.nombre AS proveedor_nombre,
+                 COALESCE(vp.orden_secuencia, vp.id) AS secuencia
           FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+          LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
           ORDER BY vp.created_at DESC LIMIT 500`;
     const seguimiento = req.query.seguimiento;
+    // Cuenta cuántas filas de este resultado comparten grupo_id — sirve para
+    // que el admin vea "esta venta es parte de un pedido con otro proveedor".
+    const porGrupo = {};
+    rows.forEach(r => { if (r.grupo_id) porGrupo[r.grupo_id] = (porGrupo[r.grupo_id] || 0) + 1; });
     const list = (seguimiento ? rows.filter(r => (r.seguimiento || 'recibido') === seguimiento) : rows)
-      .map(r => ({ ...r, numero_venta: numeroVenta(r.vendedora_codigo, r.secuencia) }));
+      .map(r => ({
+        ...r, numero_venta: numeroVenta(r.vendedora_codigo, r.secuencia),
+        proveedor_nombre: r.proveedor_nombre || 'Temponovo',
+        otros_proveedores_mismo_pedido: r.grupo_id && porGrupo[r.grupo_id] > 1
+      }));
     res.json(list);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1597,7 +1927,8 @@ app.post('/api/admin/ventas/:id/reintentar', requireAdmin, async (req, res) => {
     const v = vrows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
 
     try {
-      const r = await intentarEnviarVenta({
+      const proveedor = await getProveedorDeVenta(venta);
+      const r = await enviarVentaProveedor(proveedor, {
         productos: venta.productos, observacion: venta.nota,
         tipoVenta: venta.entrega === 'retiro' ? 'Retiro' : 'Despacho'
       }, v);
@@ -1635,7 +1966,8 @@ app.post('/api/admin/reintentar-todas', requireAdmin, async (req, res) => {
         const { rows: vrows } = await sql`SELECT * FROM vendedoras WHERE id = ${venta.vendedora_id}`;
         const v = vrows[0];
         if (!v) { conError++; continue; }
-        const r = await intentarEnviarVenta({
+        const proveedor = await getProveedorDeVenta(venta);
+        const r = await enviarVentaProveedor(proveedor, {
           productos: venta.productos, observacion: venta.nota,
           tipoVenta: venta.entrega === 'retiro' ? 'Retiro' : 'Despacho'
         }, v);

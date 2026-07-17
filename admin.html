@@ -148,22 +148,22 @@ tr:last-child td{border-bottom:none;}
       <!-- CONFIGURACIÓN -->
       <section class="section" id="sec-config">
         <h2 class="page-t">Configuración</h2>
-        <p class="page-s">Estos son los datos de tu empresa: el nombre y el Partner ID en Odoo al que se le facturan todas las ventas.</p>
+        <p class="page-s" style="color:var(--red)">⚠ Esta pantalla queda de cuando había un solo proveedor (Temponovo). Ahora el nombre, el Partner ID y la venta abierta de cada proveedor se manejan en <b>Proveedores</b> — lo de acá abajo ya no afecta el catálogo ni las ventas reales, se va a sacar en una limpieza futura.</p>
 
         <div class="card">
-          <div class="card-h">Datos de la empresa</div>
+          <div class="card-h">Datos de la empresa (legacy)</div>
           <div class="row">
             <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="cfg-nombre" placeholder="Ej: Temponovo"/></div>
             <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="cfg-partner" type="number" placeholder="Ej: 827"/></div>
             <button class="btn dark" id="cfg-guardar">Guardar</button>
           </div>
-          <p class="note">Cada venta se crea en Odoo a través de la API de ventas de Temponovo (POST /sale/create y /sale/update), a nombre de este Partner ID.</p>
+          <p class="note">Ya no se usa para crear ventas — eso lo define el Partner ID de cada proveedor, en Proveedores.</p>
           <div class="msg" id="cfg-msg"></div>
         </div>
 
         <div class="card">
-          <div class="card-h">Venta abierta</div>
-          <p class="note" style="margin-bottom:12px">Es UNA sola, compartida por todas las vendedoras: el primer pedido de cualquiera la abre, y los pedidos siguientes de cualquier vendedora se le van agregando — hasta que Odoo la rechace (por ejemplo, porque ya fue pickeada) y se abra una nueva sola.</p>
+          <div class="card-h">Venta abierta (legacy, sin uso)</div>
+          <p class="note" style="margin-bottom:12px">Esta era la única venta abierta de cuando había un solo proveedor. Cada proveedor tiene ahora la suya propia — para cerrarla, andá a Proveedores.</p>
           <div id="venta-abierta-box"><span class="note">Cargando…</span></div>
         </div>
       </section>
@@ -678,11 +678,12 @@ function renderVentas(ventas) {
         </div>
       </div>
       <div class="grupo-body" style="display:none">
-        <table><thead><tr><th>Fecha</th><th>N° venta</th><th>Vendedora</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Envío</th><th>Seguimiento</th><th></th></tr></thead><tbody>
+        <table><thead><tr><th>Fecha</th><th>N° venta</th><th>Vendedora</th><th>Proveedor</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Envío</th><th>Seguimiento</th><th></th></tr></thead><tbody>
         ${g.ventas.map(v => `<tr>
           <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
-          <td class="mono">${esc(v.numero_venta)}</td>
+          <td class="mono">${esc(v.numero_venta)}${v.otros_proveedores_mismo_pedido ? '<div class="note" title="Este pedido tiene otro envío, a otro proveedor, con el mismo número">↔ pedido con más de un proveedor</div>' : ''}</td>
           <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
+          <td>${esc(v.proveedor_nombre || 'Temponovo')}</td>
           <td>${esc(v.nombre_venta || '—')}</td>
           <td>${(v.productos||[]).map(p => esc(p.sku) + ' ×' + p.quantity).join(', ')}</td>
           <td>
@@ -859,12 +860,15 @@ $('pv-crear').onclick = async () => {
 };
 function renderProveedores() {
   if (!PROVEEDORES.length) { $('pv-list').innerHTML = '<div class="empty">No hay proveedores todavía.</div>'; return; }
-  $('pv-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Odoo</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('pv-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Odoo</th><th>Venta abierta</th><th>Estado</th><th></th></tr></thead><tbody>
     ${PROVEEDORES.map(p => `<tr>
       <td class="mono">${esc(p.codigo)}</td>
       <td>${esc(p.nombre)}</td>
       <td>${p.tipo === 'manual' ? 'Manual' : 'Odoo'}</td>
       <td>${p.tipo === 'odoo' ? (p.odooPasswordSet ? '<span class="note">clave cargada — probar para confirmar</span>' : '<span class="note" style="color:var(--red)">sin clave</span>') : '<span class="note">—</span>'}</td>
+      <td>${p.ventaAbiertaNombre
+          ? `<span class="badge b-ok mono">${esc(p.ventaAbiertaNombre)}</span> <button class="btn btn-sm" data-pv-cerrar="${p.id}">Cerrar</button>`
+          : '<span class="note">—</span>'}</td>
       <td><button class="toggle ${p.activo ? 'on' : ''}" data-pv-toggle="${p.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
         ${p.tipo === 'odoo' ? `<button class="btn btn-sm" data-pv-probar="${p.id}">Probar conexión</button>` : ''}
@@ -872,7 +876,7 @@ function renderProveedores() {
         <button class="btn btn-sm danger" data-pv-del="${p.id}">Eliminar</button>
       </td>
     </tr>
-    <tr class="pv-edit-row" data-pv-edit-row="${p.id}" style="display:none"><td colspan="6"></td></tr>`).join('')}
+    <tr class="pv-edit-row" data-pv-edit-row="${p.id}" style="display:none"><td colspan="7"></td></tr>`).join('')}
   </tbody></table>`;
   $('pv-list').querySelectorAll('[data-pv-toggle]').forEach(b => b.onclick = async () => {
     const p = PROVEEDORES.find(x => x.id == b.dataset.pvToggle);
@@ -884,6 +888,11 @@ function renderProveedores() {
     try { const r = await api('/proveedores/' + b.dataset.pvProbar + '/probar', { method: 'POST' }); alert('✓ Conexión correcta (uid ' + r.uid + ')'); }
     catch (e) { alert('✕ ' + e.message); }
     b.disabled = false; b.textContent = 'Probar conexión';
+  });
+  $('pv-list').querySelectorAll('[data-pv-cerrar]').forEach(b => b.onclick = async () => {
+    if (!confirm('¿Cerrar la venta abierta de este proveedor? El próximo pedido de cualquier vendedora le abrirá una venta nueva.')) return;
+    try { await api('/proveedores/' + b.dataset.pvCerrar + '/cerrar-venta', { method: 'POST' }); loadProveedores(); }
+    catch (e) { alert(e.message); }
   });
   $('pv-list').querySelectorAll('[data-pv-del]').forEach(b => b.onclick = async () => {
     if (!confirm('¿Eliminar este proveedor?')) return;

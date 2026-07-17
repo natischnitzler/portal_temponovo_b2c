@@ -129,6 +129,8 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .his-lines{display:none;border-top:1px solid var(--line);margin-top:11px;padding-top:9px;}
 .his-item.open .his-lines{display:block;}
 .hl{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;color:var(--ink-soft);}
+.his-envio{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-top:9px;}
+.his-envio-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:12.5px;font-weight:600;}
 .hl .q{font-family:var(--mono);color:var(--steel);}
 
 /* ── VITRINA ── */
@@ -851,11 +853,14 @@ const $ = id => document.getElementById(id);
 const fmt = n => '$' + Math.round(n).toLocaleString('es-CL');
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
-function imgUrl(id,big){
-  if(PUBLIC) return `${API}/public/${SLUG}/imagen/${id}${big?'?s=g':''}`;
+// proveedorId es obligatorio ahora: el id numérico de Odoo no es único entre
+// proveedores (cada Odoo tiene su propia numeración), así que hay que decir
+// de cuál proveedor se está pidiendo la imagen.
+function imgUrl(id,big,proveedorId){
+  if(PUBLIC) return `${API}/public/${SLUG}/imagen/${proveedorId}/${id}${big?'?s=g':''}`;
   // Usa el token de imagen (no la clave real) — una clave en la URL queda
   // en el historial del navegador, en logs del servidor y en el Referer.
-  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${big?'&s=g':''}`;
+  return `${API}/imagen/${proveedorId}/${id}?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${big?'&s=g':''}`;
 }
 
 async function api(path, opts={}){
@@ -1268,8 +1273,8 @@ function renderGrid(){
   const list = filtrados();
   if(!list.length){ $('vit-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">No hay productos disponibles que coincidan.</div>`; return; }
   $('vit-grid').innerHTML = list.map(p=>`
-    <div class="card" data-id="${p.id}">
-      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}<img loading="lazy" src="${imgUrl(p.id)}" alt="${esc(p.nombre)}"/></div>
+    <div class="card" data-pid="${p.proveedorId}::${p.id}">
+      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}<img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
       <div class="card-body">
         <div class="card-name">${esc(p.nombre)}</div>
         <div class="card-sku">${esc(p.sku)||'—'}</div>
@@ -1277,12 +1282,14 @@ function renderGrid(){
         <div class="card-cost cost">Costo ${fmt(p.precio)}</div>
       </div>
     </div>`).join('');
-  $('vit-grid').querySelectorAll('.card').forEach(c=> c.onclick = ()=> openFicha(parseInt(c.dataset.id)));
+  $('vit-grid').querySelectorAll('.card').forEach(c=> c.onclick = ()=> openFicha(c.dataset.pid));
 }
 
 /* ═══════════ FICHA ═══════════ */
-function openFicha(id){
-  const p = PRODUCTOS.find(x=>x.id===id); if(!p) return;
+// pid: clave compuesta "proveedorId::id" — el id numérico de Odoo solo, no
+// alcanza para identificar un producto (dos proveedores pueden repetirlo).
+function openFicha(pid){
+  const p = PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===pid); if(!p) return;
   FICHA_PROD = p; FICHA_QTY = 1;
   $('ficha-cat').textContent = famSub(p).fam || 'Ficha';
   const attrs = (p.atributos||[]).map(a=>`<div class="attr-row"><span class="k">${esc(a.attr||'Detalle')}</span><span class="v">${esc(a.val)}</span></div>`).join('');
@@ -1291,7 +1298,7 @@ function openFicha(id){
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
   }).join('');
   $('sheet-body').innerHTML = `
-    <div class="ficha-img"><img src="${imgUrl(p.id,true)}" alt="${esc(p.nombre)}"/></div>
+    <div class="ficha-img"><img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
     <div class="ficha-info">
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
@@ -1407,7 +1414,7 @@ function lineasValidas(){
     if(!p) return;
     const q = parseInt(r.qty)||1;
     if(map[p.sku]) map[p.sku].quantity += q;
-    else map[p.sku] = { sku:p.sku, quantity:q, precio:p.precio };
+    else map[p.sku] = { sku:p.sku, quantity:q, precio:p.precio, proveedorId:p.proveedorId };
   });
   return Object.values(map);
 }
@@ -1484,7 +1491,7 @@ $('vr-enviar').onclick = async ()=>{
   $('vr-enviar').disabled = true; $('vr-enviar').textContent='Enviando…';
   try {
     const r = await api('/pedido', { method:'POST', body: JSON.stringify({ data:{
-      productos: ls.map(l=>({sku:l.sku, quantity:l.quantity})),
+      productos: ls.map(l=>({sku:l.sku, quantity:l.quantity, proveedorId:l.proveedorId})),
       nombreVenta: $('vr-nombre').value.trim(),
       telefono: $('vr-fono').value.trim(),
       email: $('vr-email').value.trim(),
@@ -1497,7 +1504,8 @@ $('vr-enviar').onclick = async ()=>{
     ROWS = []; ensureRows(12); saveRows(); renderRows();
     $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-depto').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
-    $('vr-ok').textContent = '✓ ¡Venta recibida! Tu número de venta es ' + (r.numero || ('#'+r.orderId)) + '. ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
+    const avisoSplit = (r.message||'').includes('se separó') ? ' Se separó en envíos por proveedor — los vas a ver por separado en Mis Ventas.' : '';
+    $('vr-ok').textContent = '✓ ¡Venta recibida! Tu número de venta es ' + (r.numero || ('#'+r.orderId)) + '.' + avisoSplit + ' ' + (METODO_ENTREGA==='retiro' ? 'La preparamos para que la retires.' : 'Preparamos el despacho y te avisamos.');
     $('vr-ok').style.display='block';
     PEDIDOS = null; // refrescar mis ventas
   } catch(e){
@@ -1624,9 +1632,22 @@ async function loadVentas(){
         </div>
       </div>
       <div class="his-lines">
-        ${o.lineas.map(l=>`<div class="hl"><span>${esc(l.sku)}</span><span class="q">×${l.cantidad}</span><span>${fmt(l.total)}</span></div>`).join('') || '<div class="hl"><span>Sin detalle</span></div>'}
-        ${o.nota?`<div class="hl" style="color:var(--steel)"><span>${esc(o.nota)}</span></div>`:''}
-        ${o.estado!=='error' && o.estado!=='cancelada' ? segStepper(o) : ''}
+        ${o.envios && o.envios.length>1 ? `
+          <div class="hl" style="color:var(--steel)"><span>Este pedido se separó en ${o.envios.length} envíos por proveedor:</span></div>
+          ${o.envios.map(en=>`
+            <div class="his-envio">
+              <div class="his-envio-h">
+                <span>${esc(en.proveedor)}</span>
+                <span class="badge ${en.estado==='cancelada'?'b-cancel':en.estado==='error'?'b-cancel':'b-'+(en.seguimiento||'recibido')}">${en.estado==='cancelada'?'Cancelada':en.estado==='error'?'Con error':(SEG_LABEL[en.seguimiento]||'Recibido')}</span>
+              </div>
+              ${en.lineas.map(l=>`<div class="hl"><span>${esc(l.sku)}</span><span class="q">×${l.cantidad}</span><span>${fmt(l.total)}</span></div>`).join('') || '<div class="hl"><span>Sin detalle</span></div>'}
+              ${en.estado!=='error' && en.estado!=='cancelada' ? segStepper(en) : ''}
+            </div>`).join('')}
+        ` : `
+          ${o.lineas.map(l=>`<div class="hl"><span>${esc(l.sku)}</span><span class="q">×${l.cantidad}</span><span>${fmt(l.total)}</span></div>`).join('') || '<div class="hl"><span>Sin detalle</span></div>'}
+          ${o.nota?`<div class="hl" style="color:var(--steel)"><span>${esc(o.nota)}</span></div>`:''}
+          ${o.estado!=='error' && o.estado!=='cancelada' ? segStepper(o) : ''}
+        `}
       </div>
     </div>`).join('');
 
@@ -1775,7 +1796,7 @@ function attachSuggest(inp, box){
     if(!m.length){ box.classList.remove('open'); return; }
     box.innerHTML = m.map(p=>`
       <div class="sug-item" data-sku="${esc(p.sku)}">
-        <img loading="lazy" src="${imgUrl(p.id)}" alt=""/>
+        <img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt=""/>
         <div><div>${esc(p.nombre)}</div><div class="s">${esc(p.sku)}</div></div>
       </div>`).join('');
     box.classList.add('open');

@@ -104,10 +104,20 @@ cambio grande que se entrega por fases:
   agregar un proveedor acá todavía no hace nada más — no aparece en ninguna
   vitrina ni se puede vender hasta la fase siguiente, que conecta el
   catálogo de verdad.
-- ⏳ Pendiente: catálogo combinado de varios proveedores (namespacing de
-  producto), separación automática de un pedido mixto en una venta por
-  proveedor, y la pantalla de catálogo/ventas manuales para un proveedor sin
-  Odoo.
+- ✅ **Fase 3+4 (ya en este código)**: el catálogo de todos los proveedores
+  activos se junta en uno solo (`/api/productos`, `/api/public/:slug/productos`),
+  cada producto queda etiquetado con su proveedor (las imágenes van por
+  `/api/imagen/:proveedorId/:id` — el id de Odoo no es único entre
+  proveedores). Si el carrito de una vendedora mezcla productos de más de un
+  proveedor, `/api/pedido` lo separa solo en una venta por proveedor
+  (compartiendo el mismo N° de pedido) — con dos caminos según el proveedor:
+  los que tienen API de ventas propia (como Temponovo) siguen igual; los que
+  no (como Aviv) se venden creando un `sale.order` estándar directo en su
+  Odoo por XML-RPC. "Mis Ventas" y Admin → Ventas muestran cuándo un pedido
+  se separó en varios envíos.
+- ⏳ Pendiente (fase 5, menor urgencia): pantalla de catálogo y gestión
+  manual de ventas para un proveedor sin Odoo (`tipo='manual'`) — hoy se
+  puede crear ese tipo de proveedor pero no aporta productos todavía.
 
 ### 2. Base de datos (obligatorio)
 
@@ -150,15 +160,15 @@ vercel --prod
 | Método | Ruta                          | Descripción                                        |
 |--------|-------------------------------|-----------------------------------------------------|
 | GET    | /api/me                       | Perfil de la vendedora (requiere código + clave)    |
-| GET    | /api/productos                | Catálogo con precio y sugerido                       |
-| GET    | /api/imagen/:id                | Imagen del producto                                  |
-| POST   | /api/pedido                    | Crea/agrega la venta en Odoo vía la API de ventas (al instante) |
+| GET    | /api/productos                | Catálogo combinado de todos los proveedores activos, con precio y sugerido |
+| GET    | /api/imagen/:proveedorId/:id   | Imagen del producto (el id de Odoo no es único entre proveedores) |
+| POST   | /api/pedido                    | Crea la venta — si el carrito mezcla proveedores, la separa sola en una por cada uno |
 | GET    | /api/pedidos                   | Historial de ventas de la vendedora                  |
 | GET    | /api/config · POST /api/config | Personalización de la vitrina (logo, colores, etc.) — de cada vendedora |
 | POST   | /api/admin/login                | Login del panel de admin                             |
 | GET/PUT /api/admin/config       | Nombre y Partner ID de la empresa (una sola)        |
 | GET/POST/PUT/DELETE /api/admin/vendedoras   | CRUD de Vendedoras                     |
-| GET/POST/PUT/DELETE /api/admin/proveedores  | CRUD de Proveedores (fase 2 — todavía no conecta el catálogo) |
+| GET/POST/PUT/DELETE /api/admin/proveedores  | CRUD de Proveedores — catálogo y ventas ya conectados |
 | POST   | /api/admin/proveedores/:id/probar | Prueba la conexión Odoo de un proveedor |
 | POST   | /api/admin/cerrar-venta          | Cierra la única venta abierta (compartida por todas)  |
 | GET    | /api/admin/vendedoras/:id/precios/base | Excel base de precios (para descargar)          |
