@@ -429,7 +429,7 @@ function renderVendedoras() {
     catch (e) { alert(e.message); }
   });
   $('v-list').querySelectorAll('[data-del-v]').forEach(b => b.onclick = async () => {
-    if (!confirm('¿Eliminar esta vendedora?')) return;
+    if (!confirm('¿Eliminar esta vendedora? Si tiene ventas registradas no se podrá borrar (para no perder ese historial) — en ese caso, desactívala con el interruptor de Estado en su lugar.')) return;
     try { await api('/vendedoras/' + b.dataset.delV, { method: 'DELETE' }); loadVendedoras(); }
     catch (e) { alert(e.message); }
   });

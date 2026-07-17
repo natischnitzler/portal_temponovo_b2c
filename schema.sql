@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS vendedoras (
 
 CREATE TABLE IF NOT EXISTS ventas_pendientes (
   id SERIAL PRIMARY KEY,
-  vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE CASCADE,
+  -- RESTRICT (no CASCADE): una vendedora con ventas registradas no se puede
+  -- borrar, para no perder historial con valor contable. Se desactiva en
+  -- cambio (columna "activo" en vendedoras).
+  vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE RESTRICT,
   productos JSONB NOT NULL,        -- [{sku, quantity}, ...]
   nombre_venta TEXT,
   telefono TEXT,

@@ -840,6 +840,7 @@ const SLUG = PUBLIC ? location.pathname.split('/')[2] : '';
 let CODE = localStorage.getItem('tn_code') || '';
 let PASS = localStorage.getItem('tn_pass') || '';
 let ME = null;
+let IMG_TOKEN = ''; // token de imagen (no es la clave) — ver /api/me e imgUrl()
 let PRODUCTOS = [];        // solo con stock (vitrina)
 let PRODUCTOS_ALL = [];    // todo (venta rápida / excel)
 let ROWS = JSON.parse(localStorage.getItem('tn_rows')||'null') || [];
@@ -852,7 +853,9 @@ const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 function imgUrl(id,big){
   if(PUBLIC) return `${API}/public/${SLUG}/imagen/${id}${big?'?s=g':''}`;
-  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}&p=${encodeURIComponent(PASS)}${big?'&s=g':''}`;
+  // Usa el token de imagen (no la clave real) — una clave en la URL queda
+  // en el historial del navegador, en logs del servidor y en el Referer.
+  return `${API}/imagen/${id}?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${big?'&s=g':''}`;
 }
 
 async function api(path, opts={}){
@@ -919,7 +922,7 @@ function applyCfg(){
   // brand en header
   const nombre = CFG.nombre || (ME?.name||'').split(' ')[0] || 'Mi Vitrina';
   $('brand').innerHTML =
-    (CFG.logo ? `<img src="${CFG.logo}" alt=""/>` : '') +
+    (CFG.logo ? `<img src="${esc(CFG.logo)}" alt=""/>` : '') +
     `<span style="min-width:0"><span class="bname">${esc(CFG.nombre || 'Vitrina')}</span>` +
     (CFG.slogan ? `<span class="bslogan">${esc(CFG.slogan)}</span>` : '') + `</span>`;
   const infoHi = $('info-hi'); if(infoHi) infoHi.textContent = '¡Bienvenida al equipo' + (ME?.name ? ', ' + ME.name : '') + '!';
@@ -1008,6 +1011,7 @@ async function tryLogin(code, pass){
   CODE = code.trim().toUpperCase();
   PASS = pass;
   ME = await api('/me');
+  IMG_TOKEN = ME.imgToken || '';
   localStorage.setItem('tn_code', CODE);
   localStorage.setItem('tn_pass', PASS);
   CFG = { ...DEFAULT_CFG, ...loadLocalCfg(CODE) }; // no heredar el diseño de quien haya usado este navegador antes
@@ -1044,7 +1048,7 @@ async function initPublic(){
     CFG = { ...DEFAULT_CFG, ...cfg };
     PRODUCTOS_ALL = prods; PRODUCTOS = prods;
     applyCfg();
-    $('brand').innerHTML = (CFG.logo?`<img src="${CFG.logo}" alt=""/>`:'') +
+    $('brand').innerHTML = (CFG.logo?`<img src="${esc(CFG.logo)}" alt=""/>`:'') +
       `<span style="min-width:0"><span class="bname">${esc(CFG.nombre||'Vitrina')}</span>` +
       (CFG.slogan?`<span class="bslogan">${esc(CFG.slogan)}</span>`:'') + `</span>`;
     document.title = (CFG.nombre||'Vitrina') + ' · Vitrina';
@@ -1737,7 +1741,7 @@ function initCfgPanel(){
   $('dl-fotos').onclick = ()=>{
     const q = FILTRO_FAM ? '&familia='+encodeURIComponent(FILTRO_FAM) : '';
     toast('Preparando ZIP…');
-    window.location = `${API}/fotos?c=${encodeURIComponent(CODE)}${q}`;
+    window.location = `${API}/fotos?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${q}`;
   };
 
   renderTagsCfg(); renderPublicLink();

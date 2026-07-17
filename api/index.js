@@ -174,6 +174,12 @@ function ensureDb() {
     // Nombre de la venta en Odoo (ej. "S06819") y detalle del error si la API falló.
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS odoo_venta_nombre TEXT`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS error_msg TEXT`;
+    // Borrar una vendedora ya NO borra en cascada su historial de ventas
+    // (son registros con valor contable). Si tiene ventas, el borrado se
+    // rechaza y el admin debe desactivarla en su lugar (columna "activo").
+    await sql`ALTER TABLE ventas_pendientes DROP CONSTRAINT IF EXISTS ventas_pendientes_vendedora_id_fkey`;
+    await sql`ALTER TABLE ventas_pendientes ADD CONSTRAINT ventas_pendientes_vendedora_id_fkey
+      FOREIGN KEY (vendedora_id) REFERENCES vendedoras(id) ON DELETE RESTRICT`;
     // ── SEGUIMIENTO LOGÍSTICO ──────────────────────────────────────
     // Independiente de si la venta llegó o no a Odoo ("estado"): esto es el
     // avance físico del pedido, que solo el admin cambia a mano — la vitrina
@@ -260,8 +266,12 @@ function verifyPassword(plain, stored) {
 }
 
 // ── SESIÓN DE ADMIN (token firmado con expiración, sin tabla de sesiones) ──
+// ADMIN_SECRET NO tiene valor por defecto a propósito: si falta, todo lo que
+// dependa de él (login de admin, tokens de imagen de vendedoras) falla
+// cerrado en vez de usar un secreto conocido/público (estaba en el código
+// fuente, que vive en un repo de GitHub).
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const ADMIN_SECRET   = process.env.ADMIN_SECRET   || 'cambia-esto-en-vercel';
+const ADMIN_SECRET   = process.env.ADMIN_SECRET   || '';
 function makeAdminToken() {
   const exp = Date.now() + 12 * 3600 * 1000; // 12 horas
   const payload = String(exp);
@@ -269,7 +279,7 @@ function makeAdminToken() {
   return payload + '.' + sig;
 }
 function verifyAdminToken(token) {
-  if (!token || !token.includes('.')) return false;
+  if (!ADMIN_SECRET || !token || !token.includes('.')) return false;
   const [payload, sig] = token.split('.');
   const expected = crypto.createHmac('sha256', ADMIN_SECRET).update(payload).digest('hex');
   try { if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) return false; }
@@ -279,6 +289,44 @@ function verifyAdminToken(token) {
 function requireAdmin(req, res, next) {
   if (!verifyAdminToken(req.headers['x-admin-token'])) return res.status(401).json({ error: 'Sesión de administrador inválida o expirada' });
   next();
+}
+
+// ── LÍMITE DE INTENTOS FALLIDOS (fuerza bruta) ───────────────────
+// En memoria, por proceso — suficiente para frenar intentos automatizados
+// sin necesitar infraestructura extra. Solo cuenta intentos FALLIDOS, para
+// no bloquear a alguien que ya inició sesión y sigue mandando su clave
+// correcta en cada request (así funciona hoy la autenticación de vendedoras).
+const failedAttempts = {};
+function isBlocked(key, max, windowMs) {
+  const now = Date.now();
+  const hits = (failedAttempts[key] || []).filter(t => now - t < windowMs);
+  failedAttempts[key] = hits;
+  return hits.length >= max;
+}
+function registerFailure(key, windowMs) {
+  const now = Date.now();
+  const hits = (failedAttempts[key] || []).filter(t => now - t < windowMs);
+  hits.push(now);
+  failedAttempts[key] = hits;
+}
+function clientIp(req) {
+  return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+}
+
+// ── TOKEN DE IMAGEN (para <img src>, que no puede mandar headers) ────
+// Nunca se manda la clave real de la vendedora en una URL (queda en logs,
+// historial del navegador y Referer). En su lugar, tras autenticarse una
+// vez, el cliente recibe este token derivado de su clave_hash — sirve
+// SOLO para pedir imágenes, no para nada más, y deja de servir sola si la
+// vendedora cambia de clave (cambia el clave_hash del que se deriva).
+function imgToken(v) {
+  return crypto.createHmac('sha256', ADMIN_SECRET + ':img').update(v.codigo + ':' + v.clave_hash).digest('hex').slice(0, 32);
+}
+function verifyImgToken(v, token) {
+  if (!ADMIN_SECRET || !token) return false;
+  const expected = imgToken(v);
+  try { return crypto.timingSafeEqual(Buffer.from(String(token), 'hex'), Buffer.from(expected, 'hex')); }
+  catch { return false; }
 }
 
 // ── CONFIGURACIÓN GLOBAL (la única empresa) / VENDEDORAS ─────────
@@ -305,15 +353,29 @@ async function publicClienteBySlug(slug) {
   return { code: v.codigo, partnerId: cfg.partner_id, name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, categorias: v.categorias || [] };
 }
 
-// ── MIDDLEWARE: ACCESO DE VENDEDORA (código + clave) ─────────────
+// ── ACCESO DE VENDEDORA (código + clave) ──────────────────────────
+// Único punto que valida código+clave — lo usan tanto el middleware de las
+// rutas normales como los endpoints que necesitan leer las credenciales de
+// la query string (imágenes, zip de fotos). Cuenta intentos fallidos por
+// código para frenar fuerza bruta, sin afectar a quien ya tiene la clave
+// correcta y la sigue mandando en cada request (así funciona hoy esta app).
+async function authenticateVendedora(req) {
+  const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+  const clave  = req.headers['x-client-pass'] || req.query.p || '';
+  if (!codigo || !clave) return { error: 'Faltan credenciales' };
+  const key = 'v:' + codigo;
+  if (isBlocked(key, 10, 10 * 60 * 1000)) return { error: 'Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.' };
+  const v = await getVendedora(codigo);
+  if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) {
+    registerFailure(key, 10 * 60 * 1000);
+    return { error: 'Cliente no reconocido' };
+  }
+  return { v };
+}
 async function requireClient(req, res, next) {
   try {
-    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
-    const clave  = req.headers['x-client-pass'] || '';
-    if (!codigo || !clave) return res.status(401).json({ error: 'Faltan credenciales' });
-    const v = await getVendedora(codigo);
-    if (!v || !v.activo) return res.status(401).json({ error: 'Usuario no reconocido' });
-    if (!verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Clave incorrecta' });
+    const { v, error } = await authenticateVendedora(req);
+    if (error) return res.status(401).json({ error });
     const cfg = await getConfig();
     if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
     req.vendedora = v; req.config = cfg;
@@ -469,10 +531,8 @@ async function fetchProductos() {
 // ════════════════════════════════════════════════════════════════
 app.get('/api/productos', async (req, res) => {
   try {
-    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
-    const clave  = req.headers['x-client-pass'] || '';
-    const v = await getVendedora(codigo);
-    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Cliente no reconocido' });
+    const { v, error } = await authenticateVendedora(req);
+    if (error) return res.status(401).json({ error });
     const cfg = await getConfig();
     if (!cfg.partner_id) return res.status(500).json({ error: 'Falta configurar el Partner ID de Odoo (Panel de Admin → Configuración)' });
 
@@ -497,13 +557,15 @@ app.delete('/api/productos/cache', requireAdmin, (_req, res) => {
 });
 
 // ── IMAGEN INDIVIDUAL (miniatura o grande) ───────────────────────
-// GET /api/imagen/:id?c=CODIGO&p=CLAVE&s=g   → image_1024 (detalle / probar)
+// GET /api/imagen/:id?c=CODIGO&t=TOKEN&s=g   → image_1024 (detalle / probar)
+// Usa el token de imagen (ver imgToken), nunca la clave real — un <img src>
+// no puede mandar headers, y una clave en la URL queda en logs/historial.
 app.get('/api/imagen/:id', async (req, res) => {
   try {
     const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
-    const clave  = req.headers['x-client-pass']  || req.query.p || '';
+    const token  = req.headers['x-client-token'] || req.query.t || '';
     const v = await getVendedora(codigo);
-    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).send('No autorizado');
+    if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).send('No autorizado');
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).send('ID inválido');
     const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
@@ -526,7 +588,7 @@ app.get('/api/imagen/:id', async (req, res) => {
     res.send(buf);
   } catch (e) {
     console.error('❌ /api/imagen/' + req.params.id, e.message);
-    res.status(500).send(e.message);
+    res.status(500).send('No se pudo cargar la imagen');
   }
 });
 
@@ -717,9 +779,9 @@ app.get('/api/geocodificar', async (req, res) => {
 app.get('/api/fotos', async (req, res) => {
   try {
     const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
-    const clave  = req.headers['x-client-pass']  || req.query.p || '';
+    const token  = req.headers['x-client-token'] || req.query.t || '';
     const v = await getVendedora(codigo);
-    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'No autorizado' });
+    if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).json({ error: 'No autorizado' });
 
     const familia = (req.query.familia || '').trim().toLowerCase();
     let prods = await fetchProductos();
@@ -747,7 +809,7 @@ app.get('/api/fotos', async (req, res) => {
     await archive.finalize();
   } catch (e) {
     console.error('❌ /api/fotos', e.message);
-    if (!res.headersSent) res.status(500).json({ error: shortErr(e) });
+    if (!res.headersSent) res.status(500).json({ error: 'No se pudo generar el zip de fotos' });
   }
 });
 
@@ -853,7 +915,7 @@ app.get('/api/public/:slug/config', async (req, res) => {
     const cfg = await readCfg(c.code, c.partnerId);
     const { nombre, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap } = cfg;
     res.json({ nombre: nombre || c.name, slogan, logo, hdr, fondo, f1, f2, radius, welcome, tags, tagMap });
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+  } catch (e) { console.error('❌ /api/public/config', e.message); res.status(500).json({ error: 'No se pudo cargar la vitrina' }); }
 });
 
 app.get('/api/public/:slug/productos', async (req, res) => {
@@ -879,7 +941,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
       }));
     cacheSet('pub_' + req.params.slug, result, 10 * 60 * 1000);
     res.json(result);
-  } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
+  } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: 'No se pudo cargar el catálogo' }); }
 });
 
 app.get('/api/public/:slug/imagen/:id', async (req, res) => {
@@ -900,7 +962,7 @@ app.get('/api/public/:slug/imagen/:id', async (req, res) => {
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
     res.send(Buffer.from(b64, 'base64'));
-  } catch (e) { res.status(500).send(shortErr(e)); }
+  } catch (e) { console.error('❌ /api/public/imagen', e.message); res.status(500).send('No se pudo cargar la imagen'); }
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -977,11 +1039,12 @@ app.post('/api/contacto', async (req, res) => {
 // ── PERFIL ─────────────────────────────────────────────────────
 app.get('/api/me', async (req, res) => {
   try {
-    const codigo = (req.headers['x-client-code'] || '').toUpperCase();
-    const clave  = req.headers['x-client-pass'] || '';
-    const v = await getVendedora(codigo);
-    if (!v || !v.activo || !verifyPassword(clave, v.clave_hash)) return res.status(401).json({ error: 'Cliente no reconocido' });
-    res.json({ name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, sucursales: v.sucursales || [], publicSlug: slugOf(v.codigo) });
+    const { v, error } = await authenticateVendedora(req);
+    if (error) return res.status(401).json({ error });
+    res.json({
+      name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, sucursales: v.sucursales || [],
+      publicSlug: slugOf(v.codigo), imgToken: imgToken(v)
+    });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -989,9 +1052,16 @@ app.get('/api/me', async (req, res) => {
 // ADMIN
 // ════════════════════════════════════════════════════════════════
 app.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_PASSWORD || !ADMIN_SECRET) {
+    return res.status(500).json({ error: 'Falta ADMIN_PASSWORD y/o ADMIN_SECRET en las variables de entorno del servidor' });
+  }
+  const key = 'admin:' + clientIp(req);
+  if (isBlocked(key, 10, 15 * 60 * 1000)) return res.status(429).json({ error: 'Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.' });
   const { password } = req.body || {};
-  if (!ADMIN_PASSWORD) return res.status(500).json({ error: 'Falta ADMIN_PASSWORD en las variables de entorno del servidor' });
-  if (!password || password !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Clave incorrecta' });
+  if (!password || password !== ADMIN_PASSWORD) {
+    registerFailure(key, 15 * 60 * 1000);
+    return res.status(401).json({ error: 'Clave incorrecta' });
+  }
   res.json({ token: makeAdminToken() });
 });
 
@@ -1064,7 +1134,10 @@ app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
 });
 app.delete('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   try { await sql`DELETE FROM vendedoras WHERE id = ${req.params.id}`; res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: shortErr(e) }); }
+  catch (e) {
+    if (e.code === '23503') return res.status(409).json({ error: 'Esta vendedora tiene ventas registradas y no se puede eliminar. Desactívala en su lugar (el interruptor de Estado).' });
+    res.status(500).json({ error: shortErr(e) });
+  }
 });
 
 // La "venta abierta" es UNA sola, compartida por todas las vendedoras (todas
@@ -1401,7 +1474,7 @@ app.get('/health', async (_req, res) => {
     ts: new Date().toISOString(),
     config: {
       odooUrl: ODOO_URL, odooDb: ODOO_DB, userSet: !!ODOO_USER, passwordSet: !!ODOO_PASS,
-      adminPasswordSet: !!ADMIN_PASSWORD, tempoApiKeySet: !!TEMPO_API_KEY, tempoApiUrl: TEMPO_API_URL, db: dbOk
+      adminPasswordSet: !!ADMIN_PASSWORD, adminSecretSet: !!ADMIN_SECRET, tempoApiKeySet: !!TEMPO_API_KEY, tempoApiUrl: TEMPO_API_URL, db: dbOk
     }
   });
 });

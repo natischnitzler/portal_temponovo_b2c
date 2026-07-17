@@ -13,9 +13,14 @@ if (!connectionString) {
   console.warn('⚠ No hay POSTGRES_URL/DATABASE_URL configurada — conecta una base de datos en Vercel → Storage.');
 }
 
+// Verifica el certificado TLS del proveedor de Postgres por defecto (Neon,
+// Vercel Postgres y similares usan certificados de una CA pública, así que
+// esto funciona sin configuración extra). Si alguna vez hace falta conectar
+// a un Postgres con certificado autofirmado, se puede desactivar la
+// verificación a propósito con PGSSL_INSECURE=1 — nunca por defecto.
 const pool = new Pool({
   connectionString,
-  ssl: connectionString ? { rejectUnauthorized: false } : undefined
+  ssl: connectionString ? { rejectUnauthorized: process.env.PGSSL_INSECURE !== '1' } : undefined
 });
 
 // Tagged template mínimo, compatible con el mismo patrón `sql\`SELECT ...${x}...\``

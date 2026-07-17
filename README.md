@@ -56,12 +56,20 @@ las que hayan fallado.
 | `TEMPONOVO_VENDOR_EMAIL` | Opcional. Email que se manda como `vendor_email` en cada venta. Si no se pone, se usa `ODOO_USER`. Todas las ventas se crean con este remitente (el de la cuenta admin) — **nunca** con el email de cada vendedora. |
 | `CATEGORIAS`         | Opcional. Categorías a mostrar separadas por `\|`.              |
 | `ADMIN_PASSWORD`     | Clave para entrar al Panel de Admin (`/admin`)                 |
-| `ADMIN_SECRET`       | Cualquier texto largo al azar (firma las sesiones de admin)    |
+| `ADMIN_SECRET`       | Cualquier texto largo al azar (firma las sesiones de admin **y** los tokens de imagen de las vendedoras — ver nota) |
 | `POSTGRES_URL`       | La inyecta Vercel solo al conectar la base de datos (ver abajo)|
+| `PGSSL_INSECURE`     | Opcional. Poner en `1` solo si tu Postgres usa un certificado autofirmado y necesitas desactivar la verificación TLS. Por defecto se verifica. |
 
 Nota: XML-RPC (`ODOO_*`) se sigue usando solo para leer catálogo, stock,
 imágenes y precios de lista — **nunca** para crear ventas. Las ventas
 siempre pasan por `TEMPONOVO_API_URL` / `TEMPONOVO_API_KEY`.
+
+Importante: `ADMIN_SECRET` es **obligatorio** — a diferencia de otras
+variables, no tiene un valor por defecto. Si falta, tanto el login de admin
+como la carga de imágenes en la vitrina de las vendedoras dejan de
+funcionar (a propósito: antes había un valor por defecto conocido en el
+código fuente, lo que permitía forjar sesiones de admin si alguien olvidaba
+configurarlo).
 
 ### 2. Base de datos (obligatorio)
 
@@ -130,6 +138,15 @@ vercel --prod
   extra.
 - La sesión del admin es un token firmado (HMAC) con expiración de 12 horas,
   sin necesitar una tabla de sesiones.
+- Las imágenes del catálogo (`<img src>`) nunca llevan la clave real de la
+  vendedora en la URL — usan un token derivado de su `clave_hash`, que deja
+  de servir solo con cambiarle la clave.
+- El login de admin y el de vendedoras bloquean por 10-15 minutos tras
+  varios intentos fallidos seguidos (fuerza bruta), sin afectar a quien ya
+  tiene la clave correcta.
+- Eliminar una vendedora con ventas registradas está bloqueado (para no
+  perder ese historial) — hay que desactivarla en su lugar desde el
+  interruptor de Estado.
 - La personalización visual (logo, colores, tipografía, etiquetas) **y los
   precios fijos** de cada vendedora se guardan como antes, como un archivo
   adjunto en el partner de Odoo (`vitrina-cfg-<código>`) — no se movieron a
