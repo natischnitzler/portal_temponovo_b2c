@@ -67,6 +67,16 @@ function xmlrpcCall(model, method, args, kwargs) {
 // una conexión explícita {url, db, user, password} y sirven para cualquier
 // proveedor, incluido Temponovo (que para el catálogo/ventas nuevas se
 // resuelve igual que cualquier otro, leyendo su fila de "proveedores").
+// El paquete "xmlrpc" no expone un timeout propio — sin esto, un proveedor
+// caído o con el firewall bloqueado deja la llamada colgada para siempre
+// (y con varios proveedores consultándose uno por uno, ESO cuelga el
+// catálogo entero, no solo el de ese proveedor).
+function withTimeout(promise, ms, msg) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms))
+  ]);
+}
 const uidCache = {}; // cacheKey -> {uid, ts}
 function getUidFor(conn, cacheKey) {
   if (!conn.user || !conn.password) {
@@ -75,7 +85,7 @@ function getUidFor(conn, cacheKey) {
   const cached = uidCache[cacheKey];
   if (cached && (Date.now() - cached.ts) < 3600000) return Promise.resolve(cached.uid);
   const client = xmlrpc.createSecureClient({ host: new URL(conn.url).hostname, port: 443, path: '/xmlrpc/2/common' });
-  return new Promise((resolve, reject) => {
+  const p = new Promise((resolve, reject) => {
     client.methodCall('authenticate', [conn.db, conn.user, conn.password, {}], (err, uid) => {
       if (err) return reject(new Error('No se pudo conectar a Odoo (' + conn.db + '): ' + err.message));
       if (!uid) return reject(new Error('Odoo rechazó las credenciales (usuario, clave o base "' + conn.db + '" equivocada).'));
@@ -83,14 +93,16 @@ function getUidFor(conn, cacheKey) {
       resolve(uid);
     });
   });
+  return withTimeout(p, 15000, 'Tiempo de espera agotado conectando a Odoo (' + conn.db + ')');
 }
 function xmlrpcCallFor(conn, cacheKey, model, method, args, kwargs) {
   return getUidFor(conn, cacheKey).then(uid => {
     const client = xmlrpc.createSecureClient({ host: new URL(conn.url).hostname, port: 443, path: '/xmlrpc/2/object' });
-    return new Promise((resolve, reject) => {
+    const p = new Promise((resolve, reject) => {
       client.methodCall('execute_kw', [conn.db, uid, conn.password, model, method, args, kwargs || {}],
         (err, r) => err ? reject(err) : resolve(r));
     });
+    return withTimeout(p, 15000, 'Tiempo de espera agotado llamando a Odoo (' + conn.db + ')');
   });
 }
 // Conexión Odoo resuelta desde una fila de "proveedores" (con la clave ya descifrada).
@@ -748,13 +760,14 @@ async function productosClienteProveedor(proveedor) {
 // caído, credenciales vencidas), se loguea y se salta — no tumba a los demás.
 async function productosClienteMulti() {
   const proveedores = await getActiveProveedores();
+  // En paralelo — uno por uno, un proveedor lento (aunque tenga timeout)
+  // sumaría su demora completa a la de los demás en vez de superponerse.
+  const resultados = await Promise.allSettled(proveedores.map(p => productosClienteProveedor(p)));
   let todos = [];
-  for (const proveedor of proveedores) {
-    try {
-      const prods = await productosClienteProveedor(proveedor);
-      todos = todos.concat(prods);
-    } catch (e) { console.warn('⚠ catálogo de ' + proveedor.codigo + ':', e.message); }
-  }
+  resultados.forEach((r, i) => {
+    if (r.status === 'fulfilled') todos = todos.concat(r.value);
+    else console.warn('⚠ catálogo de ' + proveedores[i].codigo + ':', r.reason.message);
+  });
   // Info libre del Excel del admin — keyeada por SKU puro (no por proveedor,
   // simplificación deliberada: Temponovo y Aviv usan formatos de código
   // visiblemente distintos, ver plan).
