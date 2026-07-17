@@ -72,6 +72,12 @@ tr:last-child td{border-bottom:none;}
 .b-ok{background:var(--green-light);color:var(--green);}
 .b-warn{background:var(--amber-light);color:var(--amber);}
 .b-off{background:var(--red-light);color:var(--red);}
+.b-mute{background:var(--line);color:var(--steel);}
+#vt-list.compact td{padding:4px 8px;font-size:12px;}
+#vt-list.compact th{padding:4px 8px;}
+#vt-list.compact .note{display:none;}
+#vt-list.compact .seg-select{display:none;}
+#vt-list.compact .grupo-head{padding:8px 14px;}
 .b-recibido{background:#eef1f4;color:#4a5a6b;}
 .b-preparando{background:var(--amber-light);color:var(--amber);}
 .b-en_transito{background:#e3ecf5;color:#3d5a80;}
@@ -120,11 +126,11 @@ tr:last-child td{border-bottom:none;}
 <div id="app">
   <nav class="sidebar">
     <div class="sidebar-title">Admin</div>
-    <button class="nav-item active" data-sec="config">⚙ Configuración</button>
-    <button class="nav-item" data-sec="vendedoras">👤 Vendedoras</button>
+    <button class="nav-item active" data-sec="vendedoras">👤 Vendedoras</button>
     <button class="nav-item" data-sec="productos">📋 Info productos</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
+    <button class="nav-item" data-sec="config">⚙ Configuración</button>
     <div class="sidebar-foot">
       <button class="btn-logout" id="btn-logout">Cerrar sesión</button>
     </div>
@@ -134,7 +140,7 @@ tr:last-child td{border-bottom:none;}
     <div class="wrap">
 
       <!-- CONFIGURACIÓN -->
-      <section class="section active" id="sec-config">
+      <section class="section" id="sec-config">
         <h2 class="page-t">Configuración</h2>
         <p class="page-s">Estos son los datos de tu empresa: el nombre y el Partner ID en Odoo al que se le facturan todas las ventas.</p>
 
@@ -157,7 +163,7 @@ tr:last-child td{border-bottom:none;}
       </section>
 
       <!-- VENDEDORAS -->
-      <section class="section" id="sec-vendedoras">
+      <section class="section active" id="sec-vendedoras">
         <h2 class="page-t">Vendedoras</h2>
         <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige su multiplicador de precio, qué categorías vende y, si quieres, precios fijos por producto (Excel). Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
 
@@ -199,14 +205,14 @@ tr:last-child td{border-bottom:none;}
         <div class="card">
           <div class="card-h">Cómo armar tu Excel</div>
           <p class="note" style="margin-bottom:10px">
-            La <b>primera columna</b> debe ser el <b>Código</b> (el mismo SKU de Odoo). Las <b>demás columnas son libres</b>: tú les pones el título que quieras, y cada una aparece como un dato en la ficha. Puedes subir varios Excel distintos (uno para relojes, otro para calculadoras, etc.).
+            La <b>primera columna</b> debe ser el <b>Código</b> (el mismo SKU de Odoo). Si para alguna fila no tienes el código a mano, puedes dejarlo vacío y usar la columna <b>Código de barra</b> en su lugar — se busca solo en el catálogo. Las <b>demás columnas son libres</b>: tú les pones el título que quieras, y cada una aparece como un dato en la ficha. Puedes subir varios Excel distintos (uno para relojes, otro para calculadoras, etc.).
           </p>
           <div style="overflow-x:auto">
-            <table style="min-width:520px">
-              <thead><tr><th>Código</th><th>Resistencia al agua</th><th>Correa</th><th>Garantía</th><th>Cómo venderlo</th></tr></thead>
+            <table style="min-width:600px">
+              <thead><tr><th>Código</th><th>Código de barra</th><th>Resistencia al agua</th><th>Correa</th><th>Garantía</th><th>Cómo venderlo</th></tr></thead>
               <tbody>
-                <tr><td class="mono">MTP-1234</td><td>5 ATM</td><td>Acero</td><td>2 años</td><td>Ideal para la oficina y el día a día.</td></tr>
-                <tr><td class="mono">GA-2100</td><td>20 ATM</td><td>Resina</td><td>2 años</td><td>Resistente a golpes, perfecto para deporte.</td></tr>
+                <tr><td class="mono">MTP-1234</td><td class="mono"></td><td>5 ATM</td><td>Acero</td><td>2 años</td><td>Ideal para la oficina y el día a día.</td></tr>
+                <tr><td class="mono"></td><td class="mono">7501234567890</td><td>20 ATM</td><td>Resina</td><td>2 años</td><td>Resistente a golpes, perfecto para deporte.</td></tr>
               </tbody>
             </table>
           </div>
@@ -248,6 +254,7 @@ tr:last-child td{border-bottom:none;}
                 <option value="">Todas</option>
                 <option value="enviada">Enviadas</option>
                 <option value="error">Con error</option>
+                <option value="cancelada">Canceladas</option>
               </select>
             </div>
             <div class="fld" style="max-width:180px"><label class="fld-l">Seguimiento</label>
@@ -260,6 +267,7 @@ tr:last-child td{border-bottom:none;}
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
+            <button class="btn" id="vt-compacto">Vista compacta</button>
             <button class="btn dark" id="vt-consolidar">Reintentar todas las fallidas</button>
           </div>
           <div class="msg" id="vt-msg"></div>
@@ -274,9 +282,26 @@ tr:last-child td{border-bottom:none;}
       <!-- REPORTE -->
       <section class="section" id="sec-reporte">
         <h2 class="page-t">Reporte</h2>
-        <p class="page-s">Ventas totales por vendedora.</p>
+        <p class="page-s">Ventas totales por vendedora, por mes y por tipo de producto. El desglose por tipo de producto solo cuenta ventas hechas desde esta actualización — las anteriores no tenían la categoría guardada.</p>
         <div class="card">
+          <div class="row" style="align-items:flex-end">
+            <div class="fld" style="max-width:170px"><label class="fld-l">Desde</label><input class="fld-in" id="rep-desde" type="date"/></div>
+            <div class="fld" style="max-width:170px"><label class="fld-l">Hasta</label><input class="fld-in" id="rep-hasta" type="date"/></div>
+            <button class="btn dark" id="rep-buscar">Aplicar</button>
+            <button class="btn" id="rep-limpiar">Limpiar</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">Por vendedora</div>
           <div id="rep-list"><div class="empty">Cargando…</div></div>
+        </div>
+        <div class="card">
+          <div class="card-h">Por mes</div>
+          <div id="rep-mes"><div class="empty">Cargando…</div></div>
+        </div>
+        <div class="card">
+          <div class="card-h">Por tipo de producto</div>
+          <div id="rep-cat"><div class="empty">Cargando…</div></div>
         </div>
       </section>
 
@@ -290,6 +315,7 @@ const API = '/api/admin';
 let TOKEN = localStorage.getItem('tn_admin_token') || '';
 let CATEGORIAS = [];
 let CATEGORIAS_SEL = new Set();
+let LOGOS = {};
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
@@ -396,12 +422,46 @@ async function loadVendedoras() {
   try {
     VENDEDORAS = await api('/vendedoras');
     renderVendedoras();
+    api('/vendedoras/logos').then(m => { LOGOS = m || {}; renderVendedoras(); }).catch(() => {});
   } catch (e) { $('v-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+// Fila expandible para editar las categorías de una vendedora ya creada
+// (al crearla se eligen una vez; acá se pueden cambiar después).
+function toggleCategoriasEdit(id) {
+  const row = document.querySelector('[data-cats-row="' + id + '"]');
+  if (!row) return;
+  const abrir = row.style.display === 'none';
+  document.querySelectorAll('.cat-edit-row').forEach(r => r.style.display = 'none');
+  if (!abrir) return;
+  const v = VENDEDORAS.find(x => x.id == id);
+  const sel = new Set(v.categorias || []);
+  const cell = row.children[1];
+  cell.innerHTML = `
+    <div class="chip-list">${CATEGORIAS.map(c => `<label class="chk ${sel.has(c)?'on':''}" data-cat="${esc(c)}"><input type="checkbox" ${sel.has(c)?'checked':''}/> ${esc(c)}</label>`).join('') || '<span class="note">No se pudo leer el catálogo de Odoo.</span>'}</div>
+    <div class="row" style="margin-top:8px"><button class="btn btn-sm dark" data-cats-guardar="${id}">Guardar categorías</button></div>`;
+  cell.querySelectorAll('.chk').forEach(chk => {
+    chk.onclick = e => {
+      e.preventDefault();
+      const cat = chk.dataset.cat;
+      if (sel.has(cat)) sel.delete(cat); else sel.add(cat);
+      chk.classList.toggle('on', sel.has(cat));
+      chk.querySelector('input').checked = sel.has(cat);
+    };
+  });
+  cell.querySelector('[data-cats-guardar]').onclick = async () => {
+    try {
+      await api('/vendedoras/' + id, { method: 'PUT', body: JSON.stringify({ categorias: [...sel] }) });
+      row.style.display = 'none';
+      loadVendedoras();
+    } catch (e) { alert(e.message); }
+  };
+  row.style.display = '';
 }
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th></th><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
+      <td>${LOGOS[v.codigo] ? `<img src="${esc(LOGOS[v.codigo])}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:#f2f1ee;display:block"/>` : ''}</td>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
       <td class="mono">${esc(v.email)||'<span class="note">—</span>'}</td>
@@ -409,14 +469,17 @@ function renderVendedoras() {
       <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
+        <button class="btn btn-sm" data-cats="${v.id}">Categorías</button>
         <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
         <button class="btn btn-sm" data-precios-base="${v.id}">Descargar precios</button>
         <button class="btn btn-sm" data-precios-up="${v.id}">Subir precios</button>
         <button class="btn btn-sm danger" data-precios-clear="${v.id}">Quitar precios fijos</button>
         <button class="btn btn-sm danger" data-del-v="${v.id}">Eliminar</button>
       </td>
-    </tr>`).join('')}
+    </tr>
+    <tr class="cat-edit-row" data-cats-row="${v.id}" style="display:none"><td></td><td colspan="7"></td></tr>`).join('')}
   </tbody></table>`;
+  $('v-list').querySelectorAll('[data-cats]').forEach(b => b.onclick = () => toggleCategoriasEdit(b.dataset.cats));
   $('v-list').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
     const v = VENDEDORAS.find(x => x.id == b.dataset.toggle);
     try { await api('/vendedoras/' + v.id, { method: 'PUT', body: JSON.stringify({ activo: !v.activo }) }); loadVendedoras(); }
@@ -498,6 +561,17 @@ $('v-crear').onclick = async () => {
 
 /* ── VENTAS ── */
 $('vt-buscar').onclick = loadVentas;
+let VT_COMPACT = localStorage.getItem('tn_admin_vt_compact') === '1';
+function applyVtCompact() {
+  $('vt-list').classList.toggle('compact', VT_COMPACT);
+  $('vt-compacto').textContent = VT_COMPACT ? 'Vista expandida' : 'Vista compacta';
+}
+$('vt-compacto').onclick = () => {
+  VT_COMPACT = !VT_COMPACT;
+  localStorage.setItem('tn_admin_vt_compact', VT_COMPACT ? '1' : '0');
+  applyVtCompact();
+};
+applyVtCompact();
 async function loadVentas() {
   const estado = $('vt-estado').value;
   const seguimiento = $('vt-seguimiento').value;
@@ -543,7 +617,7 @@ function renderVentas(ventas) {
       <div class="grupo-head">
         <div>
           ${g.key === 'sin_odoo'
-            ? '<span class="gh-name" style="color:var(--red)">⚠ Sin enviar / con error</span>'
+            ? '<span class="gh-name" style="color:var(--red)">⚠ Sin enviar, con error o canceladas</span>'
             : `<span class="gh-name">${esc(g.odoo_venta_nombre || '(sin nombre)')}</span>`}
         </div>
         <div class="gh-meta">
@@ -566,8 +640,9 @@ function renderVentas(ventas) {
           </td>
           <td class="mono">${fmt(v.total)}</td>
           <td>
-            <span class="badge ${v.estado==='enviada'?'b-ok':'b-off'}">${v.estado==='enviada'?'Enviada':'Con error'}</span>
+            <span class="badge ${v.estado==='enviada'?'b-ok':v.estado==='cancelada'?'b-mute':'b-off'}">${v.estado==='enviada'?'Enviada':v.estado==='cancelada'?'Cancelada':'Con error'}</span>
             ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
+            ${v.estado==='cancelada' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px">${esc(v.error_msg)}</div>` : ''}
           </td>
           <td>
             <span class="badge b-${v.seguimiento||'recibido'}" style="margin-bottom:6px;display:inline-block">${SEGUIMIENTO_LABEL[v.seguimiento]||'Recibido'}</span>
@@ -580,6 +655,7 @@ function renderVentas(ventas) {
           </td>
           <td>
             ${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}
+            ${v.estado==='error' ? `<button class="btn btn-sm danger" data-cancelar="${v.id}">Cancelar</button>` : ''}
             ${v.estado==='enviada' ? `<button class="btn btn-sm danger" data-forzar="${v.id}" title="Úsalo solo si esta venta en realidad NO llegó a Odoo (ej. cayó en una venta cancelada)">Reenviar (forzar)</button>` : ''}
           </td>
         </tr>`).join('')}
@@ -603,6 +679,15 @@ function renderVentas(ventas) {
     try { await api('/ventas/' + b.dataset.reintentar + '/reintentar', { method: 'POST' }); loadVentas(); }
     catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Reintentar'; }
   });
+  $('vt-list').querySelectorAll('[data-cancelar]').forEach(b => b.onclick = async () => {
+    const motivoRaw = prompt('¿Por qué cancelas esta venta? (opcional, queda como nota)');
+    if (motivoRaw === null) return;
+    const motivo = motivoRaw.trim();
+    if (!confirm('¿Cancelar esta venta? Deja de estar en la cola de reintentos y no cuenta en el reporte.')) return;
+    b.disabled = true; b.textContent = 'Cancelando…';
+    try { await api('/ventas/' + b.dataset.cancelar + '/cancelar', { method: 'POST', body: JSON.stringify({ motivo }) }); loadVentas(); }
+    catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Cancelar'; }
+  });
   $('vt-list').querySelectorAll('[data-forzar]').forEach(b => b.onclick = async () => {
     if (!confirm('Esto vuelve a mandar estos productos a Odoo (nueva venta o la que esté abierta), aunque esta fila ya figura como "Enviada". Úsalo solo si estás segura de que en realidad NO llegó (por ejemplo, quedó en una venta cancelada). ¿Continuar?')) return;
     b.disabled = true; b.textContent = 'Enviando…';
@@ -620,20 +705,52 @@ $('vt-consolidar').onclick = async () => {
 };
 
 /* ── REPORTE ── */
+const MESES_CORTOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+function mesLabel(mk) { const [y, m] = mk.split('-'); return MESES_CORTOS[parseInt(m, 10) - 1] + ' ' + y; }
+$('rep-buscar').onclick = loadReporte;
+$('rep-limpiar').onclick = () => { $('rep-desde').value = ''; $('rep-hasta').value = ''; loadReporte(); };
 async function loadReporte() {
+  $('rep-list').innerHTML = $('rep-mes').innerHTML = $('rep-cat').innerHTML = '<div class="empty">Cargando…</div>';
   try {
-    const rows = await api('/reporte');
-    if (!rows.length) { $('rep-list').innerHTML = '<div class="empty">Sin datos todavía.</div>'; return; }
-    $('rep-list').innerHTML = `<table><thead><tr><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Con error</th><th>Total</th></tr></thead><tbody>
-      ${rows.map(r => `<tr>
+    const desde = $('rep-desde').value, hasta = $('rep-hasta').value;
+    const params = [];
+    if (desde) params.push('desde=' + desde);
+    if (hasta) params.push('hasta=' + hasta);
+    const q = params.length ? '?' + params.join('&') : '';
+    const { porVendedora, porMes, porCategoria } = await api('/reporte' + q);
+
+    $('rep-list').innerHTML = !porVendedora.length ? '<div class="empty">Sin datos todavía.</div>' :
+      `<table><thead><tr><th>Vendedora</th><th>Código</th><th>Ventas</th><th>Con error</th><th>Canceladas</th><th>Total</th></tr></thead><tbody>
+      ${porVendedora.map(r => `<tr>
         <td>${esc(r.vendedora_nombre)}</td>
         <td class="mono">${esc(r.codigo)}</td>
         <td class="mono">${r.ventas}</td>
         <td class="mono">${r.con_error}</td>
+        <td class="mono">${r.canceladas}</td>
         <td class="mono">${fmt(r.total)}</td>
       </tr>`).join('')}
     </tbody></table>`;
-  } catch (e) { $('rep-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+
+    $('rep-mes').innerHTML = !porMes.length ? '<div class="empty">Sin datos todavía.</div>' :
+      `<table><thead><tr><th>Mes</th><th>Ventas</th><th>Total</th></tr></thead><tbody>
+      ${porMes.map(r => `<tr>
+        <td>${esc(mesLabel(r.mes))}</td>
+        <td class="mono">${r.ventas}</td>
+        <td class="mono">${fmt(r.total)}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+
+    $('rep-cat').innerHTML = !porCategoria.length ? '<div class="empty">Sin datos todavía.</div>' :
+      `<table><thead><tr><th>Tipo de producto</th><th>Ventas</th><th>Total</th></tr></thead><tbody>
+      ${porCategoria.map(r => `<tr>
+        <td>${esc(r.categoria)}</td>
+        <td class="mono">${r.ventas}</td>
+        <td class="mono">${fmt(r.total)}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  } catch (e) {
+    $('rep-list').innerHTML = $('rep-mes').innerHTML = $('rep-cat').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
 }
 
 /* ── INFO PRODUCTOS ── */
@@ -659,11 +776,11 @@ loadProductoInfo();
 
 $('pi-plantilla').onclick = () => {
   const rows = [
-    { 'Código': 'MTP-1234', 'Resistencia al agua': '5 ATM', 'Correa': 'Acero', 'Garantía': '2 años', 'Cómo venderlo': 'Ideal para la oficina y el día a día.' },
-    { 'Código': 'GA-2100', 'Resistencia al agua': '20 ATM', 'Correa': 'Resina', 'Garantía': '2 años', 'Cómo venderlo': 'Resistente a golpes, perfecto para deporte.' }
+    { 'Código': 'MTP-1234', 'Código de barra': '', 'Resistencia al agua': '5 ATM', 'Correa': 'Acero', 'Garantía': '2 años', 'Cómo venderlo': 'Ideal para la oficina y el día a día.' },
+    { 'Código': '', 'Código de barra': '7501234567890', 'Resistencia al agua': '20 ATM', 'Correa': 'Resina', 'Garantía': '2 años', 'Cómo venderlo': 'Resistente a golpes, perfecto para deporte.' }
   ];
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 40 }];
+  ws['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 40 }];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Info productos');
   XLSX.writeFile(wb, 'plantilla-info-productos.xlsx');
 };
@@ -678,25 +795,28 @@ $('pi-input').onchange = async (e) => {
     const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
     if (!raw.length) return showMsg('pi-msg', 'El archivo está vacío.', false);
 
-    // La primera columna es el Código; el resto son campos libres.
+    // La primera columna es el Código; "Código de barra" es opcional (se usa
+    // si el Código viene vacío); el resto son campos libres.
     const cols = Object.keys(raw[0]);
-    const kSku = cols.find(k => /c[oó]d|sku/i.test(k)) || cols[0];
+    const kBarcode = cols.find(k => /c[oó]d.*barra|barcode|ean/i.test(k));
+    const kSku = cols.find(k => k !== kBarcode && /c[oó]d|sku/i.test(k)) || cols[0];
     const filas = [];
     raw.forEach(r => {
       const sku = String(r[kSku] || '').trim();
-      if (!sku) return;
+      const barcode = kBarcode ? String(r[kBarcode] || '').trim() : '';
+      if (!sku && !barcode) return;
       const campos = {};
       cols.forEach(c => {
-        if (c === kSku) return;
+        if (c === kSku || c === kBarcode) return;
         const val = String(r[c] ?? '').trim();
         if (val) campos[String(c).trim()] = val;
       });
-      filas.push({ sku, campos });
+      filas.push({ sku, barcode, campos });
     });
-    if (!filas.length) return showMsg('pi-msg', 'No se encontró ninguna fila con Código válido. Revisa que la primera columna sea el código del producto.', false);
+    if (!filas.length) return showMsg('pi-msg', 'No se encontró ninguna fila con Código o Código de barra. Revisa que la primera columna sea el código del producto.', false);
 
     const r = await api('/producto-info', { method: 'POST', body: JSON.stringify({ data: { modo, filas } }) });
-    showMsg('pi-msg', `✓ ${r.cargados} producto(s) cargado(s) (${r.modo === 'reemplazar' ? 'reemplazando todo' : 'sumando/actualizando'}).`, true);
+    showMsg('pi-msg', `✓ ${r.cargados} producto(s) cargado(s) (${r.modo === 'reemplazar' ? 'reemplazando todo' : 'sumando/actualizando'})` + (r.sinMatch ? `. ⚠ ${r.sinMatch} fila(s) con código de barra que no matcheó con ningún producto del catálogo.` : '.'), true);
     loadProductoInfo();
   } catch (err) { showMsg('pi-msg', 'No se pudo leer el archivo: ' + err.message, false); }
   e.target.value = '';

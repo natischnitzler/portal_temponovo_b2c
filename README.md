@@ -59,6 +59,7 @@ las que hayan fallado.
 | `ADMIN_SECRET`       | Cualquier texto largo al azar (firma las sesiones de admin **y** los tokens de imagen de las vendedoras — ver nota) |
 | `POSTGRES_URL`       | La inyecta Vercel solo al conectar la base de datos (ver abajo)|
 | `PGSSL_INSECURE`     | Opcional. Poner en `1` solo si tu Postgres usa un certificado autofirmado y necesitas desactivar la verificación TLS. Por defecto se verifica. |
+| `CREDENTIALS_KEY`    | **Obligatoria.** Clave de 32 bytes en base64 (generarla una vez con `openssl rand -base64 32`) — cifra las credenciales de cada proveedor (Odoo/API de ventas) que se guarden en la base de datos. Ver nota abajo. |
 
 Nota: XML-RPC (`ODOO_*`) se sigue usando solo para leer catálogo, stock,
 imágenes y precios de lista — **nunca** para crear ventas. Las ventas
@@ -70,6 +71,29 @@ como la carga de imágenes en la vitrina de las vendedoras dejan de
 funcionar (a propósito: antes había un valor por defecto conocido en el
 código fuente, lo que permitía forjar sesiones de admin si alguien olvidaba
 configurarlo).
+
+### Portal multi-proveedor (en construcción)
+
+El portal está migrando de un solo proveedor (Temponovo) a soportar varios
+proveedores conectados desde el Panel de Admin (empezando por Aviv), cada
+uno con su propia conexión a Odoo (o cargado a mano si no tiene Odoo). Es un
+cambio grande que se entrega por fases:
+
+- ✅ **Fase 0 (ya en este código)**: existe la tabla `proveedores` en la base
+  de datos, y al arrancar por primera vez con `CREDENTIALS_KEY` configurada,
+  el backend migra automáticamente la configuración actual de Temponovo
+  (`ODOO_*`/`TEMPONOVO_*`/el Partner ID de Configuración) a la primera fila
+  de esa tabla, con las credenciales cifradas. Todavía **no cambia nada** en
+  el funcionamiento del portal — se puede verificar en `GET /health`, que
+  ahora incluye la lista de proveedores y si sus credenciales quedaron
+  seteadas. Si `CREDENTIALS_KEY` no está configurada, esta migración
+  simplemente no corre todavía (se reintenta sola en el próximo request en
+  cuanto se configure) — el resto del portal sigue funcionando igual que
+  antes con las variables de entorno de siempre.
+- ⏳ Pendiente: pestaña Admin → Proveedores (alta/edición de proveedores sin
+  redeploy), catálogo combinado de varios proveedores, separación automática
+  de un pedido mixto en una venta por proveedor, y carga manual de catálogo
+  y ventas para un proveedor sin Odoo.
 
 ### 2. Base de datos (obligatorio)
 

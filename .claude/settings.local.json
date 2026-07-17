@@ -16,7 +16,9 @@
       "Bash(lsof -ti:3099)",
       "Bash(xargs -r kill)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(grep -n \"^\\\\$\\('vt-buscar'\\)\\\\|^loadVentas\\(\\);\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/admin.html)",
+      "Bash(grep -n \"function ensureDb\\\\|dbReady = \\(async\\\\|oldEmpresas\\\\|^  }\\)\\(\\);$\\\\|return dbReady\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/index.js)"
     ]
   }
 }

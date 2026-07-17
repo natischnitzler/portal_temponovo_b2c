@@ -1620,13 +1620,13 @@ async function loadVentas(){
         </div>
         <div class="his-right">
           <div class="his-total">${fmt(o.total)}</div>
-          <span class="badge ${o.estado==='error'?'b-cancel':'b-'+(o.seguimiento||'recibido')}">${o.estado==='error'?'Con error':(SEG_LABEL[o.seguimiento]||'Recibido')}</span>
+          <span class="badge ${o.estado==='cancelada'?'b-cancel':o.estado==='error'?'b-cancel':'b-'+(o.seguimiento||'recibido')}">${o.estado==='cancelada'?'Cancelada':o.estado==='error'?'Con error':(SEG_LABEL[o.seguimiento]||'Recibido')}</span>
         </div>
       </div>
       <div class="his-lines">
         ${o.lineas.map(l=>`<div class="hl"><span>${esc(l.sku)}</span><span class="q">×${l.cantidad}</span><span>${fmt(l.total)}</span></div>`).join('') || '<div class="hl"><span>Sin detalle</span></div>'}
         ${o.nota?`<div class="hl" style="color:var(--steel)"><span>${esc(o.nota)}</span></div>`:''}
-        ${o.estado!=='error' ? segStepper(o) : ''}
+        ${o.estado!=='error' && o.estado!=='cancelada' ? segStepper(o) : ''}
       </div>
     </div>`).join('');
 

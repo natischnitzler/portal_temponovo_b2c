@@ -189,6 +189,23 @@ function ensureDb() {
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento TEXT NOT NULL DEFAULT 'recibido'`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS seguimiento_at TIMESTAMPTZ DEFAULT now()`;
 
+    // ── MULTI-PROVEEDOR (fase 0) ─────────────────────────────────────
+    // Columnas para cuando una venta se separe por proveedor: todavía no se
+    // usan en ningún flujo (eso llega en una fase siguiente) — nullable, no
+    // cambian nada del comportamiento actual.
+    // grupo_id: comparte el mismo valor entre las N filas que salen de UN
+    //   pedido de cliente cuando se divide entre proveedores.
+    // proveedor_id: a qué proveedor pertenece esta fila (hoy siempre NULL /
+    //   luego siempre "temponovo" hasta que haya split real).
+    // orden_secuencia: número de pedido del cliente, calculado una vez por
+    //   grupo_id (reemplaza el conteo al vuelo que hace numeroVenta()).
+    // estado_manual: solo se usa cuando el proveedor es tipo 'manual' (sin
+    //   Odoo) — el admin lo gestiona a mano dentro del portal.
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS grupo_id UUID`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS proveedor_id INTEGER`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS orden_secuencia INTEGER`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS estado_manual TEXT`;
+
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
     // Un curso agrupa lecciones; cada lección puede ser un video (link de
@@ -227,6 +244,54 @@ function ensureDb() {
       campos JSONB NOT NULL DEFAULT '{}',
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
+    // ── PROVEEDORES (fase 0 del portal multi-proveedor) ─────────────
+    // Hoy el portal habla con UN solo Odoo (Temponovo, vía las variables de
+    // entorno ODOO_*/TEMPONOVO_*) y UN solo partner_id ("configuracion").
+    // Esta tabla es el destino final de esa configuración — cada proveedor
+    // (Temponovo, Aviv, futuros) tendrá su propia conexión y su propia
+    // "venta abierta", editables desde Admin → Proveedores, sin redeploy.
+    // En esta fase la tabla solo se crea y se siembra con Temponovo — el
+    // resto del código todavía sigue usando las variables de entorno
+    // directamente (eso cambia en una fase siguiente).
+    await sql`CREATE TABLE IF NOT EXISTS proveedores (
+      id SERIAL PRIMARY KEY,
+      codigo TEXT NOT NULL UNIQUE,
+      nombre TEXT NOT NULL,
+      tipo TEXT NOT NULL DEFAULT 'odoo',
+      activo BOOLEAN DEFAULT true,
+      partner_id INTEGER,
+      odoo_url TEXT, odoo_db TEXT, odoo_user TEXT, odoo_password_enc TEXT,
+      venta_api_url TEXT, venta_api_key_enc TEXT, venta_vendor_email TEXT,
+      venta_abierta_id INTEGER, venta_abierta_nombre TEXT,
+      categorias_filtro JSONB DEFAULT '[]',
+      orden INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
+    await sql`ALTER TABLE ventas_pendientes DROP CONSTRAINT IF EXISTS ventas_pendientes_proveedor_id_fkey`;
+    await sql`ALTER TABLE ventas_pendientes ADD CONSTRAINT ventas_pendientes_proveedor_id_fkey
+      FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)`;
+
+    // Migración única: si nunca se creó ningún proveedor y existen las
+    // variables de entorno de Temponovo, se crea como el primer proveedor
+    // — llevándose el partner_id y la venta abierta que hoy viven en
+    // "configuracion". Si CREDENTIALS_KEY todavía no está seteada, esto se
+    // reintenta solo en el próximo request (falla cerrado, no a medias).
+    const { rows: provRows } = await sql`SELECT id FROM proveedores LIMIT 1`;
+    if (!provRows.length && (ODOO_USER || TEMPO_API_KEY)) {
+      const { rows: cfgRows } = await sql`SELECT * FROM configuracion WHERE id = 1`;
+      const cfg = cfgRows[0] || {};
+      try {
+        await sql`INSERT INTO proveedores
+          (codigo, nombre, tipo, partner_id, odoo_url, odoo_db, odoo_user, odoo_password_enc,
+           venta_api_url, venta_api_key_enc, venta_vendor_email, venta_abierta_id, venta_abierta_nombre, categorias_filtro)
+          VALUES ('temponovo', ${cfg.nombre || 'Temponovo'}, 'odoo', ${cfg.partner_id || null},
+            ${ODOO_URL}, ${ODOO_DB}, ${ODOO_USER || null}, ${ODOO_PASS ? encryptCred(ODOO_PASS) : null},
+            ${TEMPO_API_URL}, ${TEMPO_API_KEY ? encryptCred(TEMPO_API_KEY) : null}, ${TEMPO_VENDOR_EMAIL || null},
+            ${cfg.venta_abierta_id || null}, ${cfg.venta_abierta_nombre || null}, ${JSON.stringify(CATEGORIAS_OK)})`;
+        console.log('✅ Proveedor "temponovo" creado automáticamente desde las variables de entorno');
+      } catch (e) { console.error('❌ No se pudo migrar Temponovo a la tabla proveedores (¿falta CREDENTIALS_KEY?):', e.message); }
+    }
+
     // Si había una sola empresa creada, rescata su nombre/partnerId a la config global.
     const oldEmpresas = await sql`SELECT to_regclass('public.empresas') AS t`;
     if (oldEmpresas.rows[0]?.t) {
@@ -327,6 +392,38 @@ function verifyImgToken(v, token) {
   const expected = imgToken(v);
   try { return crypto.timingSafeEqual(Buffer.from(String(token), 'hex'), Buffer.from(expected, 'hex')); }
   catch { return false; }
+}
+
+// ── CREDENCIALES DE PROVEEDORES (cifradas en la base) ─────────────
+// Cada proveedor (Temponovo, Aviv, futuros) guarda su clave de Odoo y su
+// API key de ventas cifradas en Postgres — nunca en texto plano — para
+// poder agregarse desde el Panel de Admin sin tocar variables de entorno.
+// CREDENTIALS_KEY, igual que ADMIN_SECRET, NO tiene valor por defecto: sin
+// ella, cifrar/descifrar falla en vez de usar algo conocido/inseguro.
+// Se genera una vez con, por ejemplo: openssl rand -base64 32
+const CREDENTIALS_KEY = process.env.CREDENTIALS_KEY || '';
+function credentialsKeyBuffer() {
+  if (!CREDENTIALS_KEY) throw new Error('Falta CREDENTIALS_KEY en las variables de entorno del servidor');
+  const key = Buffer.from(CREDENTIALS_KEY, 'base64');
+  if (key.length !== 32) throw new Error('CREDENTIALS_KEY debe decodificar a 32 bytes en base64 (ej. generada con `openssl rand -base64 32`)');
+  return key;
+}
+function encryptCred(plain) {
+  if (plain == null || plain === '') return null;
+  const key = credentialsKeyBuffer();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), enc.toString('hex')].join(':');
+}
+function decryptCred(stored) {
+  if (!stored) return '';
+  const key = credentialsKeyBuffer();
+  const [ivHex, tagHex, dataHex] = String(stored).split(':');
+  if (!ivHex || !tagHex || !dataHex) return '';
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
 }
 
 // ── CONFIGURACIÓN GLOBAL (la única empresa) / VENDEDORAS ─────────
@@ -827,10 +924,19 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     // total estimado — solo para mostrar en "Mis Ventas"/reporte local, no se manda a Odoo
     let prods = [];
     try { prods = await productosCliente({ partnerId: req.partnerId }); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
-    const precioBySku = {}; prods.forEach(p => { precioBySku[p.sku] = p.precio; });
+    const bySku = {}; prods.forEach(p => { bySku[p.sku] = p; });
     const mult = req.multiplicador || 2;
+    // Se guarda categoría y total POR LÍNEA (no solo el sku/cantidad que pide
+    // Odoo) para poder reportar después por tipo de producto sin tener que
+    // volver a leer el catálogo — que puede haber cambiado o perdido ese SKU.
     let total = 0;
-    productos.forEach(p => { total += (precioBySku[p.sku] || 0) * mult * (parseFloat(p.quantity) || 1); });
+    const productosConDetalle = productos.map(p => {
+      const info = bySku[p.sku];
+      const qty = parseFloat(p.quantity) || 1;
+      const lineaTotal = Math.round((info ? info.precio : 0) * mult * qty);
+      total += lineaTotal;
+      return { sku: p.sku, quantity: qty, categoria: info ? famOf(info.categoria) : '', total: lineaTotal };
+    });
 
     const entregaFinal = entrega === 'retiro' ? 'retiro' : 'despacho';
     const notaFinal = [nombreVenta, telefono, email, nota, metodoPago ? 'Método: ' + metodoPago : ''].filter(Boolean).join(' | ');
@@ -838,7 +944,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     let idVenta = null, nombreOdoo = null, errorMsg = null;
     try {
       const r = await intentarEnviarVenta({
-        productos, observacion: notaFinal,
+        productos: productosConDetalle, observacion: notaFinal,
         tipoVenta: entregaFinal === 'retiro' ? 'Retiro' : 'Despacho'
       }, req.vendedora);
       idVenta = r.idVenta; nombreOdoo = r.nombreOdoo;
@@ -849,7 +955,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
       INSERT INTO ventas_pendientes
         (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at)
       VALUES
-        (${req.vendedora.id}, ${JSON.stringify(productos)}, ${nombreVenta || ''},
+        (${req.vendedora.id}, ${JSON.stringify(productosConDetalle)}, ${nombreVenta || ''},
          ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(total)},
          ${estado}, ${idVenta}, ${nombreOdoo}, ${errorMsg}, ${estado === 'enviada' ? new Date() : null})
       RETURNING id`;
@@ -878,17 +984,18 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       id: o.id,
       nombre: numeroVenta(req.vendedora.codigo, o.secuencia),
       fecha: o.created_at,
-      estado: o.estado, // 'enviada' | 'error'
+      estado: o.estado, // 'enviada' | 'error' | 'cancelada'
       total: parseFloat(o.total || 0),
       neto: parseFloat(o.total || 0),
-      nota: o.estado === 'error' ? '⚠ Estamos terminando de procesar esta venta.' : (o.nota || ''),
+      nota: o.estado === 'error' ? '⚠ Estamos terminando de procesar esta venta.'
+        : o.estado === 'cancelada' ? '✕ Esta venta fue cancelada.' : (o.nota || ''),
       ref: o.nombre_venta || '',
       entrega: o.entrega || 'despacho',
       seguimiento: o.seguimiento || 'recibido',
       seguimientoLabel: SEGUIMIENTO_LABEL[o.seguimiento] || SEGUIMIENTO_LABEL.recibido,
       seguimientoPaso: Math.max(0, SEGUIMIENTO_ORDEN.indexOf(o.seguimiento || 'recibido')),
       seguimientoAt: o.seguimiento_at,
-      lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: '', cantidad: p.quantity, total: 0 }))
+      lineas: (o.productos || []).map(p => ({ sku: p.sku, categoria: p.categoria || '', cantidad: p.quantity, total: parseFloat(p.total || 0) }))
     })));
   } catch (e) { console.error('❌ /api/pedidos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1096,6 +1203,21 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
+// Logo de cada vendedora (vive en su config visual, guardada en Odoo) — para
+// mostrarlo como miniatura en la lista de Admin. { CODIGO: dataURL|url }
+app.get('/api/admin/vendedoras/logos', requireAdmin, async (_req, res) => {
+  try {
+    const cfg0 = await getConfig();
+    if (!cfg0.partner_id) return res.json({});
+    const { rows } = await sql`SELECT codigo FROM vendedoras WHERE activo = true`;
+    const out = {};
+    await Promise.all(rows.map(async r => {
+      try { const cfg = await readCfg(r.codigo, cfg0.partner_id); if (cfg.logo) out[r.codigo] = cfg.logo; }
+      catch (e) { console.warn('⚠ logo de ' + r.codigo + ':', e.message); }
+    }));
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
 app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
   try {
     const { codigo, clave, nombre, email, multiplicador, categorias, sucursales } = req.body || {};
@@ -1217,18 +1339,36 @@ app.get('/api/admin/producto-info', requireAdmin, async (_req, res) => {
     res.json({ total: rows.length, columnas: [...columnas], skus: rows.map(r => r.sku) });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
-// Sube info libre. body.data = { modo: 'sumar'|'reemplazar', filas: [ {sku, campos:{...}}, ... ] }
+// Sube info libre. body.data = { modo: 'sumar'|'reemplazar', filas: [ {sku, barcode, campos:{...}}, ... ] }
 // - 'sumar': actualiza/inserta cada SKU que venga (mantiene los demás).
 // - 'reemplazar': borra TODO lo anterior y deja solo lo que viene.
+// - Cada fila puede traer "sku" (Código de Odoo) o, si no lo tiene a mano,
+//   "barcode" (código de barra) — en ese caso se resuelve el SKU real
+//   buscando el barcode en el catálogo. Si no matchea con ningún producto,
+//   la fila se descarta y se cuenta en "sinMatch".
 app.post('/api/admin/producto-info', requireAdmin, async (req, res) => {
   try {
     const { modo, filas } = req.body?.data || {};
     if (!Array.isArray(filas) || !filas.length) return res.status(400).json({ error: 'No hay filas para cargar' });
 
+    let porBarcode = null;
+    async function skuPorBarcode(barcode) {
+      if (!porBarcode) {
+        porBarcode = {};
+        try {
+          (await fetchProductos()).forEach(p => { if (p.barcode) porBarcode[String(p.barcode).trim()] = (p.sku || '').toUpperCase(); });
+        } catch (e) { console.warn('⚠ producto-info: no se pudo leer el catálogo para resolver por barcode', e.message); }
+      }
+      return porBarcode[String(barcode).trim()] || null;
+    }
+
     const limpias = [];
+    let sinMatch = 0;
     for (const f of filas) {
-      const sku = String(f?.sku || '').trim().toUpperCase();
-      if (!sku) continue;
+      let sku = String(f?.sku || '').trim().toUpperCase();
+      const barcode = String(f?.barcode || '').trim();
+      if (!sku && barcode) sku = await skuPorBarcode(barcode) || '';
+      if (!sku) { if (barcode) sinMatch++; continue; }
       const campos = {};
       Object.entries(f.campos || {}).forEach(([k, v]) => {
         const key = String(k).trim();
@@ -1237,7 +1377,7 @@ app.post('/api/admin/producto-info', requireAdmin, async (req, res) => {
       });
       limpias.push({ sku, campos });
     }
-    if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un Código válido' });
+    if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un Código o Código de barra reconocible' });
 
     const client = await pool.connect();
     try {
@@ -1257,7 +1397,7 @@ app.post('/api/admin/producto-info', requireAdmin, async (req, res) => {
     } finally { client.release(); }
 
     limpiarCacheProductoInfo();
-    res.json({ ok: true, cargados: limpias.length, modo: modo === 'reemplazar' ? 'reemplazar' : 'sumar' });
+    res.json({ ok: true, cargados: limpias.length, sinMatch, modo: modo === 'reemplazar' ? 'reemplazar' : 'sumar' });
   } catch (e) { console.error('❌ /api/admin/producto-info', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 // Borra toda la info libre de producto.
@@ -1320,6 +1460,9 @@ app.post('/api/admin/ventas/:id/reintentar', requireAdmin, async (req, res) => {
     if (venta.estado === 'enviada' && req.query.force !== '1') {
       return res.status(400).json({ error: 'Esta venta ya fue enviada a Odoo. Si de verdad no llegó (por ejemplo, cayó en una venta cancelada), reenvíala con "force".' });
     }
+    if (venta.estado === 'cancelada' && req.query.force !== '1') {
+      return res.status(400).json({ error: 'Esta venta fue cancelada. Si quieres mandarla de todas formas, reenvíala con "force".' });
+    }
     const { rows: vrows } = await sql`SELECT * FROM vendedoras WHERE id = ${venta.vendedora_id}`;
     const v = vrows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
 
@@ -1335,6 +1478,20 @@ app.post('/api/admin/ventas/:id/reintentar', requireAdmin, async (req, res) => {
       await sql`UPDATE ventas_pendientes SET error_msg = ${msg} WHERE id = ${venta.id}`;
       res.status(502).json({ error: msg });
     }
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// Cancela una venta con error en vez de seguir reintentándola (ej. un
+// producto que ya no existe). Queda el registro para historial/reporte,
+// pero sale de la cola de "reintentar todas" y no cuenta como venta real.
+app.post('/api/admin/ventas/:id/cancelar', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await sql`SELECT estado FROM ventas_pendientes WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Venta no encontrada' });
+    if (rows[0].estado !== 'error') return res.status(400).json({ error: 'Solo se pueden cancelar ventas con error. Esta ya fue enviada a Odoo.' });
+    const motivo = (req.body && String(req.body.motivo || '').trim()) || null;
+    await sql`UPDATE ventas_pendientes SET estado = 'cancelada', error_msg = ${motivo} WHERE id = ${req.params.id}`;
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -1363,18 +1520,50 @@ app.post('/api/admin/reintentar-todas', requireAdmin, async (req, res) => {
   } catch (e) { console.error('❌ /api/admin/reintentar-todas', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
-app.get('/api/admin/reporte', requireAdmin, async (_req, res) => {
+// ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD (opcionales, filtran por fecha de creación).
+// "por categoría" depende de que la venta se haya hecho DESPUÉS de que
+// empezamos a guardar la categoría/total por línea — las ventas viejas no
+// tienen ese dato y no aparecen ahí (sí en el total por vendedora).
+app.get('/api/admin/reporte', requireAdmin, async (req, res) => {
   try {
-    const { rows } = await sql`
+    const desde = req.query.desde ? new Date(req.query.desde + 'T00:00:00') : null;
+    const hastaBase = req.query.hasta ? new Date(req.query.hasta + 'T00:00:00') : null;
+    const hasta = hastaBase ? new Date(hastaBase.getTime() + 24 * 3600 * 1000) : null; // exclusivo: incluye todo el día "hasta"
+
+    const { rows: porVendedora } = await sql`
       SELECT v.id AS vendedora_id, v.nombre AS vendedora_nombre, v.codigo,
-             COUNT(vp.id) AS ventas, COALESCE(SUM(vp.total), 0) AS total,
-             COUNT(vp.id) FILTER (WHERE vp.estado = 'error') AS con_error
+             COUNT(vp.id) FILTER (WHERE vp.estado <> 'cancelada') AS ventas,
+             COALESCE(SUM(vp.total) FILTER (WHERE vp.estado <> 'cancelada'), 0) AS total,
+             COUNT(vp.id) FILTER (WHERE vp.estado = 'error') AS con_error,
+             COUNT(vp.id) FILTER (WHERE vp.estado = 'cancelada') AS canceladas
       FROM vendedoras v
       LEFT JOIN ventas_pendientes vp ON vp.vendedora_id = v.id
+        AND (${desde}::timestamptz IS NULL OR vp.created_at >= ${desde})
+        AND (${hasta}::timestamptz IS NULL OR vp.created_at < ${hasta})
       GROUP BY v.id, v.nombre, v.codigo
       ORDER BY v.nombre`;
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+
+    const { rows: porMes } = await sql`
+      SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
+             COUNT(*)::int AS ventas, COALESCE(SUM(total), 0) AS total
+      FROM ventas_pendientes
+      WHERE estado <> 'cancelada'
+        AND (${desde}::timestamptz IS NULL OR created_at >= ${desde})
+        AND (${hasta}::timestamptz IS NULL OR created_at < ${hasta})
+      GROUP BY 1 ORDER BY 1 DESC`;
+
+    const { rows: porCategoria } = await sql`
+      SELECT COALESCE(NULLIF(linea->>'categoria', ''), 'Sin categoría') AS categoria,
+             COUNT(DISTINCT vp.id)::int AS ventas,
+             COALESCE(SUM((linea->>'total')::numeric), 0) AS total
+      FROM ventas_pendientes vp, jsonb_array_elements(vp.productos) AS linea
+      WHERE vp.estado <> 'cancelada'
+        AND (${desde}::timestamptz IS NULL OR vp.created_at >= ${desde})
+        AND (${hasta}::timestamptz IS NULL OR vp.created_at < ${hasta})
+      GROUP BY 1 ORDER BY total DESC`;
+
+    res.json({ porVendedora, porMes, porCategoria });
+  } catch (e) { console.error('❌ /api/admin/reporte', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -1469,13 +1658,26 @@ app.delete('/api/admin/academia/lecciones/:id', requireAdmin, async (req, res) =
 app.get('/health', async (_req, res) => {
   let dbOk = false;
   try { await sql`SELECT 1`; dbOk = true; } catch {}
+  // Lista de proveedores sin exponer credenciales — solo si están seteadas o
+  // no. Sirve para verificar en staging que la migración automática del
+  // proveedor "temponovo" (fase 0 del portal multi-proveedor) corrió bien.
+  let proveedores = [];
+  try {
+    const { rows } = await sql`SELECT codigo, nombre, tipo, activo,
+      (odoo_password_enc IS NOT NULL) AS odoo_password_set,
+      (venta_api_key_enc IS NOT NULL) AS venta_api_key_set
+      FROM proveedores ORDER BY orden, id`;
+    proveedores = rows;
+  } catch {}
   res.json({
     ok: true,
     ts: new Date().toISOString(),
     config: {
       odooUrl: ODOO_URL, odooDb: ODOO_DB, userSet: !!ODOO_USER, passwordSet: !!ODOO_PASS,
-      adminPasswordSet: !!ADMIN_PASSWORD, adminSecretSet: !!ADMIN_SECRET, tempoApiKeySet: !!TEMPO_API_KEY, tempoApiUrl: TEMPO_API_URL, db: dbOk
-    }
+      adminPasswordSet: !!ADMIN_PASSWORD, adminSecretSet: !!ADMIN_SECRET, credentialsKeySet: !!CREDENTIALS_KEY,
+      tempoApiKeySet: !!TEMPO_API_KEY, tempoApiUrl: TEMPO_API_URL, db: dbOk
+    },
+    proveedores
   });
 });
 
