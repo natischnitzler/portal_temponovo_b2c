@@ -18,7 +18,9 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(grep -n \"^\\\\$\\('vt-buscar'\\)\\\\|^loadVentas\\(\\);\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/admin.html)",
-      "Bash(grep -n \"function ensureDb\\\\|dbReady = \\(async\\\\|oldEmpresas\\\\|^  }\\)\\(\\);$\\\\|return dbReady\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/index.js)"
+      "Bash(grep -n \"function ensureDb\\\\|dbReady = \\(async\\\\|oldEmpresas\\\\|^  }\\)\\(\\);$\\\\|return dbReady\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/index.js)",
+      "Bash(git fetch *)",
+      "Bash(git push *)"
     ]
   }
 }
