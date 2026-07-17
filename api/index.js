@@ -1385,7 +1385,9 @@ app.post('/api/admin/proveedores/:id/probar', requireAdmin, async (req, res) => 
     const uid = await new Promise((resolve, reject) => {
       client.methodCall('authenticate', [p.odoo_db, p.odoo_user, password, {}], (err, uid) => err ? reject(err) : resolve(uid));
     });
-    if (!uid) return res.status(401).json({ error: 'Odoo rechazó las credenciales (usuario, clave o base de datos incorrectos)' });
+    // OJO: nunca devolver 401 acá — el frontend interpreta CUALQUIER 401 como
+    // que la sesión de admin expiró y desloguea, tapando el error real.
+    if (!uid) return res.status(400).json({ error: 'Odoo rechazó las credenciales (usuario, clave o base de datos incorrectos)' });
     res.json({ ok: true, uid });
   } catch (e) { res.status(502).json({ error: 'No se pudo conectar: ' + shortErr(e) }); }
 });

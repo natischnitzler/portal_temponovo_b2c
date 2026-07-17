@@ -851,7 +851,7 @@ function renderProveedores() {
       <td class="mono">${esc(p.codigo)}</td>
       <td>${esc(p.nombre)}</td>
       <td>${p.tipo === 'manual' ? 'Manual' : 'Odoo'}</td>
-      <td>${p.tipo === 'odoo' ? (p.odooPasswordSet ? '<span class="note">conectado</span>' : '<span class="note" style="color:var(--red)">sin clave</span>') : '<span class="note">—</span>'}</td>
+      <td>${p.tipo === 'odoo' ? (p.odooPasswordSet ? '<span class="note">clave cargada — probar para confirmar</span>' : '<span class="note" style="color:var(--red)">sin clave</span>') : '<span class="note">—</span>'}</td>
       <td><button class="toggle ${p.activo ? 'on' : ''}" data-pv-toggle="${p.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
         ${p.tipo === 'odoo' ? `<button class="btn btn-sm" data-pv-probar="${p.id}">Probar conexión</button>` : ''}
