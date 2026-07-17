@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n '\\\\${CFG\\\\.' index.html)",
+      "Bash(npm audit *)",
+      "Bash(gh repo *)",
+      "Bash(node -c api/index.js)",
+      "Bash(node -c api/db.js)",
+      "Bash(npm install *)",
+      "Bash(ADMIN_PASSWORD=test123 ADMIN_SECRET=test-secret-value node -e ' *)",
+      "Bash(node -e ' *)",
+      "Bash(node -c /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/index.js)",
+      "Bash(node -c /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/db.js)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('/Users/nati/Documents/GitHub/portal_temponovo_b2c/package.json'\\)\\)\")",
+      "Bash(kill %1)",
+      "Bash(lsof -ti:3099)",
+      "Bash(xargs -r kill)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
