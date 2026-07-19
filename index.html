@@ -910,6 +910,19 @@ async function api(path, opts={}){
   if(!r.ok) throw new Error(d.error||('Error '+r.status));
   return d;
 }
+// Precarga del catálogo (por vendedora, como CFG) — al entrar se ve de
+// inmediato la última colección conocida en vez de la pantalla "Cargando
+// colección...", mientras se confirma en el servidor si hubo cambios.
+function catalogCacheKey(code){ return 'tn_catalogo_' + (code||'').toUpperCase(); }
+function loadCatalogCache(code){
+  try {
+    const d = JSON.parse(localStorage.getItem(catalogCacheKey(code)) || 'null');
+    return Array.isArray(d?.productos) ? d.productos : null;
+  } catch { return null; }
+}
+function saveCatalogCache(code, productos){
+  try { localStorage.setItem(catalogCacheKey(code), JSON.stringify({ productos, ts: Date.now() })); } catch {}
+}
 
 /* ═══════════ CONFIG "MI VITRINA" ═══════════ */
 const DEFAULT_CFG = { nombre:'', slogan:'', logo:'', hdr:'#191b1e', fondo:'#faf9f6', f1:'Marcellus', f2:'Jost',
@@ -1175,13 +1188,25 @@ async function initApp(){
   } catch(e){}
   applyCfg(); initCfgPanel(); updateBadges();
   if(esPrimeraVez && localStorage.getItem('tn_onboard_ok_'+CODE) !== '1') openOnboarding();
-  try {
-    PRODUCTOS_ALL = await api('/productos');
+  function pintarColeccion(){
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);   // sin stock no se muestra
     $('vit-loading').style.display='none';
     renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderFavFilter(); renderGrid(); renderRows();
+  }
+  // Precarga: si ya se conoce la colección de una visita anterior, se
+  // muestra de una (nada de pantalla "Cargando colección...") mientras se
+  // confirma en el servidor si cambió algo (precio, stock, nuevos productos).
+  const cache = loadCatalogCache(CODE);
+  if(cache && cache.length){ PRODUCTOS_ALL = cache; pintarColeccion(); }
+  try {
+    const fresh = await api('/productos');
+    PRODUCTOS_ALL = fresh;
+    pintarColeccion();
+    saveCatalogCache(CODE, fresh);
   } catch(e){
-    $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
+    // Si había precarga, se sigue viendo esa colección (server caído/sin
+    // señal) — recién se muestra el error si no había nada que mostrar.
+    if(!cache || !cache.length) $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
   }
 }
 
@@ -1260,6 +1285,7 @@ $('refresh-btn').onclick = async ()=>{
     await api('/productos/cache', { method:'DELETE' });
     PRODUCTOS_ALL = await api('/productos');
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);
+    saveCatalogCache(CODE, PRODUCTOS_ALL);
     renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderFavFilter(); renderGrid();
     toast('Catálogo actualizado');
   } catch(e){ toast('No se pudo actualizar: '+e.message); }
