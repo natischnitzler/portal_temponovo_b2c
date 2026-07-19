@@ -209,13 +209,6 @@ tr:last-child td{border-bottom:none;}
         <p class="page-s">Cada proveedor conecta el portal a su propio catálogo — hoy vía Odoo (URL, base de datos, usuario y clave), o "Manual" para uno que todavía no tiene Odoo. Agregar un proveedor acá no cambia nada solo — hasta que se conecte el catálogo, no aparece en ninguna vitrina.</p>
 
         <div class="card">
-          <div class="card-h">Catálogo y stock</div>
-          <p class="note" style="margin-bottom:12px">El catálogo (precio, stock, fotos) se guarda en memoria un rato para no consultar Odoo en cada pedido — hasta 10 min por proveedor, más otros 5 min en la vitrina de cada vendedora. Si necesitás que un cambio de stock se vea ya mismo (por ejemplo, después de cargar mercadería), actualizalo a mano acá.</p>
-          <button class="btn dark" id="pv-refrescar">Actualizar catálogo ahora</button>
-          <div class="msg" id="pv-refrescar-msg"></div>
-        </div>
-
-        <div class="card">
           <div class="card-h">Nuevo proveedor</div>
           <div class="row">
             <div class="fld"><label class="fld-l">Código (interno)</label><input class="fld-in" id="pv-codigo" placeholder="Ej: aviv" style="text-transform:lowercase"/></div>
@@ -848,17 +841,6 @@ async function loadProveedores() {
   try { PROVEEDORES = await api('/proveedores'); renderProveedores(); }
   catch (e) { $('pv-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
-// DELETE /api/productos/cache vive fuera de /api/admin (histórico) — por
-// eso acá no se usa el helper api(), se llama directo con el token.
-$('pv-refrescar').onclick = async () => {
-  $('pv-refrescar').disabled = true; $('pv-refrescar').textContent = 'Actualizando…';
-  try {
-    const r = await fetch('/api/productos/cache', { method: 'DELETE', headers: { 'x-admin-token': TOKEN } });
-    if (!r.ok) throw new Error('Error ' + r.status);
-    showMsg('pv-refrescar-msg', '✓ Catálogo actualizado — el próximo pedido trae todo fresco de Odoo', true);
-  } catch (e) { showMsg('pv-refrescar-msg', e.message, false); }
-  $('pv-refrescar').disabled = false; $('pv-refrescar').textContent = 'Actualizar catálogo ahora';
-};
 $('pv-tipo').onchange = () => {
   $('pv-odoo-fields').style.display = $('pv-tipo').value === 'manual' ? 'none' : '';
 };

@@ -847,12 +847,23 @@ app.get('/api/productos', async (req, res) => {
   } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
-// "Actualizar catálogo ahora" en Admin → Proveedores — limpia las 3 capas
-// de caché (crudo por proveedor, por vendedora, vitrinas públicas) para que
-// el próximo pedido traiga todo fresco de Odoo, sin esperar a que venzan
-// los TTL normales.
-app.delete('/api/productos/cache', requireAdmin, (_req, res) => {
-  Object.keys(cache).filter(k => k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('img_') || k.startsWith('pub_'))
+// "Actualizar catálogo" — botón-ícono en la propia vitrina de cada
+// vendedora (junto al buscador), para traer precio/stock frescos de Odoo
+// ahora mismo sin esperar el TTL normal del caché. También lo puede llamar
+// el admin (token de admin). La vendedora solo limpia SU catálogo calculado
+// y SU vitrina pública — el catálogo crudo por proveedor es compartido, así
+// que igual se limpia siempre (es la única forma de traer stock de verdad
+// nuevo de Odoo), pero eso no expone nada de otra vendedora.
+app.delete('/api/productos/cache', async (req, res) => {
+  if (verifyAdminToken(req.headers['x-admin-token'])) {
+    Object.keys(cache).filter(k => k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('img_') || k.startsWith('pub_'))
+      .forEach(k => delete cache[k]);
+    return res.json({ ok: true });
+  }
+  const { v, error } = await authenticateVendedora(req);
+  if (error) return res.status(401).json({ error });
+  const slug = slugOf(v.codigo);
+  Object.keys(cache).filter(k => k.startsWith('productos') || k === 'cat_' + v.codigo || k.startsWith('pub_' + slug))
     .forEach(k => delete cache[k]);
   res.json({ ok: true });
 });

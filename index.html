@@ -339,6 +339,10 @@ body.costs #btn-eye svg{stroke-width:2;}
 .filter-btn{border:1px solid var(--line);background:var(--white);padding:10px 14px;font-size:12px;letter-spacing:.04em;border-radius:var(--r);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:7px;flex:1;min-width:0;position:relative;}
 .filter-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;flex-shrink:0;}
 .filter-btn.on{border-color:var(--hdr);box-shadow:0 0 0 1px var(--hdr);color:var(--ink);}
+.refresh-btn{border:1px solid var(--line);background:var(--white);border-radius:var(--r);width:42px;height:42px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);}
+.refresh-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;transition:transform .5s;}
+.refresh-btn.spin svg{animation:refresh-spin .7s linear infinite;}
+@keyframes refresh-spin{to{transform:rotate(360deg);}}
 @media(min-width:520px){
   .vit-search{flex:1 1 auto;}
   .sort-sel,.filter-btn{flex:0 0 auto;}
@@ -482,6 +486,9 @@ body.public .priv{display:none!important;}
           <button class="filter-btn" id="filter-btn">
             <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
             Filtrar
+          </button>
+          <button class="refresh-btn priv" id="refresh-btn" title="Actualizar catálogo (precio y stock)">
+            <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
           </button>
         </div>
         <div class="filter-panel" id="filter-panel">
@@ -1227,6 +1234,22 @@ const PRICE_RANGES = [
   { id:'p4', label:'Más de $60.000',   min:60000,  max:Infinity }
 ];
 $('filter-btn').onclick = ()=>{ $('filter-panel').classList.toggle('open'); };
+// Fuerza traer el catálogo fresco de Odoo ahora mismo (precio y stock),
+// sin esperar a que venza el caché normal (hasta ~10-15 min) — útil recién
+// después de reponer mercadería. Limpia el caché en el servidor y vuelve a
+// pedir el catálogo.
+$('refresh-btn').onclick = async ()=>{
+  if($('refresh-btn').classList.contains('spin')) return;
+  $('refresh-btn').classList.add('spin');
+  try {
+    await api('/productos/cache', { method:'DELETE' });
+    PRODUCTOS_ALL = await api('/productos');
+    PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderFavFilter(); renderGrid();
+    toast('Catálogo actualizado');
+  } catch(e){ toast('No se pudo actualizar: '+e.message); }
+  $('refresh-btn').classList.remove('spin');
+};
 function updateFilterBtn(){
   $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA || FILTRO_FAVORITOS));
 }
