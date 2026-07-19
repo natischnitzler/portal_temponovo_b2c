@@ -932,13 +932,20 @@ app.get('/api/imagen/:proveedorId/:id', async (req, res) => {
     const key = 'img_' + proveedorId + '_' + field + '_' + id;
     let b64 = cacheGet(key);
     if (!b64) {
-      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
-      if (proveedor && proveedor.tipo === 'odoo') {
-        const conn = connFor(proveedor);
-        const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
-        b64 = prods && prods[0] ? prods[0][field] : null;
-        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
-      }
+      // Si Odoo está lento/caído para ESTA imagen puntual, no tumba la
+      // página con un 500 — se cae al placeholder y listo. Con la vitrina
+      // pidiendo muchas imágenes de golpe (una por producto), un proveedor
+      // lento puede fallar alguna suelta sin que sea un error real; no se
+      // cachea el fallo, así que la próxima carga reintenta contra Odoo.
+      try {
+        const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+        if (proveedor && proveedor.tipo === 'odoo') {
+          const conn = connFor(proveedor);
+          const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
+          b64 = prods && prods[0] ? prods[0][field] : null;
+          if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+        }
+      } catch (e) { console.warn('⚠ /api/imagen/' + proveedorId + '/' + id + ':', e.message); }
     }
     if (!b64) {
       const px = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -971,13 +978,15 @@ app.get('/api/imagen-extra/:proveedorId/:imgId', async (req, res) => {
     const key = 'imgx_' + proveedorId + '_' + field + '_' + imgId;
     let b64 = cacheGet(key);
     if (!b64) {
-      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
-      if (proveedor && proveedor.tipo === 'odoo') {
-        const conn = connFor(proveedor);
-        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
-        b64 = imgs && imgs[0] ? imgs[0][field] : null;
-        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
-      }
+      try {
+        const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+        if (proveedor && proveedor.tipo === 'odoo') {
+          const conn = connFor(proveedor);
+          const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
+          b64 = imgs && imgs[0] ? imgs[0][field] : null;
+          if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+        }
+      } catch (e) { console.warn('⚠ imagen-extra ' + proveedorId + '/' + imgId + ':', e.message); }
     }
     if (!b64) {
       const px = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -1623,13 +1632,15 @@ app.get('/api/public/:slug/imagen/:proveedorId/:id', async (req, res) => {
     const key = 'img_' + proveedorId + '_' + field + '_' + id;
     let b64 = cacheGet(key);
     if (!b64) {
-      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
-      if (proveedor && proveedor.tipo === 'odoo') {
-        const conn = connFor(proveedor);
-        const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
-        b64 = prods && prods[0] ? prods[0][field] : null;
-        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
-      }
+      try {
+        const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+        if (proveedor && proveedor.tipo === 'odoo') {
+          const conn = connFor(proveedor);
+          const prods = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [[id], [field]]);
+          b64 = prods && prods[0] ? prods[0][field] : null;
+          if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+        }
+      } catch (e) { console.warn('⚠ /api/public/imagen ' + proveedorId + '/' + id + ':', e.message); }
     }
     if (!b64) return res.status(404).send('Sin imagen');
     res.setHeader('Content-Type', 'image/png');
@@ -1649,13 +1660,15 @@ app.get('/api/public/:slug/imagen-extra/:proveedorId/:imgId', async (req, res) =
     const key = 'imgx_' + proveedorId + '_' + field + '_' + imgId;
     let b64 = cacheGet(key);
     if (!b64) {
-      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
-      if (proveedor && proveedor.tipo === 'odoo') {
-        const conn = connFor(proveedor);
-        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
-        b64 = imgs && imgs[0] ? imgs[0][field] : null;
-        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
-      }
+      try {
+        const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+        if (proveedor && proveedor.tipo === 'odoo') {
+          const conn = connFor(proveedor);
+          const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
+          b64 = imgs && imgs[0] ? imgs[0][field] : null;
+          if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+        }
+      } catch (e) { console.warn('⚠ imagen-extra ' + proveedorId + '/' + imgId + ':', e.message); }
     }
     if (!b64) return res.status(404).send('Sin imagen');
     res.setHeader('Content-Type', 'image/png');
