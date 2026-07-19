@@ -92,6 +92,12 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .home-tile .td{font-size:11.5px;color:var(--steel);line-height:1.5;}
 
 /* ── MIS VENTAS ── */
+.comision-hero{background:var(--hdr);color:var(--hdr-tx);border-radius:var(--r);padding:26px 20px;text-align:center;margin-bottom:14px;}
+.ch-label{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.75;margin-bottom:8px;}
+.ch-value{font-family:var(--mono);font-size:36px;font-weight:500;letter-spacing:-.01em;}
+.ch-trend{font-size:12px;margin-top:10px;opacity:.95;}
+.ch-trend.up{color:#8fd19e;}
+.ch-trend.down{color:#e8a3a3;}
 .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;}
 .stat{background:var(--white);border:1px solid var(--line);padding:14px 10px;text-align:center;}
 .stat .v{font-family:var(--mono);font-size:17px;margin-bottom:4px;}
@@ -2035,52 +2041,42 @@ async function loadVentas(){
   const delMes = ventas.filter(o=>mesKey(o.fecha||'')===thisMes);
   const totalMes = delMes.reduce((s,o)=>s+o.total,0);
   const comisionMes = delMes.reduce((s,o)=>s+(o.comision||0),0);
+  // Comparación con el mes pasado — el gancho motivador ("vas mejor que el
+  // mes pasado") importa más acá que el desglose por categoría.
+  const mesAnteriorKey = new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
+  const comisionMesAnterior = ventas.filter(o=>mesKey(o.fecha||'')===mesAnteriorKey).reduce((s,o)=>s+(o.comision||0),0);
+  let tendencia = '';
+  if(comisionMesAnterior>0){
+    const pct = Math.round(((comisionMes-comisionMesAnterior)/comisionMesAnterior)*100);
+    tendencia = `<div class="ch-trend ${pct>=0?'up':'down'}">${pct>=0?'▲':'▼'} ${Math.abs(pct)}% vs. el mes pasado</div>`;
+  } else if(comisionMes>0){
+    tendencia = `<div class="ch-trend up">✨ Tu primera comisión de este mes</div>`;
+  }
 
-  // últimos 6 meses × familia
+  // Comisión de los últimos 6 meses — un solo valor por mes (lo que ella
+  // gana), no un desglose por categoría: acá el foco es motivarla a
+  // vender, no analizar qué vendió.
   const meses = [];
   for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); meses.push(d.toISOString().slice(0,7)); }
-  const famTot = {};
-  ventas.forEach(o=>{
-    const mk = mesKey(o.fecha||''); if(!meses.includes(mk)) return;
-    (o.lineas.length? o.lineas : [{categoria:'', total:o.total}]).forEach(l=>{
-      const parts=(l.categoria||'').split('/').map(x=>x.trim()).filter(x=>x&&x.toLowerCase()!=='all');
-      const fam = parts[0]||'Otros';
-      famTot[fam]=(famTot[fam]||0)+l.total;
-    });
-  });
-  const fams = Object.keys(famTot).sort((a,b)=>famTot[b]-famTot[a]).slice(0,4);
   const data = meses.map(mk=>{
-    const d = {}; fams.forEach(f=>d[f]=0); d._otros=0; d._n=0;
-    ventas.filter(o=>mesKey(o.fecha||'')===mk).forEach(o=>{
-      d._n++;
-      (o.lineas.length? o.lineas : [{categoria:'', total:o.total}]).forEach(l=>{
-        const parts=(l.categoria||'').split('/').map(x=>x.trim()).filter(x=>x&&x.toLowerCase()!=='all');
-        const fam = parts[0]||'Otros';
-        if(fams.includes(fam)) d[fam]+=l.total; else d._otros+=l.total;
-      });
-    });
-    return d;
+    const delMk = ventas.filter(o=>mesKey(o.fecha||'')===mk);
+    return { comision: delMk.reduce((s,o)=>s+(o.comision||0),0), n: delMk.length };
   });
-  const maxV = Math.max(1, ...data.map(d=> fams.reduce((s,f)=>s+d[f],0)+d._otros ));
-  const series = [...fams]; if(data.some(d=>d._otros>0)) series.push('_otros');
+  const maxV = Math.max(1, ...data.map(d=>d.comision));
+  const COMISION_COLOR = '#5b9c6e';
 
   const W=560,H=190,PB=26,PL=6,bw=Math.min(52,(W-PL*2)/meses.length*0.55);
   let bars='';
   meses.forEach((mk,i)=>{
     const x = PL + (W-PL*2)*(i+0.5)/meses.length - bw/2;
-    let y = H-PB;
-    series.forEach((f,si)=>{
-      const v = f==='_otros'? data[i]._otros : data[i][f];
-      if(v<=0) return;
-      const h = (H-PB-14)*v/maxV;
-      y -= h;
-      bars += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${CHART_COLORS[si%CHART_COLORS.length]}" rx="1.5"/>`;
-    });
+    const v = data[i].comision;
+    const h = v>0 ? (H-PB-14)*v/maxV : 0;
+    const y = H-PB-h;
+    if(v>0) bars += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${COMISION_COLOR}" rx="1.5"/>`;
     const [yy,mm]=mk.split('-');
     bars += `<text x="${x+bw/2}" y="${H-8}" font-size="10" fill="#9a9a94" text-anchor="middle" font-family="Jost">${MESES[parseInt(mm)-1]}</text>`;
-    if(data[i]._n) bars += `<text x="${x+bw/2}" y="${y-5}" font-size="9.5" fill="#3c3f44" text-anchor="middle" font-family="IBM Plex Mono">${data[i]._n}</text>`;
+    if(v>0) bars += `<text x="${x+bw/2}" y="${y-5}" font-size="9.5" fill="#3c3f44" text-anchor="middle" font-family="IBM Plex Mono">${fmt(v)}</text>`;
   });
-  const legend = series.map((f,si)=>`<span class="leg-i"><i style="background:${CHART_COLORS[si%CHART_COLORS.length]}"></i>${f==='_otros'?'Otros':esc(f)}</span>`).join('');
 
   const SEG_ORDEN = ['recibido','preparando','en_transito','entregado'];
   const SEG_LABEL = { recibido:'Recibido', preparando:'Preparando', en_transito:'En tránsito', entregado:'Entregado' };
@@ -2125,15 +2121,18 @@ async function loadVentas(){
 
   box.innerHTML = `
     ${DEMO ? '<div class="ok-box" style="display:block;margin:0 0 14px;background:#fdf6e3;color:#8a6d3d">🧪 Esto es un <b>ejemplo</b> de cómo se verán tus ventas. Cuando hagas la primera, aparecerá aquí de verdad.</div>' : ''}
-    <div class="stat-row">
+    <div class="comision-hero">
+      <div class="ch-label">Tu comisión este mes</div>
+      <div class="ch-value">${fmt(comisionMes)}</div>
+      ${tendencia}
+    </div>
+    <div class="stat-row" style="grid-template-columns:repeat(2,1fr)">
       <div class="stat"><div class="v">${delMes.length}</div><div class="l">Ventas<br/>este mes</div></div>
       <div class="stat"><div class="v">${fmt(totalMes)}</div><div class="l">Vendido<br/>este mes</div></div>
-      <div class="stat"><div class="v">${fmt(comisionMes)}</div><div class="l">Tu comisión<br/>este mes</div></div>
     </div>
     <div class="chart-box">
-      <div class="chart-t">Últimos 6 meses · por tipo</div>
+      <div class="chart-t">Tu comisión · últimos 6 meses</div>
       <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${bars}</svg>
-      <div class="legend">${legend}</div>
     </div>
     <h2 class="page-t" style="font-size:17px;margin-bottom:12px">Detalle de ventas</h2>
     ${detalle}`;
