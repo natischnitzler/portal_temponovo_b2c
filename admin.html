@@ -137,7 +137,6 @@ tr:last-child td{border-bottom:none;}
     <button class="nav-item" data-sec="productos">🏭 Proveedores</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
-    <button class="nav-item" data-sec="config">⚙ Configuración</button>
     <div class="sidebar-foot">
       <button class="btn-logout" id="btn-logout">Cerrar sesión</button>
     </div>
@@ -145,29 +144,6 @@ tr:last-child td{border-bottom:none;}
 
   <main class="main">
     <div class="wrap">
-
-      <!-- CONFIGURACIÓN -->
-      <section class="section" id="sec-config">
-        <h2 class="page-t">Configuración</h2>
-        <p class="page-s" style="color:var(--red)">⚠ Esta pantalla queda de cuando había un solo proveedor (Temponovo). Ahora el nombre, el Partner ID y la venta abierta de cada proveedor se manejan en <b>Proveedores</b> — lo de acá abajo ya no afecta el catálogo ni las ventas reales, se va a sacar en una limpieza futura.</p>
-
-        <div class="card">
-          <div class="card-h">Datos de la empresa (legacy)</div>
-          <div class="row">
-            <div class="fld"><label class="fld-l">Nombre</label><input class="fld-in" id="cfg-nombre" placeholder="Ej: Temponovo"/></div>
-            <div class="fld"><label class="fld-l">Partner ID en Odoo</label><input class="fld-in" id="cfg-partner" type="number" placeholder="Ej: 827"/></div>
-            <button class="btn dark" id="cfg-guardar">Guardar</button>
-          </div>
-          <p class="note">Ya no se usa para crear ventas — eso lo define el Partner ID de cada proveedor, en Proveedores.</p>
-          <div class="msg" id="cfg-msg"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-h">Venta abierta (legacy, sin uso)</div>
-          <p class="note" style="margin-bottom:12px">Esta era la única venta abierta de cuando había un solo proveedor. Cada proveedor tiene ahora la suya propia — para cerrarla, andá a Proveedores.</p>
-          <div id="venta-abierta-box"><span class="note">Cargando…</span></div>
-        </div>
-      </section>
 
       <!-- VENDEDORAS -->
       <section class="section active" id="sec-vendedoras">
@@ -439,7 +415,7 @@ $('btn-logout').onclick = logout;
 function openApp() {
   $('login-screen').style.display = 'none';
   $('app').classList.add('open');
-  loadConfig(); loadCategorias(); loadVendedoras();
+  loadCategorias(); loadVendedoras();
 }
 if (TOKEN) openApp();
 
@@ -452,36 +428,6 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
   if (btn.dataset.sec === 'catalogo') { loadCatalogo(); loadCategoriasMult(); }
 });
-
-/* ── CONFIGURACIÓN (una sola empresa) ── */
-async function loadConfig() {
-  try {
-    const cfg = await api('/config');
-    $('cfg-nombre').value = cfg.nombre || '';
-    $('cfg-partner').value = cfg.partner_id || '';
-    renderVentaAbierta(cfg);
-  } catch (e) { showMsg('cfg-msg', e.message, false); }
-}
-function renderVentaAbierta(cfg) {
-  $('venta-abierta-box').innerHTML = cfg.venta_abierta_nombre
-    ? `<span class="badge b-ok mono">${esc(cfg.venta_abierta_nombre)}</span> <button class="btn btn-sm" id="cerrar-venta-btn">Cerrar venta abierta</button>`
-    : '<span class="note">— (se abre una sola en cuanto alguna vendedora venda)</span>';
-  const btn = $('cerrar-venta-btn');
-  if (btn) btn.onclick = async () => {
-    if (!confirm('¿Cerrar la venta abierta? El próximo pedido de cualquier vendedora abrirá una venta nueva en Odoo.')) return;
-    try { await api('/cerrar-venta', { method: 'POST' }); loadConfig(); }
-    catch (e) { alert(e.message); }
-  };
-}
-$('cfg-guardar').onclick = async () => {
-  const nombre = $('cfg-nombre').value.trim();
-  const partnerId = parseInt($('cfg-partner').value);
-  if (!nombre || !partnerId) return showMsg('cfg-msg', 'Nombre y Partner ID son obligatorios', false);
-  try {
-    await api('/config', { method: 'PUT', body: JSON.stringify({ nombre, partnerId }) });
-    showMsg('cfg-msg', '✓ Configuración guardada', true);
-  } catch (e) { showMsg('cfg-msg', e.message, false); }
-};
 
 /* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
 async function loadCategorias() {
