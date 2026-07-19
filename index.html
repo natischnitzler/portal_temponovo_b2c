@@ -162,6 +162,9 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .card-name{font-family:var(--f1);font-size:14.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.7em;}
 .card-sku{font-family:var(--mono);font-size:10.5px;color:var(--steel);}
 .card-price{font-family:var(--mono);font-size:14.5px;margin-top:3px;font-weight:500;}
+.card-tallas{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;}
+.t-chip{border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:10.5px;font-family:var(--mono);padding:2px 6px;color:var(--ink-soft);}
+.t-chip:hover{border-color:var(--hdr);color:var(--ink);}
 
 /* ── SHEET (ficha / config) ── */
 .sheet-back{position:fixed;inset:0;background:rgba(25,27,30,.45);z-index:200;display:none;backdrop-filter:blur(2px);}
@@ -1032,12 +1035,15 @@ async function updatePWA(){
       icon512: buildIcon(512, hdr, hdrTx, letter, logoImg)
     };
   }
-  const startUrl = PUBLIC ? `/v/${SLUG}` : '/';
+  // Absolutas, no relativas: el manifest se sirve como blob: URL, y Chrome
+  // no resuelve bien rutas relativas contra esa base ("start_url"/"scope"
+  // quedan como URL inválida" en la consola aunque el manifest funcione).
+  const startUrl = new URL(PUBLIC ? `/v/${SLUG}` : '/', location.origin).href;
   const manifest = {
     name: nombre,
     short_name: nombre.slice(0, 20),
     start_url: startUrl,
-    scope: '/',
+    scope: new URL('/', location.origin).href,
     display: 'standalone',
     background_color: CFG.fondo || '#faf9f6',
     theme_color: hdr,
@@ -1455,24 +1461,59 @@ function filtrados(){
   return list;
 }
 $('vit-orden').onchange = ()=>{ ORDEN = $('vit-orden').value; renderGrid(); };
+// Un anillo con varias tallas es el MISMO diseño, no productos distintos —
+// se agrupan en una sola card (imagen/precio del representante, chips con
+// las tallas disponibles) en vez de repetir la misma foto una vez por SKU.
+// Todo lo demás (favoritos, carrito, comparar) sigue operando por SKU
+// puntual — ver esAnillo/ringGroupKey más abajo.
+function groupCards(list){
+  const groups = {}, orden = [];
+  list.forEach(p=>{
+    if(!esAnillo(p) || !p.medida){
+      const k = 'solo::'+p.proveedorId+'::'+p.id;
+      groups[k] = { rep:p, variantes:[p], stockTotal:p.stock||0, solo:true };
+      orden.push(k);
+      return;
+    }
+    const k = ringGroupKey(p);
+    if(!groups[k]){ groups[k] = { rep:p, variantes:[], stockTotal:0, solo:false }; orden.push(k); }
+    const g = groups[k];
+    g.variantes.push(p);
+    g.stockTotal += (p.stock||0);
+    if((p.stock||0) > (g.rep.stock||0)) g.rep = p; // la imagen/precio de la card es de la talla con más stock
+  });
+  return orden.map(k=>groups[k]);
+}
 function renderGrid(){
   const list = filtrados();
   if(!list.length){ $('vit-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">No hay productos disponibles que coincidan.</div>`; return; }
-  $('vit-grid').innerHTML = list.map(p=>`
+  const groups = groupCards(list);
+  $('vit-grid').innerHTML = groups.map(g=>{
+    const p = g.rep;
+    const tallas = g.solo ? '' : g.variantes.slice()
+      .sort((a,b)=> (parseFloat(a.medida)-parseFloat(b.medida)) || String(a.medida).localeCompare(String(b.medida)))
+      .map(v=>`<button class="t-chip" data-talla-pid="${v.proveedorId}::${v.id}">${esc(v.medida)}</button>`).join('');
+    return `
     <div class="card" data-pid="${p.proveedorId}::${p.id}">
-      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}${heartBtn(p,'priv card-heart')}<img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
+      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}${g.solo?heartBtn(p,'priv card-heart'):''}<img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
       <div class="card-body">
-        <div class="card-name">${esc(p.nombre)}</div>
+        <div class="card-name">${esc(g.solo?p.nombre:cleanNombreAnillo(p.nombre))}</div>
         <div class="card-sku">${esc(p.sku)||'—'}</div>
+        ${tallas?`<div class="card-tallas">${tallas}</div>`:''}
         <div class="card-price">${fmt(sugerido(p))}</div>
         <div class="card-cost cost">Costo ${fmt(p.precio)}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   $('vit-grid').querySelectorAll('.card').forEach(c=> c.onclick = ()=> openFicha(c.dataset.pid));
   $('vit-grid').querySelectorAll('[data-fav-pid]').forEach(b=> b.onclick = e=>{
     e.stopPropagation();
     const p = PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===b.dataset.favPid);
     if(p) toggleFavorito(p);
+  });
+  $('vit-grid').querySelectorAll('[data-talla-pid]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation();
+    openFicha(b.dataset.tallaPid);
   });
 }
 

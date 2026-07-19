@@ -744,6 +744,12 @@ async function fetchProductosProveedor(proveedor) {
     // "Medida" (talla/tamaño) se identifica dentro de los atributos genéricos
     // por el nombre del atributo — no hace falta un campo aparte en Odoo.
     const MEDIDA_RE = /medid|talla|tama[ñn]o|size/i;
+    // Respaldo: en un ANILLO, un atributo cuyo valor es un número pelado
+    // (13, 15, 17...) es casi siempre la talla, aunque el atributo en Odoo
+    // tenga otro nombre (o ninguno reconocible) — no hay otro atributo de
+    // joyería (metal, piedra, color) que sea un número sin texto. Evita
+    // depender de adivinar cómo cada proveedor tituló ese atributo.
+    const VALOR_TALLA_RE = /^\d{1,2}(\.\d+)?$/;
     // metal_type/rock_type pueden ser un campo de texto simple O una relación
     // many2one (Odoo los devuelve como [id, "Nombre"] en ese caso) — sin
     // esto, un many2one queda como "1,Plata Rodinada" (el array coaccionado
@@ -755,10 +761,13 @@ async function fetchProductosProveedor(proveedor) {
       const tmplId = Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id;
       const tmpl = tmplMap[tmplId] || {};
       const joy = joyeriaMap[tmplId] || {};
+      const categoria = Array.isArray(p.categ_id) ? p.categ_id[1] : '';
+      const esAnilloProd = /anillo/i.test(categoria);
+      const esMedida = a => MEDIDA_RE.test(a.attr) || (esAnilloProd && VALOR_TALLA_RE.test(String(a.val || '').trim()));
       const todosAtributos = (p.product_template_attribute_value_ids || [])
         .map(id => attrMap[id]).filter(Boolean);
-      const medidas = todosAtributos.filter(a => MEDIDA_RE.test(a.attr));
-      const atributos = todosAtributos.filter(a => !MEDIDA_RE.test(a.attr));
+      const medidas = todosAtributos.filter(esMedida);
+      const atributos = todosAtributos.filter(a => !esMedida(a));
       result.push({
         id: p.id,
         proveedorId: proveedor.id,
@@ -767,7 +776,7 @@ async function fetchProductosProveedor(proveedor) {
         nombre: p.name || '',
         descripcion: tmpl.description_sale || '',
         precio: parseFloat(p.list_price || 0),
-        categoria: Array.isArray(p.categ_id) ? p.categ_id[1] : '',
+        categoria,
         atributos,
         metal: nombreDe(joy.metal_type),
         piedra: nombreDe(joy.rock_type),
