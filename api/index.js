@@ -731,6 +731,21 @@ async function fetchProductosProveedor(proveedor) {
         extra.forEach(t => { joyeriaMap[t.id] = t; });
       } catch (e) { /* este proveedor no tiene esos campos — normal, se ignora */ }
     }
+    // Fotos adicionales del producto (modelo product.image, "Extra Product
+    // Media" de Odoo) — más allá de la imagen principal (image_1920 de
+    // product.product). Fetch defensivo: no todos los Odoo tienen ese modelo
+    // habilitado/con datos, y no queremos tumbar el catálogo por esto.
+    let imagenesMap = {};
+    if (tmplIds.length) {
+      try {
+        const imgs = await xmlrpcCallFor(conn, key, 'product.image', 'search_read',
+          [[['product_tmpl_id', 'in', tmplIds]], ['id', 'product_tmpl_id']]);
+        imgs.forEach(im => {
+          const tId = Array.isArray(im.product_tmpl_id) ? im.product_tmpl_id[0] : im.product_tmpl_id;
+          (imagenesMap[tId] = imagenesMap[tId] || []).push(im.id);
+        });
+      } catch (e) { /* este proveedor no tiene fotos adicionales cargadas — se ignora */ }
+    }
 
     const attrValIds = [...new Set(prods.flatMap(p => p.product_template_attribute_value_ids || []))];
     let attrMap = {};
@@ -774,7 +789,8 @@ async function fetchProductosProveedor(proveedor) {
         piedra: nombreDe(joy.rock_type),
         medida: medidas.map(m => m.val).filter(Boolean).join(', '),
         barcode: p.barcode || '',
-        stock: parseFloat(p.qty_available || 0)
+        stock: parseFloat(p.qty_available || 0),
+        imagenes: imagenesMap[tmplId] || []
       });
     });
   }
@@ -908,6 +924,45 @@ app.get('/api/imagen/:proveedorId/:id', async (req, res) => {
     res.send(buf);
   } catch (e) {
     console.error('❌ /api/imagen/' + req.params.proveedorId + '/' + req.params.id, e.message);
+    res.status(500).send('No se pudo cargar la imagen');
+  }
+});
+
+// Foto adicional (galería) — mismo patrón que /api/imagen, pero contra el
+// modelo product.image (id propio, no el id del product.product).
+app.get('/api/imagen-extra/:proveedorId/:imgId', async (req, res) => {
+  try {
+    const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+    const token  = req.headers['x-client-token'] || req.query.t || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).send('No autorizado');
+    const proveedorId = parseInt(req.params.proveedorId);
+    const imgId = parseInt(req.params.imgId);
+    if (!proveedorId || !imgId) return res.status(400).send('ID inválido');
+    const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
+
+    const key = 'imgx_' + proveedorId + '_' + field + '_' + imgId;
+    let b64 = cacheGet(key);
+    if (!b64) {
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (proveedor && proveedor.tipo === 'odoo') {
+        const conn = connFor(proveedor);
+        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
+        b64 = imgs && imgs[0] ? imgs[0][field] : null;
+        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      }
+    }
+    if (!b64) {
+      const px = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+      res.setHeader('Content-Type', 'image/png');
+      return res.send(px);
+    }
+    const buf = Buffer.from(b64, 'base64');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
+    res.send(buf);
+  } catch (e) {
+    console.error('❌ /api/imagen-extra/' + req.params.proveedorId + '/' + req.params.imgId, e.message);
     res.status(500).send('No se pudo cargar la imagen');
   }
 });
@@ -1454,6 +1509,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
       .map(p => ({
         id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
         categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
+        imagenes: p.imagenes || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
     if (soloFavoritos) result = result.filter(p => favoritos.has(p.proveedorId + '::' + p.sku));
@@ -1483,6 +1539,7 @@ app.get('/api/public/:slug/producto/:proveedorId/:id', async (req, res) => {
     res.json({
       id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
       categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
+      imagenes: p.imagenes || [],
       stock: p.stock,
       precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
     });
@@ -1513,6 +1570,32 @@ app.get('/api/public/:slug/imagen/:proveedorId/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
     res.send(Buffer.from(b64, 'base64'));
   } catch (e) { console.error('❌ /api/public/imagen', e.message); res.status(500).send('No se pudo cargar la imagen'); }
+});
+
+app.get('/api/public/:slug/imagen-extra/:proveedorId/:imgId', async (req, res) => {
+  try {
+    const c = await publicClienteBySlug(req.params.slug);
+    if (!c) return res.status(404).send('No encontrada');
+    const proveedorId = parseInt(req.params.proveedorId);
+    const imgId = parseInt(req.params.imgId);
+    if (!proveedorId || !imgId) return res.status(400).send('ID inválido');
+    const field = req.query.s === 'g' ? 'image_1024' : 'image_256';
+    const key = 'imgx_' + proveedorId + '_' + field + '_' + imgId;
+    let b64 = cacheGet(key);
+    if (!b64) {
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (proveedor && proveedor.tipo === 'odoo') {
+        const conn = connFor(proveedor);
+        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.image', 'read', [[imgId], [field]]);
+        b64 = imgs && imgs[0] ? imgs[0][field] : null;
+        if (b64) cacheSet(key, b64, 2 * 60 * 60 * 1000);
+      }
+    }
+    if (!b64) return res.status(404).send('Sin imagen');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400');
+    res.send(Buffer.from(b64, 'base64'));
+  } catch (e) { console.error('❌ /api/public/imagen-extra', e.message); res.status(500).send('No se pudo cargar la imagen'); }
 });
 
 // ════════════════════════════════════════════════════════════════

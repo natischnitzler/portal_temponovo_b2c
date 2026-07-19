@@ -118,6 +118,16 @@ cambio grande que se entrega por fases:
 - ⏳ Pendiente (fase 5, menor urgencia): pantalla de catálogo y gestión
   manual de ventas para un proveedor sin Odoo (`tipo='manual'`) — hoy se
   puede crear ese tipo de proveedor pero no aporta productos todavía.
+- ✅ **Selector de talla (anillos) y galería de fotos (ya en este código)**:
+  al abrir la ficha de un anillo que tiene otras tallas del mismo diseño
+  (mismo proveedor, categoría, nombre sin el sufijo de talla, metal y
+  piedra) con stock, aparece "¿Cuál es tu talla?" para cambiar entre ellas
+  sin salir de la ficha — cada talla sigue siendo un producto (SKU)
+  distinto para el carrito y los favoritos. Si el producto tiene fotos
+  adicionales cargadas en Odoo (modelo `product.image`, más allá de la
+  imagen principal), se muestran como miniaturas debajo de la foto grande.
+  No se implementó video: no se encontró un campo de video en el Odoo de
+  ningún proveedor actual.
 
 ### 2. Base de datos (obligatorio)
 
@@ -162,6 +172,7 @@ vercel --prod
 | GET    | /api/me                       | Perfil de la vendedora (requiere código + clave)    |
 | GET    | /api/productos                | Catálogo combinado de todos los proveedores activos, con precio y sugerido |
 | GET    | /api/imagen/:proveedorId/:id   | Imagen del producto (el id de Odoo no es único entre proveedores) |
+| GET    | /api/imagen-extra/:proveedorId/:imgId | Foto adicional del producto (galería, modelo `product.image` de Odoo) |
 | POST   | /api/pedido                    | Crea la venta — si el carrito mezcla proveedores, la separa sola en una por cada uno |
 | GET    | /api/pedidos                   | Historial de ventas de la vendedora                  |
 | GET    | /api/config · POST /api/config | Personalización de la vitrina (logo, colores, etc.) — de cada vendedora |

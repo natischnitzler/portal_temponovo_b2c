@@ -193,6 +193,15 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .ficha-spec{display:flex;flex-direction:column;gap:2px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:64px;}
 .ficha-spec .k{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--steel);}
 .ficha-spec .v{font-size:13.5px;font-weight:500;}
+.ficha-gallery{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;border-bottom:1px solid var(--line);background:var(--white);}
+.ficha-thumb{flex:0 0 auto;width:52px;height:52px;border:1px solid var(--line);border-radius:8px;overflow:hidden;padding:0;background:var(--paper);}
+.ficha-thumb img{width:100%;height:100%;object-fit:contain;}
+.ficha-thumb.sel{border-color:var(--hdr);border-width:2px;}
+.ficha-tallas{margin-bottom:18px;}
+.ficha-tallas .lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-bottom:8px;}
+.tallas-row{display:flex;flex-wrap:wrap;gap:8px;}
+.talla-btn{min-width:42px;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);font-size:13px;font-family:var(--mono);color:var(--ink);}
+.talla-btn.sel{background:var(--hdr);color:var(--hdr-tx);border-color:var(--hdr);}
 .ficha-attrs{border-top:1px solid var(--line);margin-bottom:18px;}
 .attr-row{display:flex;justify-content:space-between;gap:16px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:14px;}
 .attr-row .k{color:var(--steel);font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding-top:1px;}
@@ -888,6 +897,12 @@ function imgUrl(id,big,proveedorId){
   // en el historial del navegador, en logs del servidor y en el Referer.
   return `${API}/imagen/${proveedorId}/${id}?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${big?'&s=g':''}`;
 }
+// Fotos adicionales del producto (galería) — mismo esquema que imgUrl, pero
+// contra /imagen-extra con el id propio de product.image (no el del producto).
+function imgUrlExtra(imgId,big,proveedorId){
+  if(PUBLIC) return `${API}/public/${SLUG}/imagen-extra/${proveedorId}/${imgId}${big?'?s=g':''}`;
+  return `${API}/imagen-extra/${proveedorId}/${imgId}?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}${big?'&s=g':''}`;
+}
 
 async function api(path, opts={}){
   const r = await fetch(API+path, {...opts, headers:{'Content-Type':'application/json','x-client-code':CODE,'x-client-pass':PASS, ...(opts.headers||{})}});
@@ -1436,10 +1451,31 @@ function renderGrid(){
 }
 
 /* ═══════════ FICHA ═══════════ */
+// Selector de talla (anillos): agrupa variantes del mismo diseño (misma
+// categoría/nombre-sin-talla/metal/piedra, de un mismo proveedor) para
+// mostrar "¿Cuál es tu talla?" — cada talla sigue siendo un producto
+// (SKU) distinto, no se fusionan en el carrito ni en favoritos.
+function esAnillo(p){ return /anillo/i.test(p.categoria||''); }
+function cleanNombreAnillo(n){
+  return String(n||'')
+    .replace(/\s*\([^)]*\b(talla|medida|tama[ñn]o|size)\b[^)]*\)\s*$/i,'')
+    .replace(/\s*-\s*(talla|medida|tama[ñn]o|size)\s*[:\-]?\s*\S+\s*$/i,'')
+    .trim();
+}
+function ringGroupKey(p){ return [p.proveedorId, p.categoria, cleanNombreAnillo(p.nombre), p.metal||'', p.piedra||''].join('::'); }
+function ringSiblings(p){
+  if(!esAnillo(p) || !p.medida) return [];
+  const key = ringGroupKey(p);
+  // stock===undefined pasa en la vitrina pública (esa lista ya viene
+  // filtrada a stock>0 desde el server, sin traer el número).
+  return PRODUCTOS_ALL.filter(x=> (x.stock===undefined || x.stock>0) && esAnillo(x) && x.medida && ringGroupKey(x)===key)
+    .sort((a,b)=> (parseFloat(a.medida)-parseFloat(b.medida)) || String(a.medida).localeCompare(String(b.medida)));
+}
 // pid: clave compuesta "proveedorId::id" — el id numérico de Odoo solo, no
 // alcanza para identificar un producto (dos proveedores pueden repetirlo).
 function openFicha(pid){
-  const p = PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===pid); if(!p) return;
+  const p = PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===pid) || PRODUCTOS_ALL.find(x=>(x.proveedorId+'::'+x.id)===pid);
+  if(!p) return;
   FICHA_PROD = p; FICHA_QTY = 1;
   $('ficha-cat').textContent = famSub(p).fam || 'Ficha';
   const attrs = (p.atributos||[]).map(a=>`<div class="attr-row"><span class="k">${esc(a.attr||'Detalle')}</span><span class="v">${esc(a.val)}</span></div>`).join('');
@@ -1452,8 +1488,20 @@ function openFicha(pid){
     const largo = String(f.v).length > 40 || String(f.v).includes('\n');
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
   }).join('');
+  // Galería: imagen principal + fotos adicionales (product.image en Odoo).
+  const galeria = [{ src: imgUrl(p.id,true,p.proveedorId), thumb: imgUrl(p.id,false,p.proveedorId) }]
+    .concat((p.imagenes||[]).map(imId=>({ src: imgUrlExtra(imId,true,p.proveedorId), thumb: imgUrlExtra(imId,false,p.proveedorId) })));
+  const thumbs = galeria.length>1 ? `<div class="ficha-gallery">${galeria.map((g,i)=>
+    `<button class="ficha-thumb${i===0?' sel':''}" data-idx="${i}"><img src="${g.thumb}" loading="lazy" alt=""/></button>`).join('')}</div>` : '';
+  const siblings = ringSiblings(p);
+  const tallas = siblings.length>1 ? `<div class="ficha-tallas">
+    <div class="lbl">¿Cuál es tu talla?</div>
+    <div class="tallas-row">${siblings.map(s=>
+      `<button class="talla-btn${s.proveedorId===p.proveedorId&&s.id===p.id?' sel':''}" data-talla-pid="${s.proveedorId}::${s.id}">${esc(s.medida)}</button>`).join('')}</div>
+  </div>` : '';
   $('sheet-body').innerHTML = `
-    <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}${shareBtn(p,'priv')}<img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
+    <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}${shareBtn(p,'priv')}<img id="ficha-main-img" src="${galeria[0].src}" alt="${esc(p.nombre)}"/></div>
+    ${thumbs}
     <div class="ficha-info">
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
@@ -1462,6 +1510,7 @@ function openFicha(pid){
         <div class="ficha-price"><div class="lbl">Precio${PUBLIC?'':' de venta'}</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
       </div>
       <div class="ficha-stockline priv"><span class="dot"></span> Disponible · ${p.stock} un.</div>
+      ${tallas}
       ${specs?`<div class="ficha-specs">${specs}</div>`:''}
       ${attrs?`<div class="ficha-attrs">${attrs}</div>`:''}
       ${p.descripcion?`<p class="ficha-desc">${esc(p.descripcion)}</p>`:''}
@@ -1483,6 +1532,12 @@ function openFicha(pid){
   if(fichaHeart) fichaHeart.onclick = ()=> toggleFavorito(p);
   const fichaShare = document.querySelector('#sheet-body [data-share-pid]');
   if(fichaShare) fichaShare.onclick = ()=> compartirProducto(p);
+  document.querySelectorAll('#sheet-body .ficha-thumb').forEach(b=> b.onclick = ()=>{
+    document.querySelectorAll('#sheet-body .ficha-thumb').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel');
+    $('ficha-main-img').src = galeria[+b.dataset.idx].src;
+  });
+  document.querySelectorAll('#sheet-body [data-talla-pid]').forEach(b=> b.onclick = ()=> openFicha(b.dataset.tallaPid));
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }
