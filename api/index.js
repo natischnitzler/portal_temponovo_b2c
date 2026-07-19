@@ -301,6 +301,17 @@ function ensureDb() {
       ) sub
       WHERE vp.id = sub.id AND vp.orden_secuencia IS NULL`;
 
+    // ── COMISIÓN POR VENDEDORA ───────────────────────────────────────
+    // Precio de venta = costo del proveedor × multiplicador (ya existía).
+    // Comisión = lo que se lleva la vendedora sobre la GANANCIA de cada
+    // venta (precio de venta − costo del proveedor) × este % — configurable
+    // por vendedora en Admin → Vendedoras. Se calcula y se guarda por línea
+    // al momento de la venta (ver /api/pedido), no se recalcula después —
+    // así lo ya ganado no cambia si el proveedor sube el costo o el admin
+    // ajusta el % más adelante.
+    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
+    await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
+
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
     // Un curso agrupa lecciones; cada lección puede ser un video (link de
@@ -1307,6 +1318,9 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     const porPid = {}; catalogo.forEach(p => { porPid[p.proveedorId + '::' + p.sku] = p; });
     const primeroPorSku = {}; catalogo.forEach(p => { if (!primeroPorSku[p.sku]) primeroPorSku[p.sku] = p; });
     const mult = req.multiplicador || 2;
+    // % vigente AHORA — se graba el monto ya calculado en cada línea (no el
+    // %) para que lo ya ganado no cambie si el admin lo ajusta después.
+    const comisionPct = parseFloat(req.vendedora.comision) || 0;
 
     // Agrupa el carrito por proveedor — de acá sale el split real.
     const grupos = new Map(); // proveedorId -> [{sku, quantity}]
@@ -1330,13 +1344,19 @@ app.post('/api/pedido', requireClient, async (req, res) => {
       // Se guarda categoría y total POR LÍNEA (no solo el sku/cantidad que
       // pide Odoo) para poder reportar después por tipo de producto sin
       // tener que volver a leer el catálogo — que puede haber cambiado.
-      let total = 0;
+      // Costo y comisión también se graban por línea, en el momento de la
+      // venta: la comisión es sobre la GANANCIA (total − costo), no sobre
+      // el total facturado.
+      let total = 0, comisionTotal = 0;
       const productosConDetalle = lineas.map(l => {
         const info = porPid[proveedorId + '::' + l.sku] || primeroPorSku[l.sku];
         const qty = parseFloat(l.quantity) || 1;
-        const lineaTotal = Math.round((info ? info.precio : 0) * mult * qty);
-        total += lineaTotal;
-        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info) : '', total: lineaTotal };
+        const costoUnit = info ? info.precio : 0;
+        const lineaTotal = Math.round(costoUnit * mult * qty);
+        const costoLinea = Math.round(costoUnit * qty);
+        const comisionLinea = Math.round((lineaTotal - costoLinea) * (comisionPct / 100));
+        total += lineaTotal; comisionTotal += comisionLinea;
+        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info) : '', total: lineaTotal, costo: costoLinea, comision: comisionLinea };
       });
 
       let idVenta = null, nombreOdoo = null, errorMsg = null;
@@ -1355,7 +1375,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
       resultados.push({
         proveedorId, proveedorNombre: proveedor ? proveedor.nombre : ('proveedor #' + proveedorId),
         estado: (idVenta && !errorMsg) ? 'enviada' : 'error',
-        idVenta, nombreOdoo, errorMsg, productosConDetalle, total
+        idVenta, nombreOdoo, errorMsg, productosConDetalle, total, comisionTotal
       });
     }
 
@@ -1363,10 +1383,10 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     for (const r of resultados) {
       await sql`
         INSERT INTO ventas_pendientes
-          (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at, grupo_id, proveedor_id)
+          (vendedora_id, productos, nombre_venta, telefono, email, direccion, comuna, entrega, nota, total, comision, estado, odoo_order_id, odoo_venta_nombre, error_msg, consolidado_at, grupo_id, proveedor_id)
         VALUES
           (${req.vendedora.id}, ${JSON.stringify(r.productosConDetalle)}, ${nombreVenta || ''},
-           ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(r.total)},
+           ${telefono || ''}, ${email || ''}, ${entregaFinal === 'retiro' ? '' : (direccion || '')}, ${comuna || ''}, ${entregaFinal}, ${notaFinal}, ${Math.round(r.total)}, ${Math.round(r.comisionTotal)},
            ${r.estado}, ${r.idVenta}, ${r.nombreOdoo}, ${r.errorMsg}, ${r.estado === 'enviada' ? new Date() : null}, ${grupoId}, ${r.proveedorId})`;
     }
 
@@ -1431,6 +1451,10 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
       envios.sort((a, b) => (a.proveedor_nombre || '').localeCompare(b.proveedor_nombre || ''));
       const primero = envios[0];
       const total = envios.reduce((s, o) => s + parseFloat(o.total || 0), 0);
+      // Comisión ganada — solo cuenta lo que efectivamente se envió (no lo
+      // que quedó en error/cancelado, aunque el pedido haya tenido otros
+      // envíos que sí salieron bien).
+      const comision = envios.filter(o => o.estado === 'enviada').reduce((s, o) => s + parseFloat(o.comision || 0), 0);
       const estadoGeneral = pedidoEstadoGeneral(envios);
       // orden_secuencia puede faltar en filas viejas (previas a este cambio) — se usa el id como respaldo.
       const numero = numeroVenta(req.vendedora.codigo, primero.orden_secuencia || primero.id);
@@ -1450,7 +1474,7 @@ app.get('/api/pedidos', requireClient, async (req, res) => {
         id: primero.grupo_id || primero.id,
         nombre: numero,
         fecha: primero.created_at,
-        total, neto: total,
+        total, neto: total, comision,
         entrega: primero.entrega || 'despacho',
         ref: primero.nombre_venta || '',
         // compat: mismos campos de siempre, a nivel superior (del primer/único envío)
@@ -1717,8 +1741,8 @@ app.get('/api/me', async (req, res) => {
     const { v, error } = await authenticateVendedora(req);
     if (error) return res.status(401).json({ error });
     res.json({
-      name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, sucursales: v.sucursales || [],
-      publicSlug: slugOf(v.codigo), imgToken: imgToken(v)
+      name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, comision: parseFloat(v.comision) || 0,
+      sucursales: v.sucursales || [], publicSlug: slugOf(v.codigo), imgToken: imgToken(v)
     });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1767,7 +1791,7 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
 // ── Vendedoras ──
 app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
+    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
     res.json(rows); // nunca se devuelve clave_hash
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1787,14 +1811,14 @@ app.get('/api/admin/vendedoras/logos', requireAdmin, async (_req, res) => {
 });
 app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
   try {
-    const { codigo, clave, nombre, email, multiplicador, categorias, sucursales } = req.body || {};
+    const { codigo, clave, nombre, email, multiplicador, comision, categorias, sucursales } = req.body || {};
     if (!codigo || !clave || !nombre) return res.status(400).json({ error: 'Código, clave y nombre son obligatorios' });
     const hash = hashPassword(clave);
     const { rows } = await sql`
-      INSERT INTO vendedoras (codigo, clave_hash, nombre, email, multiplicador, categorias, sucursales)
-      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${email || ''}, ${multiplicador || 2},
+      INSERT INTO vendedoras (codigo, clave_hash, nombre, email, multiplicador, comision, categorias, sucursales)
+      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${email || ''}, ${multiplicador || 2}, ${comision || 0},
               ${JSON.stringify(categorias || [])}, ${JSON.stringify(sucursales || [])})
-      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at`;
     res.json(rows[0]);
   } catch (e) {
     if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de usuario ya existe' });
@@ -1803,7 +1827,7 @@ app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
 });
 app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   try {
-    const { nombre, clave, email, multiplicador, categorias, sucursales, activo } = req.body || {};
+    const { nombre, clave, email, multiplicador, comision, categorias, sucursales, activo } = req.body || {};
     const claveHash = clave ? hashPassword(clave) : null;
     const { rows } = await sql`
       UPDATE vendedoras SET
@@ -1811,11 +1835,12 @@ app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
         clave_hash = COALESCE(${claveHash}, clave_hash),
         email = COALESCE(${email}, email),
         multiplicador = COALESCE(${multiplicador}, multiplicador),
+        comision = COALESCE(${comision}, comision),
         categorias = COALESCE(${categorias ? JSON.stringify(categorias) : null}, categorias),
         sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
         activo = COALESCE(${activo}, activo)
       WHERE id = ${req.params.id}
-      RETURNING id, codigo, nombre, email, multiplicador, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at`;
     if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
     delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
     res.json(rows[0]);

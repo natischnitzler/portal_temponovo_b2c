@@ -144,8 +144,8 @@ cambio grande que se entrega por fases:
 Desde el Panel de Admin (`/admin` → **Configuración**) pones el nombre de
 tu empresa y el `partnerId` de Odoo al que se le facturan todas las
 ventas. Después, desde **Vendedoras**, creas cada vendedora (usuario,
-clave, nombre, email para `vendor_email`, multiplicador, categorías que
-vende). Ahí mismo puedes:
+clave, nombre, email para `vendor_email`, multiplicador, comisión,
+categorías que vende). Ahí mismo puedes:
 
 - **Descargar precios** — baja un Excel con el código, nombre y precio de
   venta actual de cada producto para esa vendedora.
@@ -153,6 +153,18 @@ vende). Ahí mismo puedes:
   columnas de código y precio) para fijar precios de venta específicos por
   producto, que mandan por sobre el multiplicador.
 - **Quitar precios fijos** — vuelve todo al cálculo por multiplicador.
+- **Precio/comisión** — ajusta el multiplicador y el % de comisión de una
+  vendedora ya creada (fila expandible en la lista).
+
+**Multiplicador vs. comisión:** el multiplicador fija el precio de venta
+(costo del proveedor × multiplicador) — eso no cambió. La comisión es lo
+que se lleva la vendedora sobre la GANANCIA de cada venta (precio de
+venta − costo del proveedor) × su %, configurable por vendedora. Se
+calcula y se graba por línea en el momento de la venta (no se recalcula
+después, para que lo ya ganado no cambie si el proveedor sube el costo o
+el admin ajusta el % más adelante). La vendedora nunca ve el costo del
+proveedor — al apretar el ícono del ojo ve su comisión por producto, no
+el costo; en "Mis Ventas" ve el total acumulado de comisión del mes.
 
 También en Configuración puedes ver la **venta abierta** (la única, compartida
 por todas las vendedoras) y forzar que se cierre si quieres que el próximo

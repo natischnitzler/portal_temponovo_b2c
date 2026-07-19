@@ -578,6 +578,7 @@ body.public .priv{display:none!important;}
             <div class="side-t">Confirmar venta</div>
             <div class="sum-row"><span>Códigos únicos</span><b id="sum-skus">0</b></div>
             <div class="sum-row"><span>Unidades</span><b id="sum-items">0</b></div>
+            <div class="sum-row cost"><span>Tu comisión</span><b id="sum-comision">$0</b></div>
             <div class="sum-total"><span>Total</span><b id="sum-total">$0</b></div>
 
             <div class="fld">
@@ -718,7 +719,7 @@ body.public .priv{display:none!important;}
 
   <nav class="nav-bottom">
     <div class="nav-side">
-      <button class="nav-mini" id="btn-eye" title="Ver mis costos">
+      <button class="nav-mini" id="btn-eye" title="Ver mi comisión">
         <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
       <button class="nav-mini" id="btn-cfg" title="Configuración">
@@ -1176,6 +1177,14 @@ function sugerido(p){
   const m = parseFloat(CFG.mult) || ME?.multiplicador || 2;
   return Math.round(p.precio * m);
 }
+// Lo que gana la vendedora por unidad: % de comisión sobre la ganancia
+// (precio de venta − costo del proveedor), no sobre el total facturado.
+function comisionUnit(p){
+  if(PUBLIC) return 0;
+  const pct = parseFloat(ME?.comision) || 0;
+  if(!pct) return 0;
+  return Math.round((sugerido(p) - p.precio) * (pct/100));
+}
 
 /* ═══════════ LOGIN ═══════════ */
 async function tryLogin(code, pass){
@@ -1278,7 +1287,7 @@ if(localStorage.getItem('tn_eye')==='1') document.body.classList.add('costs');
 $('btn-eye').onclick = ()=>{
   const on = document.body.classList.toggle('costs');
   localStorage.setItem('tn_eye', on?'1':'0');
-  toast(on ? 'Mostrando tus costos' : 'Costos ocultos');
+  toast(on ? 'Mostrando tu comisión' : 'Comisión oculta');
 };
 
 /* ═══════════ INIT ═══════════ */
@@ -1607,7 +1616,7 @@ function renderGrid(){
         <div class="card-sku">${esc(p.sku)||'—'}</div>
         ${tallas?`<div class="card-tallas">${tallas}</div>`:''}
         <div class="card-price">${fmt(sugerido(p))}</div>
-        <div class="card-cost cost">Costo ${fmt(p.precio)}</div>
+        <div class="card-cost cost">Tu comisión ${fmt(comisionUnit(p))}</div>
       </div>
     </div>`;
   }).join('');
@@ -1680,7 +1689,7 @@ function openFicha(pid){
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
       <div class="ficha-prices">
-        <div class="ficha-price cost" style="flex-direction:column"><div class="lbl">Tu costo</div><div class="val">${fmt(p.precio)}</div></div>
+        <div class="ficha-price cost" style="flex-direction:column"><div class="lbl">Tu comisión</div><div class="val">${fmt(comisionUnit(p))}</div></div>
         <div class="ficha-price"><div class="lbl">Precio${PUBLIC?'':' de venta'}</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
       </div>
       <div class="ficha-stockline priv"><span class="dot"></span> Disponible · ${p.stock} un.</div>
@@ -1847,7 +1856,8 @@ function renderRows(){
       <div class="cart-item-info">
         <div class="cart-item-name">${esc(p.nombre)}</div>
         <div class="cart-item-sku">${esc(p.sku)}</div>
-        <div class="cart-item-price">${fmt(p.precio)}</div>
+        <div class="cart-item-price">${fmt(sugerido(p))}</div>
+        <div class="cart-item-price cost">Tu comisión ${fmt(comisionUnit(p))}</div>
       </div>
       <div class="cart-item-qty">
         <button class="qty-btn" data-menos="${esc(r.sku)}">−</button>
@@ -1876,7 +1886,7 @@ function lineasValidas(){
     if(!p) return;
     const q = parseInt(r.qty)||1;
     if(map[p.sku]) map[p.sku].quantity += q;
-    else map[p.sku] = { sku:p.sku, quantity:q, precio:p.precio, proveedorId:p.proveedorId };
+    else map[p.sku] = { sku:p.sku, quantity:q, precioVenta:sugerido(p), comisionU:comisionUnit(p), proveedorId:p.proveedorId };
   });
   return Object.values(map);
 }
@@ -1884,7 +1894,9 @@ function renderResumen(){
   const ls = lineasValidas();
   $('sum-skus').textContent = ls.length;
   $('sum-items').textContent = ls.reduce((s,l)=>s+l.quantity,0);
-  $('sum-total').textContent = fmt(ls.reduce((s,l)=>s+l.precio*l.quantity,0));
+  $('sum-total').textContent = fmt(ls.reduce((s,l)=>s+l.precioVenta*l.quantity,0));
+  const sumComision = $('sum-comision');
+  if(sumComision) sumComision.textContent = fmt(ls.reduce((s,l)=>s+l.comisionU*l.quantity,0));
   updateBadges();
 }
 $('vr-vaciar').onclick = (e)=>{ e.preventDefault(); if(!confirm('¿Vaciar el carrito?')) return; ROWS = []; saveRows(); renderRows(); };
@@ -1995,7 +2007,7 @@ function demoPedidos(){
         fecha: new Date(d.getFullYear(), d.getMonth(), 4+k*6).toISOString(),
         estado: 'enviada',
         seguimiento: segDemo[(i+k)%segDemo.length],
-        total: tot, neto: Math.round(tot/1.19), nota:'',
+        total: tot, neto: Math.round(tot/1.19), nota:'', comision: Math.round(tot*0.15),
         lineas: [{ sku:'DEMO-'+(100+i*10+k), categoria:cat, cantidad:1+(k%2), total:tot }]
       });
     }
@@ -2022,8 +2034,7 @@ async function loadVentas(){
   const thisMes = now.toISOString().slice(0,7);
   const delMes = ventas.filter(o=>mesKey(o.fecha||'')===thisMes);
   const totalMes = delMes.reduce((s,o)=>s+o.total,0);
-  const mult = parseFloat(CFG.mult) || ME?.multiplicador || 2;
-  const ganMes = totalMes * (mult-1);
+  const comisionMes = delMes.reduce((s,o)=>s+(o.comision||0),0);
 
   // últimos 6 meses × familia
   const meses = [];
@@ -2116,15 +2127,14 @@ async function loadVentas(){
     ${DEMO ? '<div class="ok-box" style="display:block;margin:0 0 14px;background:#fdf6e3;color:#8a6d3d">🧪 Esto es un <b>ejemplo</b> de cómo se verán tus ventas. Cuando hagas la primera, aparecerá aquí de verdad.</div>' : ''}
     <div class="stat-row">
       <div class="stat"><div class="v">${delMes.length}</div><div class="l">Ventas<br/>este mes</div></div>
-      <div class="stat"><div class="v">${fmt(totalMes)}</div><div class="l">Comprado<br/>este mes</div></div>
-      <div class="stat"><div class="v">${fmt(ganMes)}</div><div class="l">Ganancia<br/>estimada</div></div>
+      <div class="stat"><div class="v">${fmt(totalMes)}</div><div class="l">Vendido<br/>este mes</div></div>
+      <div class="stat"><div class="v">${fmt(comisionMes)}</div><div class="l">Tu comisión<br/>este mes</div></div>
     </div>
     <div class="chart-box">
       <div class="chart-t">Últimos 6 meses · por tipo</div>
       <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${bars}</svg>
       <div class="legend">${legend}</div>
     </div>
-    <p class="cfg-note" style="margin:0 2px 16px">La ganancia estimada usa tu multiplicador actual (×${mult}).</p>
     <h2 class="page-t" style="font-size:17px;margin-bottom:12px">Detalle de ventas</h2>
     ${detalle}`;
   box.querySelectorAll('.his-item').forEach(el=> el.onclick = ()=> el.classList.toggle('open'));
@@ -2211,7 +2221,7 @@ function initCfgPanel(){
     const rows = PRODUCTOS_ALL.map(p=>{
       const fs = famSub(p);
       return { 'Código':p.sku, 'Producto':p.nombre, 'Familia':fs.fam, 'Subfamilia':fs.sub,
-        'Stock':p.stock, 'Tu precio':p.precio, 'Precio de venta':sugerido(p),
+        'Stock':p.stock, 'Precio de venta':sugerido(p), 'Tu comisión':comisionUnit(p),
         'Detalles':(p.atributos||[]).map(a=>a.attr+': '+a.val).join(' · ') };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
