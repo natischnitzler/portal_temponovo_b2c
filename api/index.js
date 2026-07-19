@@ -731,22 +731,6 @@ async function fetchProductosProveedor(proveedor) {
         extra.forEach(t => { joyeriaMap[t.id] = t; });
       } catch (e) { /* este proveedor no tiene esos campos — normal, se ignora */ }
     }
-    // Fotos adicionales del producto (modelo product.image, "Extra Product
-    // Media" de Odoo) — más allá de la imagen principal (image_1920 de
-    // product.product). Fetch defensivo: no todos los Odoo tienen ese modelo
-    // habilitado/con datos, y no queremos tumbar el catálogo por esto.
-    let imagenesMap = {};
-    if (tmplIds.length) {
-      try {
-        const imgs = await xmlrpcCallFor(conn, key, 'product.image', 'search_read',
-          [[['product_tmpl_id', 'in', tmplIds]], ['id', 'product_tmpl_id']]);
-        imgs.forEach(im => {
-          const tId = Array.isArray(im.product_tmpl_id) ? im.product_tmpl_id[0] : im.product_tmpl_id;
-          (imagenesMap[tId] = imagenesMap[tId] || []).push(im.id);
-        });
-      } catch (e) { /* este proveedor no tiene fotos adicionales cargadas — se ignora */ }
-    }
-
     const attrValIds = [...new Set(prods.flatMap(p => p.product_template_attribute_value_ids || []))];
     let attrMap = {};
     if (attrValIds.length) {
@@ -789,13 +773,36 @@ async function fetchProductosProveedor(proveedor) {
         piedra: nombreDe(joy.rock_type),
         medida: medidas.map(m => m.val).filter(Boolean).join(', '),
         barcode: p.barcode || '',
-        stock: parseFloat(p.qty_available || 0),
-        imagenes: imagenesMap[tmplId] || []
+        stock: parseFloat(p.qty_available || 0)
       });
     });
   }
   cacheSet(cacheKey, result, CATALOGO_TTL_MS);
   return result;
+}
+
+// Fotos adicionales de UN producto (modelo product.image, "Extra Product
+// Media" de Odoo) — más allá de la imagen principal. A propósito NO se pide
+// para todo el catálogo de una (eso frenaba la carga entera de la colección
+// por un round-trip extra a Odoo por cada tanda de 200 productos); se pide
+// perezosamente, solo cuando se abre la ficha de ESE producto puntual.
+async function fetchImagenesExtra(proveedor, productId) {
+  if (proveedor.tipo !== 'odoo') return [];
+  const cacheKey = 'imgids_' + proveedor.id + '_' + productId;
+  const cached = cacheGet(cacheKey); if (cached) return cached;
+  const conn = connFor(proveedor);
+  const key = 'prov_' + proveedor.id;
+  try {
+    const prods = await xmlrpcCallFor(conn, key, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+    const tmplId = prods && prods[0]
+      ? (Array.isArray(prods[0].product_tmpl_id) ? prods[0].product_tmpl_id[0] : prods[0].product_tmpl_id)
+      : null;
+    if (!tmplId) { cacheSet(cacheKey, [], CATALOGO_TTL_MS); return []; }
+    const imgs = await xmlrpcCallFor(conn, key, 'product.image', 'search_read', [[['product_tmpl_id', '=', tmplId]], ['id']]);
+    const ids = imgs.map(im => im.id);
+    cacheSet(cacheKey, ids, CATALOGO_TTL_MS);
+    return ids;
+  } catch (e) { return []; } // proveedor sin ese modelo/campo — no hay fotos extra, no es un error
 }
 
 // Catálogo de UN proveedor, con su precio de lista aplicado (si tiene partner_id/pricelist).
@@ -1509,7 +1516,6 @@ app.get('/api/public/:slug/productos', async (req, res) => {
       .map(p => ({
         id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
         categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
-        imagenes: p.imagenes || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
     if (soloFavoritos) result = result.filter(p => favoritos.has(p.proveedorId + '::' + p.sku));
@@ -1539,11 +1545,38 @@ app.get('/api/public/:slug/producto/:proveedorId/:id', async (req, res) => {
     res.json({
       id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
       categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
-      imagenes: p.imagenes || [],
       stock: p.stock,
       precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
     });
   } catch (e) { console.error('❌ /api/public/producto', e.message); res.status(500).json({ error: 'No se pudo cargar el producto' }); }
+});
+
+// Fotos adicionales de un producto puntual — perezoso, se llama solo al
+// abrir su ficha (ver fetchImagenesExtra).
+app.get('/api/productos/:proveedorId/:id/imagenes', async (req, res) => {
+  try {
+    const { v, error } = await authenticateVendedora(req);
+    if (error) return res.status(401).json({ error });
+    const proveedorId = parseInt(req.params.proveedorId);
+    const id = parseInt(req.params.id);
+    if (!proveedorId || !id) return res.status(400).json({ error: 'ID inválido' });
+    const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+    if (!proveedor) return res.json({ imagenes: [] });
+    res.json({ imagenes: await fetchImagenesExtra(proveedor, id) });
+  } catch (e) { res.status(500).json({ error: 'No se pudieron cargar las fotos' }); }
+});
+
+app.get('/api/public/:slug/productos/:proveedorId/:id/imagenes', async (req, res) => {
+  try {
+    const c = await publicClienteBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
+    const proveedorId = parseInt(req.params.proveedorId);
+    const id = parseInt(req.params.id);
+    if (!proveedorId || !id) return res.status(400).json({ error: 'ID inválido' });
+    const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+    if (!proveedor) return res.json({ imagenes: [] });
+    res.json({ imagenes: await fetchImagenesExtra(proveedor, id) });
+  } catch (e) { res.status(500).json({ error: 'No se pudieron cargar las fotos' }); }
 });
 
 app.get('/api/public/:slug/imagen/:proveedorId/:id', async (req, res) => {

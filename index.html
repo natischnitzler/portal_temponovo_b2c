@@ -1488,11 +1488,10 @@ function openFicha(pid){
     const largo = String(f.v).length > 40 || String(f.v).includes('\n');
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
   }).join('');
-  // Galería: imagen principal + fotos adicionales (product.image en Odoo).
-  const galeria = [{ src: imgUrl(p.id,true,p.proveedorId), thumb: imgUrl(p.id,false,p.proveedorId) }]
-    .concat((p.imagenes||[]).map(imId=>({ src: imgUrlExtra(imId,true,p.proveedorId), thumb: imgUrlExtra(imId,false,p.proveedorId) })));
-  const thumbs = galeria.length>1 ? `<div class="ficha-gallery">${galeria.map((g,i)=>
-    `<button class="ficha-thumb${i===0?' sel':''}" data-idx="${i}"><img src="${g.thumb}" loading="lazy" alt=""/></button>`).join('')}</div>` : '';
+  // Galería: imagen principal ya (rápido); las fotos adicionales (product.image
+  // en Odoo) se piden aparte, después de mostrar la ficha — pedirlas para
+  // TODO el catálogo de una frenaba la carga entera de la colección.
+  let galeria = [{ src: imgUrl(p.id,true,p.proveedorId), thumb: imgUrl(p.id,false,p.proveedorId) }];
   const siblings = ringSiblings(p);
   const tallas = siblings.length>1 ? `<div class="ficha-tallas">
     <div class="lbl">¿Cuál es tu talla?</div>
@@ -1501,7 +1500,7 @@ function openFicha(pid){
   </div>` : '';
   $('sheet-body').innerHTML = `
     <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}${shareBtn(p,'priv')}<img id="ficha-main-img" src="${galeria[0].src}" alt="${esc(p.nombre)}"/></div>
-    ${thumbs}
+    <div id="ficha-gallery-slot"></div>
     <div class="ficha-info">
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
@@ -1532,12 +1531,31 @@ function openFicha(pid){
   if(fichaHeart) fichaHeart.onclick = ()=> toggleFavorito(p);
   const fichaShare = document.querySelector('#sheet-body [data-share-pid]');
   if(fichaShare) fichaShare.onclick = ()=> compartirProducto(p);
-  document.querySelectorAll('#sheet-body .ficha-thumb').forEach(b=> b.onclick = ()=>{
-    document.querySelectorAll('#sheet-body .ficha-thumb').forEach(x=>x.classList.remove('sel'));
-    b.classList.add('sel');
-    $('ficha-main-img').src = galeria[+b.dataset.idx].src;
-  });
+  function renderThumbs(){
+    const slot = $('ficha-gallery-slot'); if(!slot) return;
+    if(galeria.length<2){ slot.innerHTML=''; return; }
+    slot.innerHTML = `<div class="ficha-gallery">${galeria.map((g,i)=>
+      `<button class="ficha-thumb${i===0?' sel':''}" data-idx="${i}"><img src="${g.thumb}" loading="lazy" alt=""/></button>`).join('')}</div>`;
+    slot.querySelectorAll('.ficha-thumb').forEach(b=> b.onclick = ()=>{
+      slot.querySelectorAll('.ficha-thumb').forEach(x=>x.classList.remove('sel'));
+      b.classList.add('sel');
+      $('ficha-main-img').src = galeria[+b.dataset.idx].src;
+    });
+  }
   document.querySelectorAll('#sheet-body [data-talla-pid]').forEach(b=> b.onclick = ()=> openFicha(b.dataset.tallaPid));
+  // Fotos adicionales: se piden aparte (perezoso) para no frenar la carga
+  // de todo el catálogo — ver fetchImagenesExtra en el backend.
+  const galUrl = PUBLIC
+    ? `${API}/public/${SLUG}/productos/${p.proveedorId}/${p.id}/imagenes`
+    : `${API}/productos/${p.proveedorId}/${p.id}/imagenes`;
+  fetch(galUrl, PUBLIC?{}:{headers:{'x-client-code':CODE,'x-client-pass':PASS}})
+    .then(r=>r.json()).then(d=>{
+      if(FICHA_PROD!==p) return; // el usuario ya cambió de producto/talla
+      const extra = d.imagenes||[];
+      if(!extra.length) return;
+      galeria = galeria.concat(extra.map(imId=>({ src: imgUrlExtra(imId,true,p.proveedorId), thumb: imgUrlExtra(imId,false,p.proveedorId) })));
+      renderThumbs();
+    }).catch(()=>{});
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }
