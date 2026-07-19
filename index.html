@@ -205,6 +205,39 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .tallas-row{display:flex;flex-wrap:wrap;gap:8px;}
 .talla-btn{min-width:42px;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);font-size:13px;font-family:var(--mono);color:var(--ink);}
 .talla-btn.sel{background:var(--hdr);color:var(--hdr-tx);border-color:var(--hdr);}
+.talla-help-btn{display:block;margin-top:8px;background:none;border:none;padding:0;font-size:12px;color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px;}
+
+/* ── Guía de tallas ── */
+.tg-sub{font-size:12px;color:var(--steel);line-height:1.6;margin-bottom:20px;}
+.tg-metodo{border:1px solid var(--line);border-radius:var(--r);margin-bottom:14px;overflow:hidden;}
+.tg-head{width:100%;text-align:left;background:var(--white);border:none;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.tg-num{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-bottom:3px;}
+.tg-title{font-family:var(--f1);font-size:15px;}
+.tg-desc{font-size:11.5px;color:var(--steel);margin-top:2px;}
+.tg-arrow{font-size:20px;color:var(--steel);flex-shrink:0;}
+.tg-body{display:none;padding:16px;border-top:1px solid var(--line);}
+.tg-body.open{display:block;}
+.tg-instr{text-align:center;font-size:12px;color:var(--steel);line-height:1.6;margin-bottom:14px;}
+.tg-circ-wrap{display:flex;justify-content:center;margin-bottom:14px;}
+.tg-circ{border:3px solid var(--ink);border-radius:50%;width:180px;height:180px;display:flex;align-items:center;justify-content:center;}
+.tg-circ span{font-family:var(--f1);font-size:20px;color:var(--ink);}
+.tg-slider{width:100%;margin-bottom:8px;accent-color:var(--hdr);}
+.tg-slider-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--steel);margin-bottom:12px;}
+.tg-result{text-align:center;padding:12px;background:var(--paper);border-radius:8px;font-size:13px;}
+.tg-result strong{font-family:var(--f1);font-size:19px;font-weight:500;}
+.tg-result-sub{font-size:11px;color:var(--steel);}
+.tg-result-muted{color:var(--steel);}
+.tg-result-warn{color:var(--red);font-size:12px;}
+.tg-steps{list-style:none;padding:0;margin:0 0 14px;counter-reset:tg-step;}
+.tg-steps li{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;margin-bottom:9px;counter-increment:tg-step;}
+.tg-steps li::before{content:counter(tg-step);flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--hdr);color:var(--hdr-tx);font-size:10.5px;display:flex;align-items:center;justify-content:center;margin-top:1px;}
+.tg-input-row{display:flex;gap:10px;align-items:center;margin-bottom:12px;}
+.tg-input-row input{flex:1;height:44px;border:1px solid var(--line);border-radius:8px;padding:0 12px;font-size:15px;font-family:var(--f2);outline:none;color:var(--ink);}
+.tg-input-row span{font-size:12px;color:var(--steel);}
+.tg-table{width:100%;border-collapse:collapse;font-size:13px;}
+.tg-table th{padding:9px 12px;text-align:left;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--steel);font-weight:500;background:var(--paper);border-bottom:1px solid var(--line);}
+.tg-table td{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--ink-soft);}
+.tg-note{font-size:11px;color:var(--steel);text-align:center;line-height:1.6;padding:12px;background:var(--paper);border-radius:8px;margin-top:6px;}
 .ficha-attrs{border-top:1px solid var(--line);margin-bottom:18px;}
 .attr-row{display:flex;justify-content:space-between;gap:16px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:14px;}
 .attr-row .k{color:var(--steel);font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding-top:1px;}
@@ -714,6 +747,79 @@ body.public .priv{display:none!important;}
     <button class="sheet-close" id="sheet-close">×</button>
   </div>
   <div class="sheet-body" id="sheet-body"></div>
+</div>
+
+<!-- GUÍA DE TALLAS -->
+<div class="sheet-back" id="talla-back" style="z-index:210;"></div>
+<div class="sheet" id="talla-sheet" style="z-index:211;">
+  <div class="sheet-head">
+    <span class="sheet-title">¿Cuál es tu talla?</span>
+    <button class="sheet-close" id="talla-close">×</button>
+  </div>
+  <div class="sheet-body">
+    <p class="tg-sub">Tres formas de encontrar la talla correcta para tu anillo.</p>
+
+    <div class="tg-metodo">
+      <button type="button" class="tg-head" data-m="1">
+        <div>
+          <div class="tg-num">Método 01</div>
+          <div class="tg-title">Mide tu anillo en pantalla</div>
+          <div class="tg-desc">Coloca un anillo que te quede bien sobre la pantalla</div>
+        </div>
+        <span class="tg-arrow" id="tg-arrow-1">›</span>
+      </button>
+      <div class="tg-body" id="tg-body-1">
+        <p class="tg-instr">Coloca un anillo que te quede bien sobre el círculo de abajo.<br/>Ajusta el tamaño hasta que coincida con el interior del anillo.</p>
+        <div class="tg-circ-wrap"><div class="tg-circ" id="tg-circ"><span id="tg-circ-label">—</span></div></div>
+        <input type="range" class="tg-slider" id="tg-slider" min="14.8" max="18.2" step="0.05" value="16.2"/>
+        <div class="tg-slider-labels"><span>Talla 11</span><span>Talla 18</span></div>
+        <div class="tg-result" id="tg-regla-resultado"></div>
+      </div>
+    </div>
+
+    <div class="tg-metodo">
+      <button type="button" class="tg-head" data-m="2">
+        <div>
+          <div class="tg-num">Método 02</div>
+          <div class="tg-title">Mide con un papel</div>
+          <div class="tg-desc">Envuelve un trozo de papel en tu dedo</div>
+        </div>
+        <span class="tg-arrow" id="tg-arrow-2">›</span>
+      </button>
+      <div class="tg-body" id="tg-body-2">
+        <ol class="tg-steps">
+          <li>Corta una tira de papel de unos <strong>10 cm</strong> de largo y 1 cm de ancho.</li>
+          <li>Envuelve el papel alrededor del dedo donde usarás el anillo.</li>
+          <li>Marca donde se juntan los extremos y mide esa longitud en mm.</li>
+          <li>Ingresa el largo acá:</li>
+        </ol>
+        <div class="tg-input-row">
+          <input type="number" id="tg-papel-mm" min="40" max="80" placeholder="ej: 55"/>
+          <span>mm</span>
+        </div>
+        <div class="tg-result" id="tg-papel-resultado"></div>
+      </div>
+    </div>
+
+    <div class="tg-metodo">
+      <button type="button" class="tg-head" data-m="3">
+        <div>
+          <div class="tg-num">Método 03</div>
+          <div class="tg-title">Tabla de referencia</div>
+          <div class="tg-desc">Diámetro interior en milímetros</div>
+        </div>
+        <span class="tg-arrow" id="tg-arrow-3">›</span>
+      </button>
+      <div class="tg-body" id="tg-body-3">
+        <table class="tg-table">
+          <thead><tr><th>Talla</th><th>Diámetro (mm)</th><th>Circunferencia (mm)</th></tr></thead>
+          <tbody id="tg-tabla-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tg-note">💡 Si estás entre dos tallas, elegí la más grande — los anillos muy ajustados pueden incomodar con el calor.<br/><br/>Esta tabla es orientativa (talla 11 a 18). La talla exacta disponible depende de cada diseño: revisá las tallas que muestra la ficha del anillo elegido.</div>
+  </div>
 </div>
 
 <!-- CONFIG -->
@@ -1560,11 +1666,13 @@ function openFicha(pid){
   // TODO el catálogo de una frenaba la carga entera de la colección.
   let galeria = [{ src: imgUrl(p.id,true,p.proveedorId), thumb: imgUrl(p.id,false,p.proveedorId) }];
   const siblings = ringSiblings(p);
+  const guiaTallaBtn = esAnillo(p) ? `<button type="button" class="talla-help-btn">¿No sabés tu talla? Guía para medir tu anillo</button>` : '';
   const tallas = siblings.length>1 ? `<div class="ficha-tallas">
     <div class="lbl">¿Cuál es tu talla?</div>
     <div class="tallas-row">${siblings.map(s=>
       `<button class="talla-btn${s.proveedorId===p.proveedorId&&s.id===p.id?' sel':''}" data-talla-pid="${s.proveedorId}::${s.id}">${esc(s.medida)}</button>`).join('')}</div>
-  </div>` : '';
+    ${guiaTallaBtn}
+  </div>` : (guiaTallaBtn ? `<div class="ficha-tallas">${guiaTallaBtn}</div>` : '');
   $('sheet-body').innerHTML = `
     <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}${shareBtn(p,'priv')}<img id="ficha-main-img" src="${galeria[0].src}" alt="${esc(p.nombre)}"/></div>
     <div id="ficha-gallery-slot"></div>
@@ -1610,6 +1718,7 @@ function openFicha(pid){
     });
   }
   document.querySelectorAll('#sheet-body [data-talla-pid]').forEach(b=> b.onclick = ()=> openFicha(b.dataset.tallaPid));
+  document.querySelectorAll('#sheet-body .talla-help-btn').forEach(b=> b.onclick = openTallaGuide);
   // Fotos adicionales: se piden aparte (perezoso) para no frenar la carga
   // de todo el catálogo — ver fetchImagenesExtra en el backend.
   const galUrl = PUBLIC
@@ -1629,6 +1738,74 @@ function openFicha(pid){
 function closeFicha(){ $('sheet-back').classList.remove('open'); $('sheet').classList.remove('open'); document.body.style.overflow=''; }
 $('sheet-close').onclick = closeFicha;
 $('sheet-back').onclick = closeFicha;
+
+/* ═══════════ GUÍA DE TALLAS (anillos) ═══════════ */
+// Tabla talla ↔ diámetro/circunferencia interior — la misma que se usa en
+// Aviv para su herramienta "Mi talla" (rango 11 a 18, es orientativa: cada
+// diseño puede tener otras tallas disponibles, eso ya lo muestran los
+// chips de la ficha).
+const TALLAS_DATA = [
+  { talla:'11', diam:14.8, circ:46.5 },
+  { talla:'12', diam:15.3, circ:48.0 },
+  { talla:'13', diam:15.7, circ:49.3 },
+  { talla:'14', diam:16.2, circ:50.9 },
+  { talla:'15', diam:16.6, circ:52.1 },
+  { talla:'16', diam:17.1, circ:53.8 },
+  { talla:'17', diam:17.5, circ:54.9 },
+  { talla:'18', diam:18.2, circ:57.2 },
+];
+function mmATalla(diam){
+  let best = null, bestDiff = Infinity;
+  TALLAS_DATA.forEach(t=>{ const diff = Math.abs(t.diam-diam); if(diff<bestDiff){ bestDiff=diff; best=t; } });
+  return best;
+}
+(function(){
+  const tbody = $('tg-tabla-body');
+  if(!tbody) return;
+  tbody.innerHTML = TALLAS_DATA.map(t=>`<tr><td>${t.talla}</td><td>${t.diam} mm</td><td>${t.circ} mm</td></tr>`).join('');
+})();
+function toggleTallaMetodo(n){
+  const el = $('tg-body-'+n), arrow = $('tg-arrow-'+n);
+  const open = el.classList.contains('open');
+  el.classList.toggle('open', !open);
+  arrow.textContent = open ? '›' : '‹';
+  if(n==='1' && !open){ const sl = $('tg-slider'); if(sl) actualizarReglaTalla(sl.value); }
+}
+document.querySelectorAll('.tg-head').forEach(b=> b.onclick = ()=> toggleTallaMetodo(b.dataset.m));
+function actualizarReglaTalla(val){
+  const diamMm = parseFloat(val);
+  const circ = $('tg-circ'), label = $('tg-circ-label'), res = $('tg-regla-resultado');
+  // mm → px según el DPI real de la pantalla (para que el círculo tenga el
+  // tamaño físico correcto y de verdad sirva de referencia con un anillo).
+  const dpiEl = document.createElement('div');
+  dpiEl.style.cssText = 'width:1in;position:absolute;left:-9999px;';
+  document.body.appendChild(dpiEl);
+  const dpi = dpiEl.offsetWidth || 96;
+  document.body.removeChild(dpiEl);
+  const px = diamMm * (dpi/25.4);
+  circ.style.width = px+'px'; circ.style.height = px+'px';
+  label.textContent = diamMm.toFixed(1)+' mm';
+  const t = mmATalla(diamMm);
+  res.innerHTML = t
+    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Diámetro interior: ${t.diam} mm</span>`
+    : 'Ajustá el círculo hasta que coincida con tu anillo';
+}
+$('tg-slider')?.addEventListener('input', e=> actualizarReglaTalla(e.target.value));
+$('tg-papel-mm')?.addEventListener('input', e=>{
+  const mm = parseFloat(e.target.value);
+  const res = $('tg-papel-resultado');
+  if(!mm || mm<40 || mm>80){ res.innerHTML = '<span class="tg-result-muted">Ingresá la medida en mm</span>'; return; }
+  const diamMm = (mm/Math.PI).toFixed(1);
+  const t = mmATalla(parseFloat(diamMm));
+  const fuera = parseFloat(diamMm) < 14.8 || parseFloat(diamMm) > 18.2;
+  res.innerHTML = (t && !fuera)
+    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Circunferencia ${mm} mm · Diámetro ~${diamMm} mm</span>`
+    : '<span class="tg-result-warn">Esta medida queda fuera de la tabla de referencia (talla 11–18) — puede que este diseño en particular no la tenga.</span>';
+});
+function openTallaGuide(){ $('talla-back').classList.add('open'); $('talla-sheet').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeTallaGuide(){ $('talla-back').classList.remove('open'); $('talla-sheet').classList.remove('open'); document.body.style.overflow=''; }
+$('talla-close').onclick = closeTallaGuide;
+$('talla-back').onclick = closeTallaGuide;
 </script>
 <script>
 /* ═══════════ CARRITO ═══════════ */
