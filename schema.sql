@@ -23,11 +23,33 @@ CREATE TABLE IF NOT EXISTS vendedoras (
   clave_hash TEXT NOT NULL,        -- nunca se guarda la clave en texto plano
   nombre TEXT NOT NULL,
   email TEXT DEFAULT '',           -- solo dato de referencia (no se usa para autenticar contra la API)
-  multiplicador NUMERIC DEFAULT 2,
+  multiplicador NUMERIC DEFAULT 2, -- histórico, sin uso: el precio de venta ya no es por vendedora (ver catalogo_productos/categoria_multiplicador)
+  comision NUMERIC DEFAULT 0,      -- % que se lleva la vendedora sobre la ganancia (precio de venta − costo) de cada venta
   categorias JSONB DEFAULT '[]',   -- [] = todas las categorías; si no, lista blanca de familias
   sucursales JSONB DEFAULT '[]',
   activo BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Lista de precios global: el mismo precio de venta para cualquier
+-- vendedora. "disponible=false" saca el producto de TODAS las vitrinas (de
+-- cada vendedora y de la pública) — es curación de catálogo a nivel
+-- empresa, no el "ocultar" que cada vendedora ya tiene para su propia
+-- vitrina (eso vive en vendedora_config, aparte).
+CREATE TABLE IF NOT EXISTS catalogo_productos (
+  sku TEXT PRIMARY KEY,
+  precio NUMERIC,                  -- precio fijo; NULL = usa el multiplicador de su categoría
+  disponible BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Multiplicador por categoría (familia) — el precio de venta por defecto
+-- (costo del proveedor × este número) para lo que no tiene precio fijo en
+-- catalogo_productos. Sin fila para una categoría, se usa el default (×2).
+CREATE TABLE IF NOT EXISTS categoria_multiplicador (
+  familia TEXT PRIMARY KEY,
+  multiplicador NUMERIC NOT NULL DEFAULT 2,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Proveedores del catálogo (Temponovo, Aviv, futuros). Cada uno tiene su
@@ -59,7 +81,7 @@ CREATE TABLE IF NOT EXISTS ventas_pendientes (
   -- borrar, para no perder historial con valor contable. Se desactiva en
   -- cambio (columna "activo" en vendedoras).
   vendedora_id INTEGER NOT NULL REFERENCES vendedoras(id) ON DELETE RESTRICT,
-  productos JSONB NOT NULL,        -- [{sku, quantity, categoria, total}, ...] — categoria/total por línea, para reportar sin volver a leer el catálogo
+  productos JSONB NOT NULL,        -- [{sku, quantity, categoria, total, costo, comision}, ...] — por línea, para reportar sin volver a leer el catálogo; costo/comision grabados al momento de la venta (no se recalculan después)
   nombre_venta TEXT,
   telefono TEXT,
   email TEXT,
@@ -68,6 +90,7 @@ CREATE TABLE IF NOT EXISTS ventas_pendientes (
   entrega TEXT DEFAULT 'despacho', -- 'despacho' | 'retiro'
   nota TEXT,
   total NUMERIC DEFAULT 0,
+  comision NUMERIC DEFAULT 0,      -- suma de la comisión de todas las líneas, grabada al momento de la venta
   estado TEXT DEFAULT 'error',     -- 'enviada' (llegó a Odoo por la API) | 'error' (falló, hay que reintentar) | 'cancelada' (el admin la canceló)
   odoo_order_id INTEGER,           -- Id_Venta devuelto por la API (POST /sale/create o /sale/update)
   odoo_venta_nombre TEXT,          -- Nombre de la venta en Odoo (ej. "S06819")

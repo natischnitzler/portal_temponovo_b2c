@@ -1176,12 +1176,11 @@ async function updatePWA(){
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
 }
+// Precio de venta: lo calcula el servidor (precio fijo o multiplicador de
+// categoría, siempre igual para cualquier vendedora) — ver
+// catalogoConPrecioGlobal en el backend. No se recalcula acá.
 function sugerido(p){
-  if(PUBLIC) return p.precioVenta || 0;
-  const ov = CFG.overrides[p.sku];
-  if(ov > 0) return Math.round(ov);
-  const m = parseFloat(CFG.mult) || ME?.multiplicador || 2;
-  return Math.round(p.precio * m);
+  return p.precioVenta || 0;
 }
 // Lo que gana la vendedora por unidad: % de comisión sobre la ganancia
 // (precio de venta − costo del proveedor), no sobre el total facturado.

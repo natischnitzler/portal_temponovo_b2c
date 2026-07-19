@@ -302,7 +302,6 @@ function ensureDb() {
       WHERE vp.id = sub.id AND vp.orden_secuencia IS NULL`;
 
     // ── COMISIÓN POR VENDEDORA ───────────────────────────────────────
-    // Precio de venta = costo del proveedor × multiplicador (ya existía).
     // Comisión = lo que se lleva la vendedora sobre la GANANCIA de cada
     // venta (precio de venta − costo del proveedor) × este % — configurable
     // por vendedora en Admin → Vendedoras. Se calcula y se guarda por línea
@@ -311,6 +310,31 @@ function ensureDb() {
     // ajusta el % más adelante.
     await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
+
+    // ── LISTA DE PRECIOS GLOBAL ───────────────────────────────────────
+    // El precio de venta dejó de depender de la vendedora (el multiplicador
+    // por vendedora y los precios fijos "por vendedora" quedan retirados) —
+    // ahora es UNO SOLO para cualquier cliente de cualquier vendedora:
+    // 1) si el SKU tiene precio fijo acá, ese manda;
+    // 2) si no, se usa el multiplicador de SU categoría (familia, ver
+    //    famOf());
+    // 3) si la categoría tampoco tiene multiplicador, se usa el default
+    //    (MULT_DEFAULT, ×2).
+    // "disponible=false" saca el producto de TODAS las vitrinas (de cada
+    // vendedora y de la pública) — es una curación de catálogo a nivel
+    // empresa, no el "ocultar" que cada vendedora ya tenía para su propia
+    // vitrina (ese sigue existiendo, aparte).
+    await sql`CREATE TABLE IF NOT EXISTS catalogo_productos (
+      sku TEXT PRIMARY KEY,
+      precio NUMERIC,
+      disponible BOOLEAN NOT NULL DEFAULT true,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
+    await sql`CREATE TABLE IF NOT EXISTS categoria_multiplicador (
+      familia TEXT PRIMARY KEY,
+      multiplicador NUMERIC NOT NULL DEFAULT 2,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
 
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
@@ -598,7 +622,7 @@ async function requireClient(req, res, next) {
     // visual vieja (ver readCfgDb). Por eso ya no bloquea acá si falta.
     const cfg = await getConfig();
     req.vendedora = v; req.config = cfg;
-    req.partnerId = cfg.partner_id; req.clientName = v.nombre; req.multiplicador = parseFloat(v.multiplicador) || 2;
+    req.partnerId = cfg.partner_id; req.clientName = v.nombre;
     next();
   } catch (e) { console.error('❌ requireClient', e.message); res.status(500).json({ error: shortErr(e) }); }
 }
@@ -868,8 +892,54 @@ async function productosClienteMulti() {
   return todos;
 }
 
+// ── LISTA DE PRECIOS GLOBAL (Admin → Productos) ───────────────────
+// Reemplaza el multiplicador/precios "por vendedora": un solo precio de
+// venta para cualquier cliente de cualquier vendedora. Mismo patrón que
+// getProductoInfoMap() — mapa en memoria con caché corta, invalidado en
+// cada escritura.
+const MULT_DEFAULT = 2;
+async function getCatalogoMap() {
+  const hit = cacheGet('catalogo_precios'); if (hit) return hit;
+  let map = {};
+  try {
+    const { rows } = await sql`SELECT sku, precio, disponible FROM catalogo_productos`;
+    rows.forEach(r => { map[(r.sku || '').toUpperCase()] = { precio: r.precio != null ? parseFloat(r.precio) : null, disponible: r.disponible !== false }; });
+  } catch (e) { console.warn('⚠ catalogo_productos:', e.message); }
+  cacheSet('catalogo_precios', map, 5 * 60 * 1000);
+  return map;
+}
+async function getCategoriaMultMap() {
+  const hit = cacheGet('categoria_mult'); if (hit) return hit;
+  let map = {};
+  try {
+    const { rows } = await sql`SELECT familia, multiplicador FROM categoria_multiplicador`;
+    rows.forEach(r => { map[r.familia] = parseFloat(r.multiplicador) || MULT_DEFAULT; });
+  } catch (e) { console.warn('⚠ categoria_multiplicador:', e.message); }
+  cacheSet('categoria_mult', map, 5 * 60 * 1000);
+  return map;
+}
+function limpiarCacheCatalogoPrecios() {
+  Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
+    .forEach(k => delete cache[k]);
+}
+// Catálogo con precio de venta y disponibilidad YA resueltos (precio fijo >
+// multiplicador de su categoría > default). soloDisponibles=false es solo
+// para el panel de Admin, que necesita ver también lo que está apagado.
+async function catalogoConPrecioGlobal(soloDisponibles = true) {
+  const todos = await productosClienteMulti();
+  const [catalogoMap, multMap] = await Promise.all([getCatalogoMap(), getCategoriaMultMap()]);
+  const conPrecio = todos.map(p => {
+    const ov = catalogoMap[(p.sku || '').toUpperCase()];
+    const disponible = !ov || ov.disponible !== false;
+    const precioFijo = (ov && ov.precio > 0) ? Math.round(ov.precio) : null;
+    const precioVenta = precioFijo != null ? precioFijo : Math.round(p.precio * (multMap[famOf(p)] || MULT_DEFAULT));
+    return { ...p, precioVenta, precioFijo, disponible };
+  });
+  return soloDisponibles ? conPrecio.filter(p => p.disponible) : conPrecio;
+}
+
 // ════════════════════════════════════════════════════════════════
-// VITRINA — catálogo con precio del cliente + precio sugerido
+// VITRINA — catálogo con precio de venta global (ver catalogoConPrecioGlobal)
 // ════════════════════════════════════════════════════════════════
 app.get('/api/productos', async (req, res) => {
   try {
@@ -878,15 +948,12 @@ app.get('/api/productos', async (req, res) => {
 
     const cached = cacheGet('cat_' + v.codigo); if (cached) return res.json(cached);
 
-    let prods = await productosClienteMulti();
+    let prods = await catalogoConPrecioGlobal(true);
     const categorias = v.categorias || [];
     if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
 
-    const mult = parseFloat(v.multiplicador) || 2;
-    const result = prods.map(p => ({ ...p, precioSugerido: Math.round(p.precio * mult) }));
-
-    cacheSet('cat_' + v.codigo, result, VENDEDORA_TTL_MS);
-    res.json(result);
+    cacheSet('cat_' + v.codigo, prods, VENDEDORA_TTL_MS);
+    res.json(prods);
   } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -1321,12 +1388,14 @@ app.post('/api/pedido', requireClient, async (req, res) => {
     // Catálogo combinado — sirve para el precio/categoría por línea y para
     // saber a qué proveedor pertenece cada producto (si una línea no trae
     // proveedorId, ej. una pestaña vieja abierta durante el deploy, se
-    // resuelve por sku contra este catálogo como compatibilidad).
+    // resuelve por sku contra este catálogo como compatibilidad). Usa
+    // catalogoConPrecioGlobal(true) — mismo precio para cualquier vendedora,
+    // y un producto marcado no-disponible directamente no aparece acá (no
+    // se puede comprar aunque alguien tenga la pestaña vieja abierta).
     let catalogo = [];
-    try { catalogo = await productosClienteMulti(); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
+    try { catalogo = await catalogoConPrecioGlobal(true); } catch (e) { console.warn('⚠ precio pedido:', e.message); }
     const porPid = {}; catalogo.forEach(p => { porPid[p.proveedorId + '::' + p.sku] = p; });
     const primeroPorSku = {}; catalogo.forEach(p => { if (!primeroPorSku[p.sku]) primeroPorSku[p.sku] = p; });
-    const mult = req.multiplicador || 2;
     // % vigente AHORA — se graba el monto ya calculado en cada línea (no el
     // %) para que lo ya ganado no cambie si el admin lo ajusta después.
     const comisionPct = parseFloat(req.vendedora.comision) || 0;
@@ -1361,7 +1430,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
         const info = porPid[proveedorId + '::' + l.sku] || primeroPorSku[l.sku];
         const qty = parseFloat(l.quantity) || 1;
         const costoUnit = info ? info.precio : 0;
-        const lineaTotal = Math.round(costoUnit * mult * qty);
+        const lineaTotal = Math.round((info ? info.precioVenta : 0) * qty);
         const costoLinea = Math.round(costoUnit * qty);
         const comisionLinea = Math.round((lineaTotal - costoLinea) * (comisionPct / 100));
         total += lineaTotal; comisionTotal += comisionLinea;
@@ -1541,15 +1610,13 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     const cacheKey = 'pub_' + req.params.slug + (soloFavoritos ? '_fav' : '');
     const hit = cacheGet(cacheKey); if (hit) return res.json(hit);
     const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
-    const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
-    const ov = cfg.overrides || {};
     const hFams = new Set(cfg.hiddenFams || []);
     const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
     // Favoritos: selección personal de la vendedora (misma config que logo/
-    // colores/precios) — el link "compartir favoritos" es esta misma
-    // vitrina pública con ?favoritos=1, filtrada a solo esos productos.
+    // colores) — el link "compartir favoritos" es esta misma vitrina
+    // pública con ?favoritos=1, filtrada a solo esos productos.
     const favoritos = new Set(cfg.favoritos || []);
-    let prods = await productosClienteMulti();
+    let prods = await catalogoConPrecioGlobal(true);
     if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p)));
     let result = prods
       .filter(p => p.stock > 0)
@@ -1558,7 +1625,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
       .map(p => ({
         id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
         categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
-        precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+        precioVenta: p.precioVenta
       }));
     if (soloFavoritos) result = result.filter(p => favoritos.has(p.proveedorId + '::' + p.sku));
     cacheSet(cacheKey, result, VENDEDORA_TTL_MS);
@@ -1578,17 +1645,17 @@ app.get('/api/public/:slug/producto/:proveedorId/:id', async (req, res) => {
     const proveedorId = parseInt(req.params.proveedorId);
     const id = parseInt(req.params.id);
     if (!proveedorId || !id) return res.status(400).json({ error: 'Producto inválido' });
-    const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
-    const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
-    const ov = cfg.overrides || {};
-    const prods = await productosClienteMulti();
+    // Bypasea stock/ocultos-de-la-vendedora a propósito (ver comentario
+    // arriba) — pero SÍ respeta "no disponible" del catálogo global: si el
+    // admin lo retiró de la venta, el link compartido tampoco debe abrirlo.
+    const prods = await catalogoConPrecioGlobal(true);
     const p = prods.find(x => x.proveedorId === proveedorId && x.id === id);
     if (!p) return res.status(404).json({ error: 'Este producto ya no está disponible' });
     res.json({
       id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
       categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
       stock: p.stock,
-      precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+      precioVenta: p.precioVenta
     });
   } catch (e) { console.error('❌ /api/public/producto', e.message); res.status(500).json({ error: 'No se pudo cargar el producto' }); }
 });
@@ -1754,7 +1821,7 @@ app.get('/api/me', async (req, res) => {
     const { v, error } = await authenticateVendedora(req);
     if (error) return res.status(401).json({ error });
     res.json({
-      name: v.nombre, multiplicador: parseFloat(v.multiplicador) || 2, comision: parseFloat(v.comision) || 0,
+      name: v.nombre, comision: parseFloat(v.comision) || 0,
       sucursales: v.sucursales || [], publicSlug: slugOf(v.codigo), imgToken: imgToken(v)
     });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
@@ -1990,53 +2057,84 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
-// ── Precios fijos por vendedora (Excel) — se guardan como "overrides" en
-// su misma configuración visual (vendedora_config en Postgres) ──
-app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res) => {
+// ── LISTA DE PRECIOS GLOBAL (Admin → Productos) ───────────────────
+// Reemplaza el "precios fijos por vendedora" de arriba — un solo precio de
+// venta para cualquier cliente de cualquier vendedora (ver
+// catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
+// proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
+app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
-    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
-    const cfg0 = await getConfig();
-    let prods = await productosClienteMulti();
-    const categorias = v.categorias || [];
-    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
-    const cfg = await readCfgDb(v, cfg0.partner_id);
-    const ov = cfg.overrides || {};
-    const mult = parseFloat(v.multiplicador) || 2;
+    const prods = await catalogoConPrecioGlobal(false);
+    const porGrupo = {};
+    prods.forEach(p => { const k = p.proveedorId + '::' + p.nombre; porGrupo[k] = (porGrupo[k] || 0) + 1; });
     res.json(prods.map(p => ({
-      sku: p.sku, nombre: p.nombre,
-      precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+      proveedorId: p.proveedorId, proveedor: p.proveedorCodigo, sku: p.sku, nombre: p.nombre,
+      categoria: famOf(p), stock: p.stock, disponible: p.disponible,
+      precioFijo: p.precioFijo, precioVenta: p.precioVenta,
+      variantes: porGrupo[p.proveedorId + '::' + p.nombre]
     })));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
-app.post('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => {
+app.put('/api/admin/catalogo/:sku', requireAdmin, async (req, res) => {
   try {
-    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
-    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
-    const cfg0 = await getConfig();
-    const precios = req.body?.data || {};
-    if (!precios || typeof precios !== 'object') return res.status(400).json({ error: 'Formato inválido' });
-    const cfg = await readCfgDb(v, cfg0.partner_id);
-    cfg.overrides = { ...(cfg.overrides || {}) };
-    let n = 0;
-    Object.entries(precios).forEach(([sku, precio]) => {
-      const pr = parseFloat(precio);
-      if (sku && pr > 0) { cfg.overrides[String(sku).toUpperCase()] = Math.round(pr); n++; }
-    });
-    await writeCfgDb(v, cfg);
-    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)]; delete cache['pub_' + slugOf(v.codigo) + '_fav'];
-    res.json({ ok: true, actualizados: n });
+    const sku = String(req.params.sku || '').trim().toUpperCase();
+    if (!sku) return res.status(400).json({ error: 'SKU inválido' });
+    const precioNum = req.body?.precio != null && req.body.precio !== '' ? parseFloat(req.body.precio) : null;
+    const disponible = req.body?.disponible !== false;
+    await sql`
+      INSERT INTO catalogo_productos (sku, precio, disponible, updated_at)
+      VALUES (${sku}, ${precioNum > 0 ? precioNum : null}, ${disponible}, now())
+      ON CONFLICT (sku) DO UPDATE SET precio = ${precioNum > 0 ? precioNum : null}, disponible = ${disponible}, updated_at = now()`;
+    limpiarCacheCatalogoPrecios();
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
-app.delete('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => {
+// Carga masiva por Excel — mismo patrón que producto-info: se parsea en el
+// navegador con la librería XLSX y se manda como JSON (no hay parser de
+// .xlsx en el servidor).
+app.post('/api/admin/catalogo/excel', requireAdmin, async (req, res) => {
   try {
-    const { rows } = await sql`SELECT * FROM vendedoras WHERE id = ${req.params.id}`;
-    const v = rows[0]; if (!v) return res.status(404).json({ error: 'Vendedora no encontrada' });
-    const cfg0 = await getConfig();
-    const cfg = await readCfgDb(v, cfg0.partner_id);
-    cfg.overrides = {};
-    await writeCfgDb(v, cfg);
-    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)]; delete cache['pub_' + slugOf(v.codigo) + '_fav'];
+    const { filas } = req.body?.data || {};
+    if (!Array.isArray(filas) || !filas.length) return res.status(400).json({ error: 'No hay filas para cargar' });
+    const limpias = filas
+      .map(f => ({ sku: String(f?.sku || '').trim().toUpperCase(), precio: parseFloat(f?.precio), disponible: f?.disponible !== false }))
+      .filter(f => f.sku);
+    if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un código de producto reconocible' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const f of limpias) {
+        await client.query(
+          `INSERT INTO catalogo_productos (sku, precio, disponible, updated_at) VALUES ($1, $2, $3, now())
+           ON CONFLICT (sku) DO UPDATE SET precio = $2, disponible = $3, updated_at = now()`,
+          [f.sku, f.precio > 0 ? f.precio : null, f.disponible]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch {} throw e; } finally { client.release(); }
+    limpiarCacheCatalogoPrecios();
+    res.json({ ok: true, cargados: limpias.length });
+  } catch (e) { console.error('❌ /api/admin/catalogo/excel', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+// Multiplicador por categoría — el precio por defecto para lo que no tiene
+// precio fijo cargado arriba.
+app.get('/api/admin/categorias-multiplicador', requireAdmin, async (_req, res) => {
+  try {
+    const prods = await productosClienteMulti();
+    const familias = [...new Set(prods.map(p => famOf(p)))].sort();
+    const multMap = await getCategoriaMultMap();
+    res.json(familias.map(f => ({ familia: f, multiplicador: multMap[f] || MULT_DEFAULT })));
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req, res) => {
+  try {
+    const familia = decodeURIComponent(req.params.familia);
+    const multiplicador = parseFloat(req.body?.multiplicador);
+    if (!(multiplicador > 0)) return res.status(400).json({ error: 'Multiplicador inválido' });
+    await sql`
+      INSERT INTO categoria_multiplicador (familia, multiplicador, updated_at) VALUES (${familia}, ${multiplicador}, now())
+      ON CONFLICT (familia) DO UPDATE SET multiplicador = ${multiplicador}, updated_at = now()`;
+    limpiarCacheCatalogoPrecios();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });

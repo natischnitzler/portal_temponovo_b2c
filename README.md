@@ -144,27 +144,37 @@ cambio grande que se entrega por fases:
 Desde el Panel de Admin (`/admin` → **Configuración**) pones el nombre de
 tu empresa y el `partnerId` de Odoo al que se le facturan todas las
 ventas. Después, desde **Vendedoras**, creas cada vendedora (usuario,
-clave, nombre, email para `vendor_email`, multiplicador, comisión,
-categorías que vende). Ahí mismo puedes:
+clave, nombre, email para `vendor_email`, comisión, categorías que
+vende). Ahí mismo puedes usar **Comisión** (fila expandible en la lista)
+para ajustar su % después de creada.
 
-- **Descargar precios** — baja un Excel con el código, nombre y precio de
-  venta actual de cada producto para esa vendedora.
-- **Subir precios** — sube ese mismo Excel editado (o cualquier Excel con
-  columnas de código y precio) para fijar precios de venta específicos por
-  producto, que mandan por sobre el multiplicador.
-- **Quitar precios fijos** — vuelve todo al cálculo por multiplicador.
-- **Precio/comisión** — ajusta el multiplicador y el % de comisión de una
-  vendedora ya creada (fila expandible en la lista).
+**El precio de venta es GLOBAL, no por vendedora** — se define en
+**Productos**, no en Vendedoras. Cualquier cliente de cualquier vendedora
+paga el mismo precio por el mismo producto:
 
-**Multiplicador vs. comisión:** el multiplicador fija el precio de venta
-(costo del proveedor × multiplicador) — eso no cambió. La comisión es lo
-que se lleva la vendedora sobre la GANANCIA de cada venta (precio de
-venta − costo del proveedor) × su %, configurable por vendedora. Se
-calcula y se graba por línea en el momento de la venta (no se recalcula
-después, para que lo ya ganado no cambie si el proveedor sube el costo o
-el admin ajusta el % más adelante). La vendedora nunca ve el costo del
-proveedor — al apretar el ícono del ojo ve su comisión por producto, no
-el costo; en "Mis Ventas" ve el total acumulado de comisión del mes.
+1. Si el producto tiene un **precio fijo** cargado en Productos, ese manda.
+2. Si no, se usa el **multiplicador de su categoría** (ej. todo "Anillo" ×2.5) —
+   configurable ahí mismo, por categoría, no por producto ni por vendedora.
+3. Si la categoría tampoco tiene multiplicador propio, se usa el default (×2).
+
+En **Productos** también ves todo el catálogo (proveedor, variantes si el
+diseño tiene varias tallas, stock) y podés apagar **Disponible** por
+producto — eso lo saca de TODAS las vitrinas (cada vendedora y la
+pública), a diferencia del "ocultar" que cada vendedora ya tiene para su
+propia vitrina (ese sigue existiendo, aparte, en su Configuración). Precio
+y disponibilidad también se pueden cargar en bloque por Excel (primera
+columna el código, más una columna "Precio" y opcionalmente
+"Disponible").
+
+**Multiplicador vs. comisión:** el multiplicador (por categoría, ver
+arriba) fija el precio de venta. La comisión es lo que se lleva la
+vendedora sobre la GANANCIA de cada venta (precio de venta − costo del
+proveedor) × su %, configurable por vendedora. Se calcula y se graba por
+línea en el momento de la venta (no se recalcula después, para que lo ya
+ganado no cambie si el proveedor sube el costo o el admin ajusta el %
+más adelante). La vendedora nunca ve el costo del proveedor — al apretar
+el ícono del ojo ve su comisión por producto, no el costo; en "Mis
+Ventas" ve el total acumulado de comisión del mes.
 
 También en Configuración puedes ver la **venta abierta** (la única, compartida
 por todas las vendedoras) y forzar que se cierre si quieres que el próximo
@@ -194,9 +204,11 @@ vercel --prod
 | GET/POST/PUT/DELETE /api/admin/proveedores  | CRUD de Proveedores — catálogo y ventas ya conectados |
 | POST   | /api/admin/proveedores/:id/probar | Prueba la conexión Odoo de un proveedor |
 | POST   | /api/admin/cerrar-venta          | Cierra la única venta abierta (compartida por todas)  |
-| GET    | /api/admin/vendedoras/:id/precios/base | Excel base de precios (para descargar)          |
-| POST   | /api/admin/vendedoras/:id/precios      | Sube precios fijos {sku: precio}                |
-| DELETE | /api/admin/vendedoras/:id/precios      | Quita todos los precios fijos                   |
+| GET    | /api/admin/catalogo               | Catálogo completo con precio/disponibilidad resueltos (incluye lo apagado) |
+| PUT    | /api/admin/catalogo/:sku          | Fija precio y/o disponibilidad de un producto        |
+| POST   | /api/admin/catalogo/excel         | Carga masiva de precio/disponibilidad por Excel      |
+| GET    | /api/admin/categorias-multiplicador | Multiplicador por categoría (familia)              |
+| PUT    | /api/admin/categorias-multiplicador/:familia | Fija el multiplicador de una categoría        |
 | GET    | /api/admin/ventas               | Ventas, filtrables por estado (enviada/error)        |
 | POST   | /api/admin/ventas/:id/reintentar | Reintenta el envío a Odoo de una venta con error     |
 | PUT    | /api/admin/ventas/:id/seguimiento | Cambia el avance logístico de una venta: recibido → preparando → en_transito → entregado |

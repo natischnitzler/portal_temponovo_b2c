@@ -133,6 +133,7 @@ tr:last-child td{border-bottom:none;}
   <nav class="sidebar">
     <div class="sidebar-title">Admin</div>
     <button class="nav-item active" data-sec="vendedoras">👤 Vendedoras</button>
+    <button class="nav-item" data-sec="catalogo">🏷 Productos</button>
     <button class="nav-item" data-sec="productos">🏭 Proveedores</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
@@ -171,7 +172,7 @@ tr:last-child td{border-bottom:none;}
       <!-- VENDEDORAS -->
       <section class="section active" id="sec-vendedoras">
         <h2 class="page-t">Vendedoras</h2>
-        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. Elige su multiplicador de precio, qué categorías vende y, si quieres, precios fijos por producto (Excel). Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
+        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. El precio de venta es el mismo para todas (se configura en Productos) — acá solo elegís qué categorías vende y su % de comisión. Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
 
         <div class="card">
           <div class="card-h">Nueva vendedora</div>
@@ -183,11 +184,10 @@ tr:last-child td{border-bottom:none;}
           </div>
           <p class="note" style="margin-top:6px">Las ventas siempre se crean en Odoo desde la cuenta admin — este email es solo para tus registros, no se manda a la API.</p>
           <div class="row" style="margin-top:10px">
-            <div class="fld" style="max-width:140px"><label class="fld-l">Multiplicador</label><input class="fld-in" id="v-mult" type="number" step="0.1" value="2"/></div>
             <div class="fld" style="max-width:140px"><label class="fld-l">Comisión (%)</label><input class="fld-in" id="v-comision" type="number" step="1" value="0" placeholder="Ej: 20"/></div>
             <div class="fld"><label class="fld-l">Sucursales</label><input class="fld-in" id="v-sucursales" placeholder="Santiago, Providencia…"/></div>
           </div>
-          <p class="note" style="margin-top:6px">El multiplicador fija el precio de venta (costo × multiplicador). La comisión es lo que se lleva la vendedora sobre la ganancia de cada venta (precio de venta − costo del proveedor) × este %.</p>
+          <p class="note" style="margin-top:6px">La comisión es lo que se lleva la vendedora sobre la ganancia de cada venta (precio de venta − costo del proveedor) × este %. El precio de venta lo fija Productos, es igual para todas.</p>
           <div class="fld" style="margin-top:10px">
             <label class="fld-l">Categorías que vende (vacío = todas)</label>
             <div class="chip-list" id="v-categorias"></div>
@@ -202,7 +202,36 @@ tr:last-child td{border-bottom:none;}
           <div class="card-h">Vendedoras</div>
           <div id="v-list"><div class="empty">Cargando…</div></div>
         </div>
-        <input type="file" id="v-precios-input" accept=".xlsx,.xls,.csv" style="display:none"/>
+      </section>
+
+      <!-- PRODUCTOS (lista de precios global) -->
+      <section class="section" id="sec-catalogo">
+        <h2 class="page-t">Productos</h2>
+        <p class="page-s">Un solo precio de venta para cualquier vendedora. Si un producto no tiene precio fijo acá, se calcula con el multiplicador de su categoría. Lo que apagues en "Disponible" desaparece de todas las vitrinas (de cada vendedora y de la pública).</p>
+
+        <div class="card">
+          <div class="card-h">Multiplicador por categoría</div>
+          <p class="note">Precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo. Sin multiplicador propio, una categoría usa ×2.</p>
+          <div id="catmult-list"><div class="empty">Cargando…</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Cargar precios y disponibilidad por Excel</div>
+          <p class="note">Primera columna: código del producto. Además: una columna con "Precio" (vacío = usa el multiplicador de su categoría) y opcionalmente "Disponible" (si o no / true o false — vacío = disponible).</p>
+          <div class="row" style="margin-top:10px">
+            <button class="btn" id="cat-subir">Subir Excel</button>
+          </div>
+          <div class="msg" id="cat-excel-msg"></div>
+          <input type="file" id="cat-excel-input" accept=".xlsx,.xls,.csv" style="display:none"/>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Catálogo completo</div>
+          <div class="row" style="margin-bottom:10px">
+            <input class="fld-in" id="cat-buscar" placeholder="Buscar por nombre, código o proveedor…" style="max-width:360px"/>
+          </div>
+          <div id="cat-list"><div class="empty">Cargando…</div></div>
+        </div>
       </section>
 
       <!-- PROVEEDORES -->
@@ -417,6 +446,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
+  if (btn.dataset.sec === 'catalogo') { loadCatalogo(); loadCategoriasMult(); }
 });
 
 /* ── CONFIGURACIÓN (una sola empresa) ── */
@@ -476,7 +506,6 @@ async function loadCategorias() {
 
 /* ── VENDEDORAS ── */
 let VENDEDORAS = [];
-let PRECIOS_TARGET = null;
 async function loadVendedoras() {
   try {
     VENDEDORAS = await api('/vendedoras');
@@ -516,9 +545,10 @@ function toggleCategoriasEdit(id) {
   };
   row.style.display = '';
 }
-// Fila expandible para editar multiplicador y comisión de una vendedora ya
-// creada (al crearla se ponen una vez; acá se pueden ajustar después).
-function togglePrecioEdit(id) {
+// Fila expandible para editar la comisión de una vendedora ya creada (al
+// crearla se pone una vez; acá se puede ajustar después). El precio de
+// venta ya no es por vendedora — eso vive en Productos.
+function toggleComisionEdit(id) {
   const row = document.querySelector('[data-precio-row="' + id + '"]');
   if (!row) return;
   const abrir = row.style.display === 'none';
@@ -528,15 +558,13 @@ function togglePrecioEdit(id) {
   const cell = row.children[1];
   cell.innerHTML = `
     <div class="row">
-      <div class="fld" style="max-width:140px"><label class="fld-l">Multiplicador</label><input class="fld-in" id="pe-mult-${id}" type="number" step="0.1" value="${v.multiplicador}"/></div>
       <div class="fld" style="max-width:140px"><label class="fld-l">Comisión (%)</label><input class="fld-in" id="pe-comision-${id}" type="number" step="1" value="${v.comision || 0}"/></div>
     </div>
     <div class="row" style="margin-top:8px"><button class="btn btn-sm dark" data-precio-guardar="${id}">Guardar</button></div>`;
   cell.querySelector('[data-precio-guardar]').onclick = async () => {
     try {
-      const multiplicador = parseFloat($('pe-mult-' + id).value) || 2;
       const comision = parseFloat($('pe-comision-' + id).value) || 0;
-      await api('/vendedoras/' + id, { method: 'PUT', body: JSON.stringify({ multiplicador, comision }) });
+      await api('/vendedoras/' + id, { method: 'PUT', body: JSON.stringify({ comision }) });
       row.style.display = 'none';
       loadVendedoras();
     } catch (e) { alert(e.message); }
@@ -545,30 +573,26 @@ function togglePrecioEdit(id) {
 }
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th></th><th>Código</th><th>Nombre</th><th>Email</th><th>Mult.</th><th>Comisión</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th></th><th>Código</th><th>Nombre</th><th>Email</th><th>Comisión</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
       <td>${LOGOS[v.codigo] ? `<img src="${esc(LOGOS[v.codigo])}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:#f2f1ee;display:block"/>` : ''}</td>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
       <td class="mono">${esc(v.email)||'<span class="note">—</span>'}</td>
-      <td class="mono">×${v.multiplicador}</td>
       <td class="mono">${v.comision || 0}%</td>
       <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
-        <button class="btn btn-sm" data-precio="${v.id}">Precio/comisión</button>
+        <button class="btn btn-sm" data-precio="${v.id}">Comisión</button>
         <button class="btn btn-sm" data-cats="${v.id}">Categorías</button>
         <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
-        <button class="btn btn-sm" data-precios-base="${v.id}">Descargar precios</button>
-        <button class="btn btn-sm" data-precios-up="${v.id}">Subir precios</button>
-        <button class="btn btn-sm danger" data-precios-clear="${v.id}">Quitar precios fijos</button>
         <button class="btn btn-sm danger" data-del-v="${v.id}">Eliminar</button>
       </td>
     </tr>
-    <tr class="precio-edit-row" data-precio-row="${v.id}" style="display:none"><td></td><td colspan="8"></td></tr>
-    <tr class="cat-edit-row" data-cats-row="${v.id}" style="display:none"><td></td><td colspan="8"></td></tr>`).join('')}
+    <tr class="precio-edit-row" data-precio-row="${v.id}" style="display:none"><td></td><td colspan="7"></td></tr>
+    <tr class="cat-edit-row" data-cats-row="${v.id}" style="display:none"><td></td><td colspan="7"></td></tr>`).join('')}
   </tbody></table>`;
-  $('v-list').querySelectorAll('[data-precio]').forEach(b => b.onclick = () => togglePrecioEdit(b.dataset.precio));
+  $('v-list').querySelectorAll('[data-precio]').forEach(b => b.onclick = () => toggleComisionEdit(b.dataset.precio));
   $('v-list').querySelectorAll('[data-cats]').forEach(b => b.onclick = () => toggleCategoriasEdit(b.dataset.cats));
   $('v-list').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
     const v = VENDEDORAS.find(x => x.id == b.dataset.toggle);
@@ -586,68 +610,112 @@ function renderVendedoras() {
     try { await api('/vendedoras/' + b.dataset.delV, { method: 'DELETE' }); loadVendedoras(); }
     catch (e) { alert(e.message); }
   });
-  $('v-list').querySelectorAll('[data-precios-base]').forEach(b => b.onclick = () => descargarPreciosBase(b.dataset.preciosBase));
-  $('v-list').querySelectorAll('[data-precios-up]').forEach(b => b.onclick = () => {
-    PRECIOS_TARGET = b.dataset.preciosUp;
-    $('v-precios-input').value = '';
-    $('v-precios-input').click();
-  });
-  $('v-list').querySelectorAll('[data-precios-clear]').forEach(b => b.onclick = async () => {
-    if (!confirm('¿Quitar todos los precios fijos de esta vendedora? Volverá a usar el multiplicador para todo.')) return;
-    try { await api('/vendedoras/' + b.dataset.preciosClear + '/precios', { method: 'DELETE' }); alert('Precios fijos eliminados.'); }
-    catch (e) { alert(e.message); }
-  });
 }
-async function descargarPreciosBase(vid) {
-  try {
-    const rows = await api('/vendedoras/' + vid + '/precios/base');
-    if (!rows.length) return alert('Esta vendedora no tiene productos en su catálogo.');
-    const v = VENDEDORAS.find(x => x.id == vid);
-    const data = rows.map(r => ({ 'Código': r.sku, 'Producto': r.nombre, 'Precio de venta': r.precioVenta }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws['!cols'] = [{ wch: 16 }, { wch: 44 }, { wch: 16 }];
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Precios');
-    XLSX.writeFile(wb, 'precios-' + (v ? v.codigo.toLowerCase() : vid) + '.xlsx');
-  } catch (e) { alert(e.message); }
-}
-$('v-precios-input').onchange = async (e) => {
-  const f = e.target.files[0]; const vid = PRECIOS_TARGET;
-  if (!f || !vid) return;
-  try {
-    const buf = await f.arrayBuffer();
-    const wb = XLSX.read(buf);
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    const precios = {};
-    rows.forEach(r => {
-      const keys = Object.keys(r);
-      const kSku = keys.find(k => /c[oó]d/i.test(k)) || keys[0];
-      const kPr = keys.find(k => /precio/i.test(k)) || keys[keys.length - 1];
-      const sku = String(r[kSku] || '').trim().toUpperCase();
-      const pr = parseFloat(String(r[kPr]).replace(/[^\d.,]/g, '').replace(',', '.'));
-      if (sku && pr > 0) precios[sku] = pr;
-    });
-    if (!Object.keys(precios).length) return alert('No se encontraron precios válidos en el archivo.');
-    const r = await api('/vendedoras/' + vid + '/precios', { method: 'POST', body: JSON.stringify({ data: precios }) });
-    alert('✓ ' + r.actualizados + ' precio(s) actualizado(s).');
-  } catch (err) { alert('No se pudo subir: ' + err.message); }
-  e.target.value = ''; PRECIOS_TARGET = null;
-};
 $('v-crear').onclick = async () => {
   const codigo = $('v-codigo').value.trim().toUpperCase();
   const clave = $('v-clave').value;
   const nombre = $('v-nombre').value.trim();
   const email = $('v-email').value.trim();
-  const multiplicador = parseFloat($('v-mult').value) || 2;
   const comision = parseFloat($('v-comision').value) || 0;
   const sucursales = $('v-sucursales').value.split(',').map(s => s.trim()).filter(Boolean);
   if (!codigo || !clave || !nombre) return showMsg('v-msg', 'Código, clave y nombre son obligatorios', false);
   try {
-    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, email, multiplicador, comision, categorias: [...CATEGORIAS_SEL], sucursales }) });
-    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-email').value = ''; $('v-sucursales').value = ''; $('v-mult').value = 2; $('v-comision').value = 0;
+    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, email, comision, categorias: [...CATEGORIAS_SEL], sucursales }) });
+    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-email').value = ''; $('v-sucursales').value = ''; $('v-comision').value = 0;
     CATEGORIAS_SEL.clear(); $('v-categorias').querySelectorAll('.chk').forEach(c => { c.classList.remove('on'); c.querySelector('input').checked = false; });
     showMsg('v-msg', '✓ Vendedora creada', true);
     loadVendedoras();
   } catch (e) { showMsg('v-msg', e.message, false); }
+};
+
+/* ── PRODUCTOS (lista de precios global) ── */
+let CATALOGO = [];
+async function loadCategoriasMult() {
+  try {
+    const rows = await api('/categorias-multiplicador');
+    if (!rows.length) { $('catmult-list').innerHTML = '<div class="empty">No se pudo leer el catálogo de Odoo.</div>'; return; }
+    $('catmult-list').innerHTML = rows.map(r => `
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <div style="flex:1;font-size:13px">${esc(r.familia)}</div>
+        <input class="fld-in" style="max-width:90px" type="number" step="0.1" value="${r.multiplicador}" data-cm="${esc(r.familia)}"/>
+      </div>`).join('');
+    $('catmult-list').querySelectorAll('[data-cm]').forEach(inp => {
+      inp.onchange = async () => {
+        try { await api('/categorias-multiplicador/' + encodeURIComponent(inp.dataset.cm), { method: 'PUT', body: JSON.stringify({ multiplicador: parseFloat(inp.value) || 2 }) }); loadCatalogo(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { $('catmult-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+async function loadCatalogo() {
+  try {
+    CATALOGO = await api('/catalogo');
+    renderCatalogo();
+  } catch (e) { $('cat-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+function renderCatalogo() {
+  const q = ($('cat-buscar').value || '').trim().toLowerCase();
+  const rows = !q ? CATALOGO : CATALOGO.filter(p =>
+    (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.proveedor || '').toLowerCase().includes(q));
+  if (!rows.length) { $('cat-list').innerHTML = '<div class="empty">Sin productos.</div>'; return; }
+  $('cat-list').innerHTML = `<table><thead><tr><th>Proveedor</th><th>Producto</th><th>Variantes</th><th>Stock</th><th>Disponible</th><th>Precio fijo</th><th>Precio de venta</th><th></th></tr></thead><tbody>
+    ${rows.map(p => `<tr data-row="${esc(p.sku)}">
+      <td class="mono">${esc(p.proveedor)}</td>
+      <td>${esc(p.nombre)}<div class="note mono">${esc(p.sku)}</div></td>
+      <td class="mono">${p.variantes > 1 ? p.variantes : '—'}</td>
+      <td class="mono">${p.stock}</td>
+      <td><button class="toggle ${p.disponible?'on':''}" data-cat-toggle="${esc(p.sku)}" title="Disponible"><span class="dot"></span></button></td>
+      <td><input class="fld-in" style="max-width:110px" type="number" placeholder="—" value="${p.precioFijo != null ? p.precioFijo : ''}" data-cat-precio="${esc(p.sku)}"/></td>
+      <td class="mono">${fmt(p.precioVenta)}${p.precioFijo == null ? ' <span class="note">(×cat.)</span>' : ''}</td>
+      <td><button class="btn btn-sm dark" data-cat-guardar="${esc(p.sku)}">Guardar</button></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+  $('cat-list').querySelectorAll('[data-cat-toggle]').forEach(b => b.onclick = async () => {
+    const sku = b.dataset.catToggle;
+    const p = CATALOGO.find(x => x.sku === sku);
+    try {
+      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify({ precio: p.precioFijo, disponible: !p.disponible }) });
+      p.disponible = !p.disponible;
+      renderCatalogo();
+    } catch (e) { alert(e.message); }
+  });
+  $('cat-list').querySelectorAll('[data-cat-guardar]').forEach(b => b.onclick = async () => {
+    const sku = b.dataset.catGuardar;
+    const p = CATALOGO.find(x => x.sku === sku);
+    const input = $('cat-list').querySelector('[data-cat-precio="' + CSS.escape(sku) + '"]');
+    const precio = input.value === '' ? null : parseFloat(input.value);
+    try {
+      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify({ precio, disponible: p.disponible }) });
+      loadCatalogo();
+    } catch (e) { alert(e.message); }
+  });
+}
+$('cat-buscar').oninput = renderCatalogo;
+$('cat-subir').onclick = () => { $('cat-excel-input').value = ''; $('cat-excel-input').click(); };
+$('cat-excel-input').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf);
+    const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    if (!raw.length) return showMsg('cat-excel-msg', 'El archivo está vacío.', false);
+    const cols = Object.keys(raw[0]);
+    const kSku = cols.find(k => /c[oó]d|sku/i.test(k)) || cols[0];
+    const kPrecio = cols.find(k => /precio/i.test(k));
+    const kDisp = cols.find(k => /dispon/i.test(k));
+    const filas = raw.map(r => {
+      const sku = String(r[kSku] || '').trim();
+      const precioStr = kPrecio ? String(r[kPrecio] || '').replace(/[^\d.,]/g, '').replace(',', '.') : '';
+      const dispStr = kDisp ? String(r[kDisp] || '').trim().toLowerCase() : '';
+      const disponible = !dispStr || ['si', 'sí', 'true', '1', 'x'].includes(dispStr);
+      return { sku, precio: precioStr ? parseFloat(precioStr) : null, disponible };
+    }).filter(f => f.sku);
+    if (!filas.length) return showMsg('cat-excel-msg', 'No se encontró ninguna fila con código de producto.', false);
+    const r = await api('/catalogo/excel', { method: 'POST', body: JSON.stringify({ data: { filas } }) });
+    showMsg('cat-excel-msg', `✓ ${r.cargados} producto(s) actualizado(s).`, true);
+    loadCatalogo();
+  } catch (err) { showMsg('cat-excel-msg', 'No se pudo leer el archivo: ' + err.message, false); }
+  e.target.value = '';
 };
 
 /* ── VENTAS ── */
