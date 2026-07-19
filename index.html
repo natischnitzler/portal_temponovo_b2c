@@ -178,7 +178,7 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .sheet-title{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--steel);}
 .sheet-close{background:none;border:none;font-size:26px;line-height:1;color:var(--steel);padding:2px 6px;}
 .sheet-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
-.ficha-img{background:var(--white);display:flex;align-items:center;justify-content:center;padding:28px;border-bottom:1px solid var(--line);}
+.ficha-img{position:relative;background:var(--white);display:flex;align-items:center;justify-content:center;padding:28px;border-bottom:1px solid var(--line);}
 .ficha-img img{max-width:100%;max-height:42vh;object-fit:contain;}
 .ficha-info{padding:22px 22px 30px;}
 .ficha-name{font-family:var(--f1);font-size:24px;line-height:1.3;margin-bottom:6px;overflow-wrap:break-word;word-break:break-word;}
@@ -378,6 +378,11 @@ body.costs #btn-eye svg{stroke-width:2;}
 /* etiquetas en tarjetas */
 .card-img{position:relative;}
 .tagb{position:absolute;top:8px;left:8px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#fff;padding:4px 9px;border-radius:10px;z-index:2;font-weight:600;}
+.heart-btn{position:absolute;top:8px;right:8px;z-index:2;width:30px;height:30px;border:none;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.15);}
+.heart-btn svg{width:16px;height:16px;fill:none;stroke:var(--steel,#9a9a94);stroke-width:2;transition:fill .15s,stroke .15s;}
+.heart-btn.on svg{fill:var(--red,#b3423a);stroke:var(--red,#b3423a);}
+.ficha-heart{top:14px;right:14px;width:36px;height:36px;}
+.ficha-heart svg{width:19px;height:19px;}
 
 /* config: listas de catálogo y etiquetas */
 .chk-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;width:100%;}
@@ -478,6 +483,10 @@ body.public .priv{display:none!important;}
           </button>
         </div>
         <div class="filter-panel" id="filter-panel">
+          <div class="fp-group priv" id="fav-group">
+            <p class="fp-t">Favoritos</p>
+            <div class="tag-chips" id="fav-chips"></div>
+          </div>
           <div class="fp-group">
             <p class="fp-t">Mis etiquetas</p>
             <div class="tag-chips" id="tag-chips"></div>
@@ -841,6 +850,9 @@ body.public .priv{display:none!important;}
 const API = '/api';
 const PUBLIC = location.pathname.startsWith('/v/');
 const SLUG = PUBLIC ? location.pathname.split('/')[2] : '';
+// Link "compartir favoritos": misma vitrina pública + ?favoritos=1 — el
+// backend filtra a solo los productos que la vendedora marcó con corazón.
+const SOLO_FAVORITOS_PUB = PUBLIC && new URLSearchParams(location.search).get('favoritos') === '1';
 let CODE = localStorage.getItem('tn_code') || '';
 let PASS = localStorage.getItem('tn_pass') || '';
 let ME = null;
@@ -874,7 +886,7 @@ async function api(path, opts={}){
 
 /* ═══════════ CONFIG "MI VITRINA" ═══════════ */
 const DEFAULT_CFG = { nombre:'', slogan:'', logo:'', hdr:'#191b1e', fondo:'#faf9f6', f1:'Marcellus', f2:'Jost',
-  radius:'suave', welcome:'', mult:null, overrides:{}, hiddenFams:[], hiddenSkus:[], tags:[], tagMap:{} };
+  radius:'suave', welcome:'', mult:null, overrides:{}, hiddenFams:[], hiddenSkus:[], tags:[], tagMap:{}, favoritos:[] };
 // La copia local (para que cargue rápido offline) se guarda POR vendedora —
 // nunca en una sola llave compartida, o si dos personas usan el mismo
 // celular/navegador, la segunda hereda visualmente el diseño de la primera.
@@ -1048,9 +1060,10 @@ if(PUBLIC){
 
 async function initPublic(){
   try {
+    const prodUrl = `${API}/public/${SLUG}/productos` + (SOLO_FAVORITOS_PUB ? '?favoritos=1' : '');
     const [cfg, prods] = await Promise.all([
       fetch(`${API}/public/${SLUG}/config`).then(r=>r.json()),
-      fetch(`${API}/public/${SLUG}/productos`).then(async r=>{ const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); return d; })
+      fetch(prodUrl).then(async r=>{ const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); return d; })
     ]);
     CFG = { ...DEFAULT_CFG, ...cfg };
     PRODUCTOS_ALL = prods; PRODUCTOS = prods;
@@ -1059,6 +1072,12 @@ async function initPublic(){
       `<span style="min-width:0"><span class="bname">${esc(CFG.nombre||'Vitrina')}</span>` +
       (CFG.slogan?`<span class="bslogan">${esc(CFG.slogan)}</span>`:'') + `</span>`;
     document.title = (CFG.nombre||'Vitrina') + ' · Vitrina';
+    if(SOLO_FAVORITOS_PUB){
+      const banner = document.createElement('div');
+      banner.className = 'ok-box'; banner.style.cssText = 'display:block;margin:0 0 14px;background:#fdf3f3;color:#8a4d4d';
+      banner.textContent = '❤ Esta es una selección personalizada — ' + (prods.length ? 'estos son los productos que te recomendaron.' : 'todavía no tiene productos.');
+      $('vit-grid').before(banner);
+    }
     $('vit-loading').style.display='none';
     document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
     $('sec-vitrina').classList.add('active');
@@ -1119,14 +1138,56 @@ async function initApp(){
     PRODUCTOS_ALL = await api('/productos');
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);   // sin stock no se muestra
     $('vit-loading').style.display='none';
-    renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderGrid(); renderRows();
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderFavFilter(); renderGrid(); renderRows();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
   }
 }
 
+/* ═══════════ FAVORITOS ═══════════ */
+// Selección personal de la vendedora (guardada en su config, junto a logo/
+// colores) — el corazón en cada producto la arma; "Compartir favoritos"
+// manda el link de la vitrina pública con ?favoritos=1, que solo muestra
+// esos productos (no hace falta nada del lado del cliente).
+function favKey(p){ return p.proveedorId+'::'+p.sku; }
+function esFavorito(p){ return (CFG.favoritos||[]).includes(favKey(p)); }
+function toggleFavorito(p){
+  const k = favKey(p);
+  const set = new Set(CFG.favoritos||[]);
+  if(set.has(k)) set.delete(k); else set.add(k);
+  CFG.favoritos = [...set];
+  saveCfg();
+  renderFavFilter();
+  // Actualiza cualquier corazón visible de este producto (tarjeta Y ficha
+  // si está abierta — son elementos DOM distintos, "renderGrid" no toca la
+  // ficha) sin re-renderizar toda la grilla.
+  document.querySelectorAll(`[data-fav-pid="${p.proveedorId}::${p.id}"]`).forEach(b=> b.classList.toggle('on', esFavorito(p)));
+  // Si el filtro "solo favoritos" está activo, además hay que rehacer la
+  // grilla para que el producto recién desmarcado desaparezca de la lista.
+  if(FILTRO_FAVORITOS) renderGrid();
+}
+function heartBtn(p, extraClass){
+  return `<button class="heart-btn ${extraClass||''} ${esFavorito(p)?'on':''}" data-fav-pid="${p.proveedorId}::${p.id}" title="${esFavorito(p)?'Quitar de favoritos':'Agregar a favoritos'}">
+    <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 7.8 2.3 4 6 4c2 0 3.6 1.1 4.5 2.7C11.4 5.1 13 4 15 4c3.7 0 5.5 3.8 4 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
+  </button>`;
+}
+function renderFavFilter(){
+  const n = (CFG.favoritos||[]).length;
+  $('fav-chips').innerHTML = `
+    <button class="fchip ${FILTRO_FAVORITOS?'active':''}" id="fav-toggle">❤ Solo mis favoritos${n?' ('+n+')':''}</button>
+    ${n ? '<button class="fchip" id="fav-share">🔗 Compartir favoritos</button>' : ''}`;
+  const toggle = $('fav-toggle');
+  if(toggle) toggle.onclick = ()=>{ FILTRO_FAVORITOS = !FILTRO_FAVORITOS; renderFavFilter(); updateFilterBtn(); renderGrid(); };
+  const share = $('fav-share');
+  if(share) share.onclick = ()=>{
+    const url = `${location.origin}/v/${ME?.publicSlug||''}?favoritos=1`;
+    if(navigator.share) navigator.share({ title: 'Mi selección · '+(CFG.nombre||'Vitrina'), url }).catch(()=>{});
+    else { navigator.clipboard?.writeText(url); toast('Link copiado'); }
+  };
+}
+
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '', FILTRO_METAL = '', FILTRO_PIEDRA = '';
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '', FILTRO_METAL = '', FILTRO_PIEDRA = '', FILTRO_FAVORITOS = false;
 const PRICE_RANGES = [
   { id:'p1', label:'Hasta $10.000',    min:0,      max:10000 },
   { id:'p2', label:'$10.000–$30.000',  min:10000,  max:30000 },
@@ -1135,7 +1196,7 @@ const PRICE_RANGES = [
 ];
 $('filter-btn').onclick = ()=>{ $('filter-panel').classList.toggle('open'); };
 function updateFilterBtn(){
-  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA));
+  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA || FILTRO_FAVORITOS));
 }
 // Metal/piedra solo existen para proveedores de joyería (Aviv) — si nadie en
 // el catálogo actual los tiene, ni se muestra el grupo de filtro.
@@ -1279,6 +1340,7 @@ function filtrados(){
     if(FILTRO_TAG && (CFG.tagMap||{})[p.sku]!==FILTRO_TAG) return false;
     if(FILTRO_METAL && p.metal!==FILTRO_METAL) return false;
     if(FILTRO_PIEDRA && p.piedra!==FILTRO_PIEDRA) return false;
+    if(FILTRO_FAVORITOS && !esFavorito(p)) return false;
     if(FILTRO_PRECIO){
       const r = PRICE_RANGES.find(x=>x.id===FILTRO_PRECIO);
       const v = sugerido(p);
@@ -1302,7 +1364,7 @@ function renderGrid(){
   if(!list.length){ $('vit-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">No hay productos disponibles que coincidan.</div>`; return; }
   $('vit-grid').innerHTML = list.map(p=>`
     <div class="card" data-pid="${p.proveedorId}::${p.id}">
-      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}<img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
+      <div class="card-img">${(t=>t?`<span class="tagb" style="background:${t.color}">${esc(t.nombre)}</span>`:'')(tagOf(p.sku))}${heartBtn(p,'priv card-heart')}<img loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
       <div class="card-body">
         <div class="card-name">${esc(p.nombre)}</div>
         <div class="card-sku">${esc(p.sku)||'—'}</div>
@@ -1311,6 +1373,11 @@ function renderGrid(){
       </div>
     </div>`).join('');
   $('vit-grid').querySelectorAll('.card').forEach(c=> c.onclick = ()=> openFicha(c.dataset.pid));
+  $('vit-grid').querySelectorAll('[data-fav-pid]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation();
+    const p = PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===b.dataset.favPid);
+    if(p) toggleFavorito(p);
+  });
 }
 
 /* ═══════════ FICHA ═══════════ */
@@ -1331,7 +1398,7 @@ function openFicha(pid){
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
   }).join('');
   $('sheet-body').innerHTML = `
-    <div class="ficha-img"><img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
+    <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}<img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
     <div class="ficha-info">
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
@@ -1357,6 +1424,8 @@ function openFicha(pid){
   $('f-menos').onclick = ()=>{ if(FICHA_QTY>1){FICHA_QTY--; $('f-qty').textContent=FICHA_QTY;} };
   $('f-mas').onclick = ()=>{ FICHA_QTY++; $('f-qty').textContent=FICHA_QTY; };
   $('f-add').onclick = ()=>{ addRow(p.sku, FICHA_QTY); closeFicha(); toast('Agregado al carrito'); };
+  const fichaHeart = document.querySelector('#sheet-body [data-fav-pid]');
+  if(fichaHeart) fichaHeart.onclick = ()=> toggleFavorito(p);
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }

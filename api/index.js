@@ -1385,6 +1385,11 @@ app.post('/api/config', requireClient, async (req, res) => {
     const cfg = req.body?.data || {};
     if (JSON.stringify(cfg).length > 300000) return res.status(413).json({ error: 'Configuración demasiado grande (logo muy pesado)' });
     await writeCfgDb(req.vendedora, cfg);
+    // Limpia el caché de su vitrina pública (las dos variantes: completa y
+    // solo-favoritos) — si no, un cambio recién guardado (ej. marcar un
+    // favorito para compartirlo al toque) tarda hasta 10 min en verse.
+    const slug = slugOf(req.vendedora.codigo);
+    delete cache['pub_' + slug]; delete cache['pub_' + slug + '_fav'];
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1404,15 +1409,21 @@ app.get('/api/public/:slug/productos', async (req, res) => {
   try {
     const c = await publicClienteBySlug(req.params.slug);
     if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
-    const hit = cacheGet('pub_' + req.params.slug); if (hit) return res.json(hit);
+    const soloFavoritos = req.query.favoritos === '1';
+    const cacheKey = 'pub_' + req.params.slug + (soloFavoritos ? '_fav' : '');
+    const hit = cacheGet(cacheKey); if (hit) return res.json(hit);
     const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
     const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
     const ov = cfg.overrides || {};
     const hFams = new Set(cfg.hiddenFams || []);
     const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
+    // Favoritos: selección personal de la vendedora (misma config que logo/
+    // colores/precios) — el link "compartir favoritos" es esta misma
+    // vitrina pública con ?favoritos=1, filtrada a solo esos productos.
+    const favoritos = new Set(cfg.favoritos || []);
     let prods = await productosClienteMulti();
     if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p)));
-    const result = prods
+    let result = prods
       .filter(p => p.stock > 0)
       .filter(p => !hFams.has(famOf(p)))
       .filter(p => !hSkus.has((p.sku || '').toUpperCase()))
@@ -1421,7 +1432,8 @@ app.get('/api/public/:slug/productos', async (req, res) => {
         categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
-    cacheSet('pub_' + req.params.slug, result, 10 * 60 * 1000);
+    if (soloFavoritos) result = result.filter(p => favoritos.has(p.proveedorId + '::' + p.sku));
+    cacheSet(cacheKey, result, 10 * 60 * 1000);
     res.json(result);
   } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: 'No se pudo cargar el catálogo' }); }
 });
@@ -1798,7 +1810,7 @@ app.post('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) => 
       if (sku && pr > 0) { cfg.overrides[String(sku).toUpperCase()] = Math.round(pr); n++; }
     });
     await writeCfgDb(v, cfg);
-    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
+    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)]; delete cache['pub_' + slugOf(v.codigo) + '_fav'];
     res.json({ ok: true, actualizados: n });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -1810,7 +1822,7 @@ app.delete('/api/admin/vendedoras/:id/precios', requireAdmin, async (req, res) =
     const cfg = await readCfgDb(v, cfg0.partner_id);
     cfg.overrides = {};
     await writeCfgDb(v, cfg);
-    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)];
+    delete cache['cat_' + v.codigo]; delete cache['pub_' + slugOf(v.codigo)]; delete cache['pub_' + slugOf(v.codigo) + '_fav'];
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
