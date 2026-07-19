@@ -128,6 +128,13 @@ cambio grande que se entrega por fases:
   imagen principal), se muestran como miniaturas debajo de la foto grande.
   No se implementó video: no se encontró un campo de video en el Odoo de
   ningún proveedor actual.
+- ✅ **Descargas (ícono en la barra inferior, junto a Información)**: Excel
+  de stock y fotos (ZIP) — ya existían, se movieron acá desde
+  Configuración — más catálogos en **PDF**, uno por familia/subfamilia
+  (mismo agrupamiento que los pills de la vitrina, ver `famSub`), con el
+  logo y nombre de la vendedora y la fecha, solo con productos que tienen
+  stock. Se genera al vuelo con `pdfkit` (`GET /api/catalogo-pdf`), no se
+  guarda en ningún lado.
 
 ### 2. Base de datos (obligatorio)
 
@@ -195,6 +202,8 @@ vercel --prod
 | GET    | /api/productos                | Catálogo combinado de todos los proveedores activos, con precio y sugerido |
 | GET    | /api/imagen/:proveedorId/:id   | Imagen del producto (el id de Odoo no es único entre proveedores) |
 | GET    | /api/imagen-extra/:proveedorId/:imgId | Foto adicional del producto (galería, modelo `product.image` de Odoo) |
+| GET    | /api/fotos                     | ZIP con las fotos del catálogo (o de una familia), para descargar    |
+| GET    | /api/catalogo-pdf               | PDF de una familia/subfamilia (logo y nombre de la vendedora, solo con stock) |
 | POST   | /api/pedido                    | Crea la venta — si el carrito mezcla proveedores, la separa sola en una por cada uno |
 | GET    | /api/pedidos                   | Historial de ventas de la vendedora                  |
 | GET    | /api/config · POST /api/config | Personalización de la vitrina (logo, colores, etc.) — de cada vendedora |

@@ -2,6 +2,7 @@ const express  = require('express');
 const xmlrpc   = require('xmlrpc');
 const cors     = require('cors');
 const archiver = require('archiver');
+const PDFDocument = require('pdfkit');
 const crypto   = require('crypto');
 const { sql, pool } = require('./db');
 // nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
@@ -683,6 +684,14 @@ function famOf(p) {
   if (!parts.length) return 'Otros';
   const esJoya = p && typeof p === 'object' && (p.metal || p.piedra);
   return esJoya ? parts[parts.length - 1] : parts[0];
+}
+// familia + subfamilia — mismo criterio que famOf, espejo del famSub() del
+// frontend (agrupa igual que los pills de la vitrina, para los catálogos PDF).
+function famSub(p) {
+  const parts = (p.categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
+  if (!parts.length) return { fam: 'Otros', sub: '' };
+  if (p.metal || p.piedra) return { fam: parts[parts.length - 1] || 'Otros', sub: parts.slice(0, -1).join(' / ') };
+  return { fam: parts[0] || 'Otros', sub: parts.slice(1).join(' / ') };
 }
 // Carga la info libre de producto (del Excel del admin) como mapa
 // { SKU_MAYUS: { "Título": "valor", ... } }. Cacheado en memoria.
@@ -1371,6 +1380,134 @@ app.get('/api/fotos', async (req, res) => {
   } catch (e) {
     console.error('❌ /api/fotos', e.message);
     if (!res.headersSent) res.status(500).json({ error: 'No se pudo generar el zip de fotos' });
+  }
+});
+
+// ── CATÁLOGO EN PDF (por familia/subfamilia, con logo y nombre de la
+// vendedora) — un PDF en cuadrícula con foto, nombre y precio de venta,
+// solo de lo que tiene stock. Pensado para mandar por WhatsApp.
+async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
+  // Imágenes de a bloques, por proveedor (cada Odoo tiene su propia conexión).
+  const porProveedor = new Map();
+  prods.forEach(p => {
+    if (!porProveedor.has(p.proveedorId)) porProveedor.set(p.proveedorId, []);
+    porProveedor.get(p.proveedorId).push(p);
+  });
+  const imgPorId = {};
+  for (const [proveedorId, items] of porProveedor) {
+    const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+    if (!proveedor || proveedor.tipo !== 'odoo') continue;
+    const conn = connFor(proveedor);
+    const ids = items.map(p => p.id);
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      try {
+        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [chunk, ['id', 'image_256']]);
+        imgs.forEach(r => { if (r.image_256) imgPorId[proveedorId + '::' + r.id] = r.image_256; });
+      } catch (e) { console.warn('⚠ catalogo-pdf imágenes ' + proveedorId + ':', e.message); }
+    }
+  }
+
+  const MM = 2.8346;
+  const PAGE_W = 210 * MM, PAGE_H = 297 * MM, mg = 8 * MM;
+  const COLS = 3, ROWS = 4, PER_PG = COLS * ROWS;
+  const headerH = 22 * MM, footerH = 10 * MM;
+  const cellW = (PAGE_W - mg * 2) / COLS;
+  const cellH = (PAGE_H - mg * 2 - headerH - footerH) / ROWS;
+  const imgAreaH = cellH * 0.62;
+
+  const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: false });
+  const chunks = [];
+  doc.on('data', c => chunks.push(c));
+
+  const fecha = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const titulo = subfamilia ? familia + ' · ' + subfamilia : familia;
+  let logoBuf = null;
+  if (vendedora.logo && vendedora.logo.startsWith('data:')) {
+    try { logoBuf = Buffer.from(vendedora.logo.split(',')[1] || '', 'base64'); } catch (e) {}
+  }
+
+  function drawHeader() {
+    doc.addPage();
+    const top = 5 * MM;
+    if (logoBuf) {
+      try { doc.image(logoBuf, mg, top, { fit: [40 * MM, 14 * MM] }); } catch (e) {}
+    }
+    doc.fontSize(9).fillColor('#555555').font('Helvetica')
+      .text((vendedora.nombre || '').toUpperCase(), mg, top + 15 * MM, { width: 90 * MM, lineBreak: false });
+    doc.fontSize(15).fillColor('#191b1e').font('Helvetica-Bold')
+      .text(titulo, mg, top + 3 * MM, { width: PAGE_W - mg * 2, align: 'right' });
+    doc.moveTo(mg, top + headerH - 3 * MM).lineTo(PAGE_W - mg, top + headerH - 3 * MM)
+      .strokeColor('#dddddd').lineWidth(0.5 * MM).stroke();
+  }
+  function drawFooter() {
+    const fy = PAGE_H - mg - footerH + 3 * MM;
+    doc.moveTo(mg, fy).lineTo(PAGE_W - mg, fy).strokeColor('#dddddd').lineWidth(0.15 * MM).stroke();
+    doc.fontSize(8).fillColor('#888888').font('Helvetica')
+      .text(fecha, mg, fy + 2 * MM, { width: PAGE_W - mg * 2, align: 'center' });
+  }
+
+  const ordenados = [...prods].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'));
+  let idx = 0;
+  for (const p of ordenados) {
+    if (idx === 0 || idx >= PER_PG) { if (idx > 0) drawFooter(); drawHeader(); idx = 0; }
+    const col = idx % COLS, row = Math.floor(idx / COLS);
+    const x = mg + col * cellW, y = 5 * MM + headerH + row * cellH;
+
+    const b64 = imgPorId[p.proveedorId + '::' + p.id];
+    if (b64) {
+      try { doc.image(Buffer.from(b64, 'base64'), x + 2 * MM, y, { fit: [cellW - 4 * MM, imgAreaH], align: 'center', valign: 'center' }); }
+      catch (e) { doc.rect(x, y, cellW, imgAreaH).fill('#f5f5f5'); }
+    } else {
+      doc.rect(x, y, cellW, imgAreaH).fill('#f5f5f5');
+    }
+
+    const infoY = y + imgAreaH + 2 * MM;
+    doc.fontSize(8.5).fillColor('#191b1e').font('Helvetica-Bold')
+      .text(p.nombre || '', x, infoY, { width: cellW, align: 'center', height: 8 * MM, ellipsis: true });
+    doc.fontSize(9).fillColor('#191b1e').font('Helvetica')
+      .text('$' + Math.round(p.precioVenta || 0).toLocaleString('es-CL'), x, infoY + 7 * MM, { width: cellW, align: 'center' });
+
+    idx++;
+  }
+  if (idx > 0) drawFooter();
+  doc.end();
+  return new Promise(resolve => doc.on('end', () => resolve(Buffer.concat(chunks))));
+}
+
+app.get('/api/catalogo-pdf', async (req, res) => {
+  try {
+    const codigo = (req.headers['x-client-code'] || req.query.c || '').toUpperCase();
+    const token  = req.headers['x-client-token'] || req.query.t || '';
+    const v = await getVendedora(codigo);
+    if (!v || !v.activo || !verifyImgToken(v, token)) return res.status(401).json({ error: 'No autorizado' });
+
+    const familia = (req.query.familia || '').trim();
+    const subfamilia = (req.query.subfamilia || '').trim();
+    if (!familia) return res.status(400).json({ error: 'Falta la familia' });
+
+    let prods = await catalogoConPrecioGlobal(true);
+    const categorias = v.categorias || [];
+    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
+    prods = prods.filter(p => {
+      if (p.stock <= 0) return false;
+      const fs = famSub(p);
+      return fs.fam === familia && (!subfamilia || fs.sub === subfamilia);
+    });
+    if (!prods.length) return res.status(404).json({ error: 'No hay productos con stock en esa categoría' });
+
+    const cfg0 = await getConfig();
+    const cfg = await readCfgDb(v, cfg0.partner_id);
+
+    const buffer = await generarCatalogoPDF(prods, { nombre: cfg.nombre || v.nombre, logo: cfg.logo || '' }, familia, subfamilia);
+    const slug = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const nombreArchivo = 'catalogo-' + slug(familia) + (subfamilia ? '-' + slug(subfamilia) : '') + '.pdf';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo}"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error('❌ /api/catalogo-pdf', e.message);
+    res.status(500).json({ error: 'No se pudo generar el PDF' });
   }
 });
 

@@ -731,6 +731,9 @@ body.public .priv{display:none!important;}
       <button class="nav-mini" id="btn-cfg" title="Configuración">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
+      <button class="nav-mini priv" id="btn-download" title="Descargas">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+      </button>
       <button class="nav-mini" id="btn-info-top" title="Información">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/></svg>
       </button>
@@ -944,8 +947,25 @@ body.public .priv{display:none!important;}
       <div id="qr-box"></div>
     </div>
 
+    <div style="margin:0 16px">
+      <button class="cfg-btn danger" id="cfg-reset" style="width:100%;justify-content:center">Restablecer mi vitrina</button>
+    </div>
+  </div>
+  <div class="cfg-savebar">
+    <button class="big-btn dark" id="cfg-save">Guardar cambios ✓</button>
+  </div>
+</div>
+
+<!-- DESCARGAS -->
+<div class="sheet-back" id="descargas-back"></div>
+<div class="sheet" id="descargas-sheet">
+  <div class="sheet-head">
+    <span class="sheet-title">Descargas</span>
+    <button class="sheet-close" id="descargas-close">×</button>
+  </div>
+  <div class="sheet-body" style="padding-bottom:30px">
     <div class="cfg-block">
-      <div class="cfg-h">Descargas</div>
+      <div class="cfg-h">Catálogo completo</div>
       <div class="dl-row">
         <button class="cfg-btn" id="dl-excel">
           <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
@@ -959,12 +979,11 @@ body.public .priv{display:none!important;}
       <p class="cfg-note">El ZIP de fotos respeta la familia seleccionada en la vitrina.</p>
     </div>
 
-    <div style="margin:0 16px">
-      <button class="cfg-btn danger" id="cfg-reset" style="width:100%;justify-content:center">Restablecer mi vitrina</button>
+    <div class="cfg-block">
+      <div class="cfg-h">Catálogos en PDF</div>
+      <p class="cfg-note" style="margin:0 0 10px">Un PDF por categoría, con tu logo y tu nombre — listo para mandar por WhatsApp. Solo incluye lo que tiene stock.</p>
+      <div id="pdf-cat-list"><span class="note">Cargando…</span></div>
     </div>
-  </div>
-  <div class="cfg-savebar">
-    <button class="big-btn dark" id="cfg-save">Guardar cambios ✓</button>
   </div>
 </div>
 
@@ -2146,6 +2165,38 @@ const BG_COLORS  = ['#faf9f6','#ffffff','#f4efe6','#f7f1f3','#eef1f4','#eff3ee']
 function openCfg(){ $('cfg-back').classList.add('open'); $('cfg-sheet').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeCfg(){ $('cfg-back').classList.remove('open'); $('cfg-sheet').classList.remove('open'); document.body.style.overflow=''; }
 $('btn-cfg').onclick = openCfg;
+
+/* ── DESCARGAS (Excel, fotos, catálogos PDF por categoría) ── */
+function openDescargas(){ $('descargas-back').classList.add('open'); $('descargas-sheet').classList.add('open'); document.body.style.overflow='hidden'; renderPdfCatList(); }
+function closeDescargas(){ $('descargas-back').classList.remove('open'); $('descargas-sheet').classList.remove('open'); document.body.style.overflow=''; }
+$('btn-download').onclick = openDescargas;
+$('descargas-close').onclick = closeDescargas;
+$('descargas-back').onclick = closeDescargas;
+// Un PDF por familia+subfamilia (mismo agrupamiento que los pills de la
+// vitrina, ver famSub) — solo lo que tiene stock, como el resto de la app.
+function renderPdfCatList(){
+  const grupos = {};
+  PRODUCTOS.forEach(p=>{
+    const fs = famSub(p);
+    const key = fs.fam + '::' + fs.sub;
+    if(!grupos[key]) grupos[key] = { fam:fs.fam, sub:fs.sub, n:0 };
+    grupos[key].n++;
+  });
+  const filas = Object.values(grupos).sort((a,b)=> a.fam.localeCompare(b.fam,'es') || a.sub.localeCompare(b.sub,'es'));
+  if(!filas.length){ $('pdf-cat-list').innerHTML = '<span class="note">No hay productos con stock todavía.</span>'; return; }
+  $('pdf-cat-list').innerHTML = filas.map(f=>`
+    <div class="cfg-row">
+      <span class="cfg-lbl">${esc(f.fam)}${f.sub?' · '+esc(f.sub):''} <span class="note">(${f.n})</span></span>
+      <button class="cfg-btn" data-pdf-fam="${esc(f.fam)}" data-pdf-sub="${esc(f.sub)}">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+        PDF
+      </button>
+    </div>`).join('');
+  $('pdf-cat-list').querySelectorAll('[data-pdf-fam]').forEach(b=> b.onclick = ()=>{
+    toast('Preparando PDF…');
+    window.location = `${API}/catalogo-pdf?c=${encodeURIComponent(CODE)}&t=${encodeURIComponent(IMG_TOKEN)}&familia=${encodeURIComponent(b.dataset.pdfFam)}&subfamilia=${encodeURIComponent(b.dataset.pdfSub)}`;
+  });
+}
 
 /* ── Bienvenida / onboarding (primera vez que una vendedora entra) ── */
 function openOnboarding(){
