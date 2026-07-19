@@ -189,6 +189,10 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .ficha-price .val{font-family:var(--mono);font-size:17px;}
 .ficha-stockline{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:20px;color:var(--ink-soft);}
 .ficha-stockline .dot{width:9px;height:9px;border-radius:50%;background:var(--green);}
+.ficha-specs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;}
+.ficha-spec{display:flex;flex-direction:column;gap:2px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:64px;}
+.ficha-spec .k{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--steel);}
+.ficha-spec .v{font-size:13.5px;font-weight:500;}
 .ficha-attrs{border-top:1px solid var(--line);margin-bottom:18px;}
 .attr-row{display:flex;justify-content:space-between;gap:16px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:14px;}
 .attr-row .k{color:var(--steel);font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding-top:1px;}
@@ -203,26 +207,23 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .big-btn.line{background:transparent;color:var(--ink);border:1px solid var(--ink);}
 .big-btn:disabled{opacity:.5;}
 
-/* ── VENTA RÁPIDA ── */
+/* ── CARRITO ── */
 .vr-layout{display:flex;flex-direction:column;gap:18px;max-width:1100px;margin:0 auto;padding:18px 14px 40px;}
 @media(min-width:900px){.vr-layout{flex-direction:row;align-items:flex-start;}.vr-grid-col{flex:1.6;}.vr-side{flex:1;position:sticky;top:76px;}}
-.vr-tools{display:flex;gap:8px;margin-bottom:10px;}
-.vr-tbtn{height:38px;padding:0 14px;border:1px solid var(--line);background:var(--white);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-soft);}
-.vr-table{background:var(--white);border:1px solid var(--line);}
-.vr-head{display:grid;grid-template-columns:26px 1.1fr 52px 1.4fr 74px 46px;gap:6px;padding:9px 10px;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);border-bottom:1px solid var(--line);}
-.vr-row{display:grid;grid-template-columns:26px 1.1fr 52px 1.4fr 74px 46px;gap:6px;padding:5px 10px;border-bottom:1px solid var(--line);align-items:center;}
-.vr-row:last-child{border-bottom:none;}
-.vr-n{font-family:var(--mono);font-size:11px;color:var(--steel);}
-.vr-sku{border:none;border-bottom:1px dashed var(--line);background:transparent;font-family:var(--mono);font-size:12px;padding:7px 2px;outline:none;text-transform:uppercase;width:100%;}
-.vr-sku:focus{border-bottom-color:var(--hdr);}
-.vr-qty{border:1px solid var(--line);background:var(--paper);text-align:center;font-family:var(--mono);font-size:13px;padding:6px 2px;outline:none;width:100%;}
-.vr-prod{font-size:11.5px;line-height:1.3;color:var(--ink-soft);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-.vr-prod.bad{color:var(--red);}
-.vr-price{font-family:var(--mono);font-size:11.5px;text-align:right;}
-.vr-stock{font-family:var(--mono);font-size:11px;text-align:center;}
-.vr-stock.no{color:var(--red);}
-.vr-stock.si{color:var(--green);}
-.vr-paste-hint{font-size:11.5px;color:var(--steel);margin-top:8px;line-height:1.6;}
+.cart-list{background:var(--white);border:1px solid var(--line);}
+.cart-item{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--line);}
+.cart-item:last-child{border-bottom:none;}
+.cart-item-img{width:56px;height:56px;object-fit:contain;background:var(--paper);border-radius:6px;flex-shrink:0;}
+.cart-item-info{flex:1;min-width:0;}
+.cart-item-name{font-size:13.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cart-item-sku{font-family:var(--mono);font-size:11px;color:var(--steel);margin-top:2px;}
+.cart-item-price{font-family:var(--mono);font-size:12.5px;margin-top:2px;}
+.cart-item-qty{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.cart-item-qty .qty-btn{width:26px;height:26px;border:1px solid var(--line);background:var(--paper);font-size:14px;}
+.cart-item-qty span{font-family:var(--mono);font-size:13px;min-width:18px;text-align:center;}
+.cart-item-del{flex-shrink:0;width:28px;height:28px;border:none;background:none;color:var(--steel);font-size:15px;cursor:pointer;}
+.cart-item-del:hover{color:var(--red);}
+.cart-empty{padding:40px 20px;text-align:center;color:var(--steel);font-size:13.5px;}
 .side-box{background:var(--white);border:1px solid var(--line);padding:18px 16px;}
 .side-t{font-size:10px;letter-spacing:.25em;text-transform:uppercase;color:var(--steel);margin-bottom:14px;}
 .sum-row{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:4px 0;}
@@ -324,7 +325,7 @@ body.costs #btn-eye svg{stroke-width:2;}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 /* forma de cajas (3 estilos) */
 :root{--r:10px;}
-.card,.home-tile,.step,.stat,.chart-box,.his-item,.modo-card,.side-box,.cfg-block,.vr-table,.info-fin,.font-opt,.modo,.fld-in,.fld-ta,.cfg-input,.cfg-select,.big-btn,.cfg-btn,.vr-tbtn,.qty-btn,.login-btn,.info-path,.logo-preview,.fam-tile,.info-hero{border-radius:var(--r);}
+.card,.home-tile,.step,.stat,.chart-box,.his-item,.modo-card,.side-box,.cfg-block,.info-fin,.font-opt,.modo,.fld-in,.fld-ta,.cfg-input,.cfg-select,.big-btn,.cfg-btn,.qty-btn,.login-btn,.info-path,.logo-preview,.fam-tile,.info-hero{border-radius:var(--r);}
 .chip{border-radius:calc(var(--r) + 8px);}
 
 /* mensaje de bienvenida en vitrina */
@@ -485,28 +486,29 @@ body.public .priv{display:none!important;}
             <p class="fp-t">Precio</p>
             <div class="tag-chips" id="price-chips"></div>
           </div>
+          <div class="fp-group" id="metal-group" style="display:none">
+            <p class="fp-t">Metal</p>
+            <div class="tag-chips" id="metal-chips"></div>
+          </div>
+          <div class="fp-group" id="piedra-group" style="display:none">
+            <p class="fp-t">Piedra</p>
+            <div class="tag-chips" id="piedra-chips"></div>
+          </div>
         </div>
       </div>
       <div id="vit-grid" class="vit-grid" style="padding-top:4px"></div>
       <div id="vit-loading" class="loading">Cargando colección…</div>
     </section>
 
-    <!-- VENTA RÁPIDA -->
+    <!-- CARRITO -->
     <section class="section" id="sec-rapida">
       <div class="vr-layout">
         <div class="vr-grid-col">
-          <h2 class="page-t">Venta Rápida</h2>
-          <p class="page-s">Escribe o pega los códigos (desde Excel también). El resto se completa solo.</p>
-          <div class="vr-tools">
-            <button class="vr-tbtn" id="vr-mas">+ 10 filas</button>
-            <button class="vr-tbtn" id="vr-limpiar">Limpiar</button>
-          </div>
-          <div class="vr-table">
-            <div class="vr-head"><span>#</span><span>Código / barra</span><span>Cant.</span><span>Producto</span><span style="text-align:right">Precio</span><span style="text-align:center">Stock</span></div>
-            <div id="vr-rows"></div>
-          </div>
-          <p class="vr-paste-hint">Tip: copia dos columnas en Excel (código y cantidad) y pégalas en la primera casilla — se llenan todas las filas de una. También puedes escanear o escribir el código de barra.</p>
-          <datalist id="sku-list"></datalist>
+          <h2 class="page-t">Mi Carrito</h2>
+          <p class="page-s">Los productos que agregaste desde la Vitrina. Ajustá la cantidad o sacalos, y completá los datos de la venta acá al lado.
+            <a href="#" id="vr-vaciar" style="display:none;color:var(--red);margin-left:8px">Vaciar carrito</a>
+          </p>
+          <div class="cart-list" id="vr-rows"></div>
         </div>
         <div class="vr-side">
           <div class="side-box">
@@ -606,11 +608,11 @@ body.public .priv{display:none!important;}
         <div class="step">
           <div class="emoji">🛍️</div>
           <div>
-            <div class="st">3 · Arma el pedido como quieras</div>
-            <div class="sd">Dos caminos, un mismo carrito:</div>
+            <div class="st">3 · Arma el pedido</div>
+            <div class="sd">Navegá la Vitrina y agregá al carrito:</div>
             <div class="info-paths">
               <div class="info-path" id="info-go-vitrina"><b>Desde la Vitrina</b>Tocas el producto y "Agregar al carrito". Ideal cara a cara.</div>
-              <div class="info-path" id="info-go-rapida"><b>Venta Rápida</b>Toca el 🛒 carrito arriba y pega los códigos (¡hasta desde Excel!).</div>
+              <div class="info-path" id="info-go-rapida"><b>Mi Carrito</b>Toca el 🛒 carrito arriba para ajustar cantidades y completar los datos de la venta.</div>
             </div>
           </div>
         </div>
@@ -1060,7 +1062,7 @@ async function initPublic(){
     $('vit-loading').style.display='none';
     document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
     $('sec-vitrina').classList.add('active');
-    renderFams(); renderTagFilter(); renderPriceFilter(); renderGrid();
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderGrid();
     setTimeout(()=>{ try{updateFamArrows();}catch(e){} }, 50);
   } catch(e){
     $('vit-loading').innerHTML = 'Esta vitrina no está disponible.<br/>'+esc(e.message);
@@ -1111,24 +1113,20 @@ async function initApp(){
       localStorage.removeItem(localCfgKey(CODE));
     }
   } catch(e){}
-  applyCfg(); initCfgPanel(); ensureRows(12); updateBadges();
+  applyCfg(); initCfgPanel(); updateBadges();
   if(esPrimeraVez && localStorage.getItem('tn_onboard_ok_'+CODE) !== '1') openOnboarding();
   try {
     PRODUCTOS_ALL = await api('/productos');
     PRODUCTOS = PRODUCTOS_ALL.filter(p=>p.stock>0);   // sin stock no se muestra
     $('vit-loading').style.display='none';
-    $('sku-list').innerHTML = PRODUCTOS_ALL.map(p=>
-      `<option value="${esc(p.sku)}">${esc(p.nombre)}</option>` +
-      (p.barcode? `<option value="${esc(p.barcode)}">${esc(p.sku)} · ${esc(p.nombre)}</option>` : '')
-    ).join('');
-    renderFams(); renderTagFilter(); renderPriceFilter(); renderGrid(); renderRows();
+    renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderGrid(); renderRows();
   } catch(e){
     $('vit-loading').innerHTML = 'No se pudo cargar el catálogo.<br/>'+esc(e.message);
   }
 }
 
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '';
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '', FILTRO_METAL = '', FILTRO_PIEDRA = '';
 const PRICE_RANGES = [
   { id:'p1', label:'Hasta $10.000',    min:0,      max:10000 },
   { id:'p2', label:'$10.000–$30.000',  min:10000,  max:30000 },
@@ -1137,7 +1135,27 @@ const PRICE_RANGES = [
 ];
 $('filter-btn').onclick = ()=>{ $('filter-panel').classList.toggle('open'); };
 function updateFilterBtn(){
-  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO));
+  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA));
+}
+// Metal/piedra solo existen para proveedores de joyería (Aviv) — si nadie en
+// el catálogo actual los tiene, ni se muestra el grupo de filtro.
+function renderMetalPiedraFilter(){
+  const metales = [...new Set(visibles().map(p=>p.metal).filter(Boolean))].sort();
+  const piedras = [...new Set(visibles().map(p=>p.piedra).filter(Boolean))].sort();
+  $('metal-group').style.display = metales.length ? '' : 'none';
+  $('piedra-group').style.display = piedras.length ? '' : 'none';
+  if(!metales.length) FILTRO_METAL = '';
+  if(!piedras.length) FILTRO_PIEDRA = '';
+  $('metal-chips').innerHTML = metales.map(m=>`
+    <button class="fchip ${FILTRO_METAL===m?'active':''}" data-m="${esc(m)}">${esc(m)}</button>`).join('');
+  $('metal-chips').querySelectorAll('.fchip').forEach(ch=>{
+    ch.onclick = ()=>{ FILTRO_METAL = (FILTRO_METAL===ch.dataset.m) ? '' : ch.dataset.m; renderMetalPiedraFilter(); updateFilterBtn(); renderGrid(); };
+  });
+  $('piedra-chips').innerHTML = piedras.map(p=>`
+    <button class="fchip ${FILTRO_PIEDRA===p?'active':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+  $('piedra-chips').querySelectorAll('.fchip').forEach(ch=>{
+    ch.onclick = ()=>{ FILTRO_PIEDRA = (FILTRO_PIEDRA===ch.dataset.p) ? '' : ch.dataset.p; renderMetalPiedraFilter(); updateFilterBtn(); renderGrid(); };
+  });
 }
 function renderPriceFilter(){
   $('price-chips').innerHTML = PRICE_RANGES.map(r=>`
@@ -1182,6 +1200,14 @@ function renderTagFilter(){
 }
 function famSub(p){
   const parts = (p.categoria||'').split('/').map(x=>x.trim()).filter(x=>x && x.toLowerCase()!=='all');
+  if(!parts.length) return { fam:'Otros', sub:'' };
+  // Joyas (Aviv): la categoría viene "Metal / Tipo" (ej. "Oro / Anillo") — a
+  // la vendedora le importa el TIPO de pieza como familia, no el metal (eso
+  // se filtra aparte, ver metal/piedra). El resto sigue usando el primer
+  // segmento, como siempre.
+  if(p.metal || p.piedra){
+    return { fam: parts[parts.length-1]||'Otros', sub: parts.slice(0,-1).join(' / ') };
+  }
   return { fam: parts[0]||'Otros', sub: parts.slice(1).join(' / ') };
 }
 const FAM_ICONS = [
@@ -1251,6 +1277,8 @@ function filtrados(){
     if(FILTRO_FAM && fs.fam!==FILTRO_FAM) return false;
     if(FILTRO_SUB && fs.sub!==FILTRO_SUB) return false;
     if(FILTRO_TAG && (CFG.tagMap||{})[p.sku]!==FILTRO_TAG) return false;
+    if(FILTRO_METAL && p.metal!==FILTRO_METAL) return false;
+    if(FILTRO_PIEDRA && p.piedra!==FILTRO_PIEDRA) return false;
     if(FILTRO_PRECIO){
       const r = PRICE_RANGES.find(x=>x.id===FILTRO_PRECIO);
       const v = sugerido(p);
@@ -1293,6 +1321,11 @@ function openFicha(pid){
   FICHA_PROD = p; FICHA_QTY = 1;
   $('ficha-cat').textContent = famSub(p).fam || 'Ficha';
   const attrs = (p.atributos||[]).map(a=>`<div class="attr-row"><span class="k">${esc(a.attr||'Detalle')}</span><span class="v">${esc(a.val)}</span></div>`).join('');
+  const specs = [
+    p.metal  ? { k:'Metal',  v:p.metal }  : null,
+    p.piedra ? { k:'Piedra', v:p.piedra } : null,
+    p.medida ? { k:'Medida', v:p.medida } : null,
+  ].filter(Boolean).map(s=>`<div class="ficha-spec"><span class="k">${esc(s.k)}</span><span class="v">${esc(s.v)}</span></div>`).join('');
   const info = (p.info||[]).map(f=>{
     const largo = String(f.v).length > 40 || String(f.v).includes('\n');
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
@@ -1307,6 +1340,7 @@ function openFicha(pid){
         <div class="ficha-price"><div class="lbl">Precio${PUBLIC?'':' de venta'}</div><div class="val" style="font-weight:500">${fmt(sugerido(p))}</div></div>
       </div>
       <div class="ficha-stockline priv"><span class="dot"></span> Disponible · ${p.stock} un.</div>
+      ${specs?`<div class="ficha-specs">${specs}</div>`:''}
       ${attrs?`<div class="ficha-attrs">${attrs}</div>`:''}
       ${p.descripcion?`<p class="ficha-desc">${esc(p.descripcion)}</p>`:''}
       ${info?`<div class="ficha-info-block"><div class="fib-h">Información del producto</div>${info}</div>`:''}
@@ -1331,10 +1365,7 @@ $('sheet-close').onclick = closeFicha;
 $('sheet-back').onclick = closeFicha;
 </script>
 <script>
-/* ═══════════ VENTA RÁPIDA (grilla) ═══════════ */
-function ensureRows(min){
-  while(ROWS.length < min) ROWS.push({sku:'', qty:1});
-}
+/* ═══════════ CARRITO ═══════════ */
 function saveRows(){ localStorage.setItem('tn_rows', JSON.stringify(ROWS)); updateBadges(); }
 function findProd(sku){
   sku = (sku||'').trim().toUpperCase();
@@ -1344,67 +1375,55 @@ function findProd(sku){
 function addRow(sku, qty){
   const i = ROWS.findIndex(r=> (r.sku||'').toUpperCase() === sku.toUpperCase());
   if(i>=0) ROWS[i].qty += qty;
-  else {
-    const empty = ROWS.findIndex(r=>!r.sku.trim());
-    if(empty>=0) ROWS[empty] = {sku, qty};
-    else ROWS.push({sku, qty});
-  }
+  else ROWS.push({sku, qty});
+  saveRows(); renderRows();
+}
+function quitarRow(sku){
+  ROWS = ROWS.filter(r=> (r.sku||'').toUpperCase() !== sku.toUpperCase());
   saveRows(); renderRows();
 }
 function updateBadges(){
   const n = ROWS.filter(r=>r.sku.trim() && findProd(r.sku)).reduce((s,r)=>s+(parseInt(r.qty)||0),0);
   [$('badge-top'),$('badge-nav')].forEach(b=>{ if(!b) return; b.textContent=n; b.classList.toggle('show',n>0); });
 }
+// El carrito solo muestra líneas con producto válido — ya no se puede
+// escribir un SKU a mano, todo entra desde "Agregar al carrito" en la ficha.
 function renderRows(){
-  ensureRows(12);
-  $('vr-rows').innerHTML = ROWS.map((r,i)=>{
+  const validas = ROWS.filter(r=>r.sku.trim() && findProd(r.sku));
+  $('vr-vaciar').style.display = validas.length ? '' : 'none';
+  if(!validas.length){
+    $('vr-rows').innerHTML = `<div class="cart-empty">Tu carrito está vacío.<br/>Agregá productos desde la Vitrina.</div>`;
+    renderResumen();
+    return;
+  }
+  $('vr-rows').innerHTML = validas.map(r=>{
     const p = findProd(r.sku);
-    const filled = r.sku.trim().length>0;
     return `
-    <div class="vr-row">
-      <span class="vr-n">${i+1}</span>
-      <input class="vr-sku" data-i="${i}" value="${esc(r.sku)}" placeholder="SKU o código barra" list="sku-list" autocomplete="off"/>
-      <input class="vr-qty" data-i="${i}" type="number" min="1" value="${r.qty||1}"/>
-      <span class="vr-prod ${filled&&!p?'bad':''}">${filled ? (p? esc(p.nombre) : 'No encontrado') : ''}</span>
-      <span class="vr-price">${p? fmt(p.precio) : ''}</span>
-      <span class="vr-stock ${p? (p.stock>0?'si':'no') : ''}">${p? (p.stock>0? p.stock : 'sin') : '—'}</span>
+    <div class="cart-item">
+      <img class="cart-item-img" loading="lazy" src="${imgUrl(p.id,false,p.proveedorId)}" alt=""/>
+      <div class="cart-item-info">
+        <div class="cart-item-name">${esc(p.nombre)}</div>
+        <div class="cart-item-sku">${esc(p.sku)}</div>
+        <div class="cart-item-price">${fmt(p.precio)}</div>
+      </div>
+      <div class="cart-item-qty">
+        <button class="qty-btn" data-menos="${esc(r.sku)}">−</button>
+        <span>${r.qty}</span>
+        <button class="qty-btn" data-mas="${esc(r.sku)}">+</button>
+      </div>
+      <button class="cart-item-del" data-del="${esc(r.sku)}" title="Quitar">✕</button>
     </div>`;
   }).join('');
-
-  $('vr-rows').querySelectorAll('.vr-sku').forEach(inp=>{
-    inp.addEventListener('paste', e=>{
-      const text = (e.clipboardData||window.clipboardData).getData('text');
-      if(!text || !/[\n\r\t;]/.test(text)) return;   // pegado simple → normal
-      e.preventDefault();
-      const start = parseInt(inp.dataset.i);
-      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-      let idx = start, added = 0;
-      lines.forEach(line=>{
-        const parts = line.split(/[\t;]+/).map(x=>x.trim()).filter(Boolean);
-        const sku = (parts[0]||'').toUpperCase();
-        const qty = Math.max(1, parseInt(parts[1])||1);
-        if(!sku) return;
-        while(idx >= ROWS.length) ROWS.push({sku:'',qty:1});
-        ROWS[idx] = {sku, qty}; idx++; added++;
-      });
-      saveRows(); renderRows();
-      toast(added + ' filas pegadas');
-    });
-    inp.addEventListener('change', ()=>{
-      let v = inp.value.trim().toUpperCase();
-      const p = findProd(v);
-      if(p && p.sku) v = p.sku;      // si escribió el código de barra, guardar el SKU
-      ROWS[parseInt(inp.dataset.i)].sku = v;
-      saveRows(); renderRows();
-    });
-    inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
+  $('vr-rows').querySelectorAll('[data-menos]').forEach(b=> b.onclick = ()=>{
+    const r = ROWS.find(x=>(x.sku||'').toUpperCase()===b.dataset.menos.toUpperCase());
+    if(!r) return;
+    if(r.qty<=1) quitarRow(r.sku); else { r.qty--; saveRows(); renderRows(); }
   });
-  $('vr-rows').querySelectorAll('.vr-qty').forEach(inp=>{
-    inp.addEventListener('change', ()=>{
-      ROWS[parseInt(inp.dataset.i)].qty = Math.max(1, parseInt(inp.value)||1);
-      saveRows(); renderResumen();
-    });
+  $('vr-rows').querySelectorAll('[data-mas]').forEach(b=> b.onclick = ()=>{
+    const r = ROWS.find(x=>(x.sku||'').toUpperCase()===b.dataset.mas.toUpperCase());
+    if(r){ r.qty++; saveRows(); renderRows(); }
   });
+  $('vr-rows').querySelectorAll('[data-del]').forEach(b=> b.onclick = ()=> quitarRow(b.dataset.del));
   renderResumen();
 }
 function lineasValidas(){
@@ -1425,8 +1444,7 @@ function renderResumen(){
   $('sum-total').textContent = fmt(ls.reduce((s,l)=>s+l.precio*l.quantity,0));
   updateBadges();
 }
-$('vr-mas').onclick = ()=>{ ensureRows(ROWS.length+10); saveRows(); renderRows(); };
-$('vr-limpiar').onclick = ()=>{ ROWS = []; ensureRows(12); saveRows(); renderRows(); };
+$('vr-vaciar').onclick = (e)=>{ e.preventDefault(); if(!confirm('¿Vaciar el carrito?')) return; ROWS = []; saveRows(); renderRows(); };
 
 let METODO_PAGO = 'Transferencia';
 document.querySelectorAll('.chip').forEach(c=>{
@@ -1501,7 +1519,7 @@ $('vr-enviar').onclick = async ()=>{
       nota: $('vr-nota').value.trim(),
       metodoPago: METODO_PAGO + ' (por confirmar)'
     }})});
-    ROWS = []; ensureRows(12); saveRows(); renderRows();
+    ROWS = []; saveRows(); renderRows();
     $('vr-nombre').value=''; $('vr-direccion').value=''; $('vr-depto').value=''; $('vr-nota').value='';
     $('vr-fono').value=''; $('vr-email').value=''; DIR_OK=false; $('dir-ok').style.display='none';
     const avisoSplit = (r.message||'').includes('se separó') ? ' Se separó en envíos por proveedor — los vas a ver por separado en Mis Ventas.' : '';

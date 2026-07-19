@@ -627,9 +627,18 @@ async function writeCfgDb(vendedora, cfg) {
     ON CONFLICT (vendedora_id) DO UPDATE SET cfg = ${JSON.stringify(cfg)}, updated_at = now()`;
   cacheSet('cfg_' + vendedora.codigo, cfg, 5 * 60 * 1000);
 }
-function famOf(categoria) {
-  const parts = (categoria || '').split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
-  return parts[0] || 'Otros';
+// Recibe el PRODUCTO (no solo la categoría en texto): en proveedores de
+// joyería como Aviv, la categoría de Odoo viene "Metal / Tipo" (ej.
+// "Oro / Anillo") — ahí la familia que importa es el tipo de pieza (último
+// segmento), no el metal (metal/piedra ya se filtran aparte, ver
+// fetchProductosProveedor). Para todo lo demás se sigue usando el primer
+// segmento, como siempre.
+function famOf(p) {
+  const categoria = (p && typeof p === 'object') ? (p.categoria || '') : (p || '');
+  const parts = categoria.split('/').map(x => x.trim()).filter(x => x && x.toLowerCase() !== 'all');
+  if (!parts.length) return 'Otros';
+  const esJoya = p && typeof p === 'object' && (p.metal || p.piedra);
+  return esJoya ? parts[parts.length - 1] : parts[0];
 }
 // Carga la info libre de producto (del Excel del admin) como mapa
 // { SKU_MAYUS: { "Título": "valor", ... } }. Cacheado en memoria.
@@ -702,6 +711,17 @@ async function fetchProductosProveedor(proveedor) {
       const tmpls = await xmlrpcCallFor(conn, key, 'product.template', 'read', [tmplIds, ['id', 'description_sale']]);
       tmpls.forEach(t => { tmplMap[t.id] = t; });
     }
+    // Campos "de joyería" (metal_type/rock_type) — solo existen en el Odoo de
+    // proveedores como Aviv, no en el de Temponovo. Se piden aparte y con su
+    // propio try/catch: si el campo no existe en ese Odoo, Odoo tira un
+    // Fault y no queremos que eso tumbe el catálogo entero de ese proveedor.
+    let joyeriaMap = {};
+    if (tmplIds.length) {
+      try {
+        const extra = await xmlrpcCallFor(conn, key, 'product.template', 'read', [tmplIds, ['id', 'metal_type', 'rock_type']]);
+        extra.forEach(t => { joyeriaMap[t.id] = t; });
+      } catch (e) { /* este proveedor no tiene esos campos — normal, se ignora */ }
+    }
 
     const attrValIds = [...new Set(prods.flatMap(p => p.product_template_attribute_value_ids || []))];
     let attrMap = {};
@@ -713,12 +733,18 @@ async function fetchProductosProveedor(proveedor) {
         attrMap[v.id] = { attr: attrName, val: v.name || '' };
       });
     }
+    // "Medida" (talla/tamaño) se identifica dentro de los atributos genéricos
+    // por el nombre del atributo — no hace falta un campo aparte en Odoo.
+    const MEDIDA_RE = /medid|talla|tama[ñn]o|size/i;
 
     prods.forEach(p => {
       const tmplId = Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id;
       const tmpl = tmplMap[tmplId] || {};
-      const atributos = (p.product_template_attribute_value_ids || [])
+      const joy = joyeriaMap[tmplId] || {};
+      const todosAtributos = (p.product_template_attribute_value_ids || [])
         .map(id => attrMap[id]).filter(Boolean);
+      const medidas = todosAtributos.filter(a => MEDIDA_RE.test(a.attr));
+      const atributos = todosAtributos.filter(a => !MEDIDA_RE.test(a.attr));
       result.push({
         id: p.id,
         proveedorId: proveedor.id,
@@ -729,6 +755,9 @@ async function fetchProductosProveedor(proveedor) {
         precio: parseFloat(p.list_price || 0),
         categoria: Array.isArray(p.categ_id) ? p.categ_id[1] : '',
         atributos,
+        metal: joy.metal_type || '',
+        piedra: joy.rock_type || '',
+        medida: medidas.map(m => m.val).filter(Boolean).join(', '),
         barcode: p.barcode || '',
         stock: parseFloat(p.qty_available || 0)
       });
@@ -793,7 +822,7 @@ app.get('/api/productos', async (req, res) => {
 
     let prods = await productosClienteMulti();
     const categorias = v.categorias || [];
-    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
+    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
 
     const mult = parseFloat(v.multiplicador) || 2;
     const result = prods.map(p => ({ ...p, precioSugerido: Math.round(p.precio * mult) }));
@@ -1115,7 +1144,7 @@ app.get('/api/fotos', async (req, res) => {
 
     const familia = (req.query.familia || '').trim().toLowerCase();
     let prods = await productosClienteMulti();
-    if (familia) prods = prods.filter(p => famOf(p.categoria).toLowerCase() === familia);
+    if (familia) prods = prods.filter(p => famOf(p).toLowerCase() === familia);
     if (!prods.length) return res.status(404).json({ error: 'Sin productos para esa familia' });
 
     res.setHeader('Content-Type', 'application/zip');
@@ -1206,7 +1235,7 @@ app.post('/api/pedido', requireClient, async (req, res) => {
         const qty = parseFloat(l.quantity) || 1;
         const lineaTotal = Math.round((info ? info.precio : 0) * mult * qty);
         total += lineaTotal;
-        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info.categoria) : '', total: lineaTotal };
+        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info) : '', total: lineaTotal };
       });
 
       let idVenta = null, nombreOdoo = null, errorMsg = null;
@@ -1376,14 +1405,14 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     const hFams = new Set(cfg.hiddenFams || []);
     const hSkus = new Set((cfg.hiddenSkus || []).map(x => x.toUpperCase()));
     let prods = await productosClienteMulti();
-    if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p.categoria)));
+    if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p)));
     const result = prods
       .filter(p => p.stock > 0)
-      .filter(p => !hFams.has(famOf(p.categoria)))
+      .filter(p => !hFams.has(famOf(p)))
       .filter(p => !hSkus.has((p.sku || '').toUpperCase()))
       .map(p => ({
         id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
-        categoria: p.categoria, atributos: p.atributos, info: p.info || [],
+        categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
     cacheSet('pub_' + req.params.slug, result, 10 * 60 * 1000);
@@ -1520,7 +1549,7 @@ app.post('/api/admin/login', (req, res) => {
 app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
   try {
     const prods = await productosClienteMulti();
-    res.json([...new Set(prods.map(p => famOf(p.categoria)))].sort());
+    res.json([...new Set(prods.map(p => famOf(p)))].sort());
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -1738,7 +1767,7 @@ app.get('/api/admin/vendedoras/:id/precios/base', requireAdmin, async (req, res)
     const cfg0 = await getConfig();
     let prods = await productosClienteMulti();
     const categorias = v.categorias || [];
-    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p.categoria)));
+    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
     const cfg = await readCfgDb(v, cfg0.partner_id);
     const ov = cfg.overrides || {};
     const mult = parseFloat(v.multiplicador) || 2;
