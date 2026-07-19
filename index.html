@@ -383,6 +383,8 @@ body.costs #btn-eye svg{stroke-width:2;}
 .heart-btn.on svg{fill:var(--red,#b3423a);stroke:var(--red,#b3423a);}
 .ficha-heart{top:14px;right:14px;width:36px;height:36px;}
 .ficha-heart svg{width:19px;height:19px;}
+.share-btn{position:absolute;top:58px;right:14px;z-index:2;width:36px;height:36px;border:none;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.15);}
+.share-btn svg{width:17px;height:17px;fill:none;stroke:var(--steel,#9a9a94);stroke-width:2;}
 
 /* config: listas de catálogo y etiquetas */
 .chk-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;width:100%;}
@@ -853,6 +855,9 @@ const SLUG = PUBLIC ? location.pathname.split('/')[2] : '';
 // Link "compartir favoritos": misma vitrina pública + ?favoritos=1 — el
 // backend filtra a solo los productos que la vendedora marcó con corazón.
 const SOLO_FAVORITOS_PUB = PUBLIC && new URLSearchParams(location.search).get('favoritos') === '1';
+// Link "compartir este producto": misma vitrina pública + ?p=proveedorId::id
+// — al cargar, se abre directo la ficha de ese producto (ver initPublic).
+const PRODUCTO_COMPARTIDO_PID = PUBLIC ? new URLSearchParams(location.search).get('p') : null;
 let CODE = localStorage.getItem('tn_code') || '';
 let PASS = localStorage.getItem('tn_pass') || '';
 let ME = null;
@@ -1083,6 +1088,10 @@ async function initPublic(){
     $('sec-vitrina').classList.add('active');
     renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderGrid();
     setTimeout(()=>{ try{updateFamArrows();}catch(e){} }, 50);
+    if(PRODUCTO_COMPARTIDO_PID){
+      if(PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===PRODUCTO_COMPARTIDO_PID)) openFicha(PRODUCTO_COMPARTIDO_PID);
+      else toast('Ese producto ya no está disponible');
+    }
   } catch(e){
     $('vit-loading').innerHTML = 'Esta vitrina no está disponible.<br/>'+esc(e.message);
     document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
@@ -1170,6 +1179,19 @@ function heartBtn(p, extraClass){
   return `<button class="heart-btn ${extraClass||''} ${esFavorito(p)?'on':''}" data-fav-pid="${p.proveedorId}::${p.id}" title="${esFavorito(p)?'Quitar de favoritos':'Agregar a favoritos'}">
     <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 7.8 2.3 4 6 4c2 0 3.6 1.1 4.5 2.7C11.4 5.1 13 4 15 4c3.7 0 5.5 3.8 4 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
   </button>`;
+}
+// Link a este producto puntual en la vitrina pública — al abrirlo, la
+// vitrina abre directo la ficha de este producto (ver ?p= en initPublic).
+function productoUrl(p){ return `${location.origin}/v/${ME?.publicSlug||''}?p=${p.proveedorId}::${p.id}`; }
+function shareBtn(p, extraClass){
+  return `<button class="share-btn ${extraClass||''}" data-share-pid="${p.proveedorId}::${p.id}" title="Compartir este producto">
+    <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.8 15.8 7.1M8.2 13.2l7.6 3.7"/></svg>
+  </button>`;
+}
+function compartirProducto(p){
+  const url = productoUrl(p);
+  if(navigator.share) navigator.share({ title: p.nombre, url }).catch(()=>{});
+  else { navigator.clipboard?.writeText(url); toast('Link copiado'); }
 }
 function renderFavFilter(){
   const n = (CFG.favoritos||[]).length;
@@ -1398,7 +1420,7 @@ function openFicha(pid){
     return `<div class="info-row ${largo?'long':''}"><span class="ik">${esc(f.k)}</span><span class="iv">${esc(f.v)}</span></div>`;
   }).join('');
   $('sheet-body').innerHTML = `
-    <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}<img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
+    <div class="ficha-img">${heartBtn(p,'priv ficha-heart')}${shareBtn(p,'priv')}<img src="${imgUrl(p.id,true,p.proveedorId)}" alt="${esc(p.nombre)}"/></div>
     <div class="ficha-info">
       <h3 class="ficha-name">${esc(p.nombre)}</h3>
       <div class="ficha-sku">${esc(p.sku)}${p.barcode?' · '+esc(p.barcode):''}</div>
@@ -1426,6 +1448,8 @@ function openFicha(pid){
   $('f-add').onclick = ()=>{ addRow(p.sku, FICHA_QTY); closeFicha(); toast('Agregado al carrito'); };
   const fichaHeart = document.querySelector('#sheet-body [data-fav-pid]');
   if(fichaHeart) fichaHeart.onclick = ()=> toggleFavorito(p);
+  const fichaShare = document.querySelector('#sheet-body [data-share-pid]');
+  if(fichaShare) fichaShare.onclick = ()=> compartirProducto(p);
   $('sheet-back').classList.add('open'); $('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }
