@@ -1089,8 +1089,18 @@ async function initPublic(){
     renderFams(); renderTagFilter(); renderPriceFilter(); renderMetalPiedraFilter(); renderGrid();
     setTimeout(()=>{ try{updateFamArrows();}catch(e){} }, 50);
     if(PRODUCTO_COMPARTIDO_PID){
-      if(PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===PRODUCTO_COMPARTIDO_PID)) openFicha(PRODUCTO_COMPARTIDO_PID);
-      else toast('Ese producto ya no está disponible');
+      // No se busca dentro de PRODUCTOS (esa lista ya viene filtrada por
+      // stock/ocultos/categorías) — se pide el producto puntual aparte, que
+      // siempre responde si la vendedora decidió compartir justo ese.
+      const [pidProveedor, pidId] = PRODUCTO_COMPARTIDO_PID.split('::');
+      fetch(`${API}/public/${SLUG}/producto/${pidProveedor}/${pidId}`).then(async r=>{
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error||'Error');
+        if(!PRODUCTOS.find(x=>(x.proveedorId+'::'+x.id)===PRODUCTO_COMPARTIDO_PID)){
+          PRODUCTOS = [...PRODUCTOS, d]; PRODUCTOS_ALL = [...PRODUCTOS_ALL, d];
+        }
+        openFicha(PRODUCTO_COMPARTIDO_PID);
+      }).catch(()=> toast('Ese producto ya no está disponible'));
     }
   } catch(e){
     $('vit-loading').innerHTML = 'Esta vitrina no está disponible.<br/>'+esc(e.message);

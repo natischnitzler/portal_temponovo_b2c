@@ -137,6 +137,15 @@ function shortErr(e) {
 const cache = {};
 function cacheGet(k) { const e = cache[k]; if (!e) return null; if (Date.now() - e.ts > e.ttl) { delete cache[k]; return null; } return e.data; }
 function cacheSet(k, d, ttl) { cache[k] = { data: d, ts: Date.now(), ttl }; }
+// Cuánto tiempo se cachea el catálogo (y su stock) en memoria antes de
+// volver a leerlo de Odoo. CATALOGO_TTL_MS es la capa de abajo (catálogo
+// crudo de cada proveedor); VENDEDORA_TTL_MS es la capa de arriba (ya con
+// precio/multiplicador calculado, por vendedora o vitrina pública) — el
+// peor caso de desactualización es la suma de las dos. Admin → Proveedores
+// tiene un botón "Actualizar catálogo ahora" para forzarlo antes de que
+// venza el caché (DELETE /api/productos/cache).
+const CATALOGO_TTL_MS = 10 * 60 * 1000;
+const VENDEDORA_TTL_MS = 5 * 60 * 1000;
 
 // ── SEGUIMIENTO LOGÍSTICO DE VENTAS ──────────────────────────────
 // Único estado por el que pasa cada venta, en orden. Lo cambia solo el
@@ -682,7 +691,7 @@ async function getPricelistIdProveedor(proveedor) {
 async function fetchProductosProveedor(proveedor) {
   const cacheKey = 'productos_' + proveedor.id;
   const cached = cacheGet(cacheKey); if (cached) return cached;
-  if (proveedor.tipo !== 'odoo') { cacheSet(cacheKey, [], 30 * 60 * 1000); return []; } // 'manual': fase 5, catálogo propio pendiente
+  if (proveedor.tipo !== 'odoo') { cacheSet(cacheKey, [], CATALOGO_TTL_MS); return []; } // 'manual': fase 5, catálogo propio pendiente
   const conn = connFor(proveedor);
   const key = 'prov_' + proveedor.id;
 
@@ -694,7 +703,7 @@ async function fetchProductosProveedor(proveedor) {
   }
 
   const prodIds = await xmlrpcCallFor(conn, key, 'product.product', 'search', [domain]);
-  if (!prodIds.length) { cacheSet(cacheKey, [], 30 * 60 * 1000); return []; }
+  if (!prodIds.length) { cacheSet(cacheKey, [], CATALOGO_TTL_MS); return []; }
 
   const result = [];
   for (let i = 0; i < prodIds.length; i += 200) {
@@ -769,7 +778,7 @@ async function fetchProductosProveedor(proveedor) {
       });
     });
   }
-  cacheSet(cacheKey, result, 30 * 60 * 1000);
+  cacheSet(cacheKey, result, CATALOGO_TTL_MS);
   return result;
 }
 
@@ -833,13 +842,17 @@ app.get('/api/productos', async (req, res) => {
     const mult = parseFloat(v.multiplicador) || 2;
     const result = prods.map(p => ({ ...p, precioSugerido: Math.round(p.precio * mult) }));
 
-    cacheSet('cat_' + v.codigo, result, 15 * 60 * 1000);
+    cacheSet('cat_' + v.codigo, result, VENDEDORA_TTL_MS);
     res.json(result);
   } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
+// "Actualizar catálogo ahora" en Admin → Proveedores — limpia las 3 capas
+// de caché (crudo por proveedor, por vendedora, vitrinas públicas) para que
+// el próximo pedido traiga todo fresco de Odoo, sin esperar a que venzan
+// los TTL normales.
 app.delete('/api/productos/cache', requireAdmin, (_req, res) => {
-  Object.keys(cache).filter(k => k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('img_'))
+  Object.keys(cache).filter(k => k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('img_') || k.startsWith('pub_'))
     .forEach(k => delete cache[k]);
   res.json({ ok: true });
 });
@@ -1433,9 +1446,36 @@ app.get('/api/public/:slug/productos', async (req, res) => {
         precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
       }));
     if (soloFavoritos) result = result.filter(p => favoritos.has(p.proveedorId + '::' + p.sku));
-    cacheSet(cacheKey, result, 10 * 60 * 1000);
+    cacheSet(cacheKey, result, VENDEDORA_TTL_MS);
     res.json(result);
   } catch (e) { console.error('❌ /api/public/productos', e.message); res.status(500).json({ error: 'No se pudo cargar el catálogo' }); }
+});
+
+// Un producto puntual, para el link "compartir este producto" (botón en la
+// ficha). A propósito NO aplica los mismos filtros que el catálogo general
+// (stock>0, ocultos, categorías de la vendedora) — si la vendedora decidió
+// compartir ESTE producto, tiene que abrir sí o sí, así se haya quedado sin
+// stock justo en ese momento o esté oculto del catálogo general.
+app.get('/api/public/:slug/producto/:proveedorId/:id', async (req, res) => {
+  try {
+    const c = await publicClienteBySlug(req.params.slug);
+    if (!c) return res.status(404).json({ error: 'Vitrina no encontrada' });
+    const proveedorId = parseInt(req.params.proveedorId);
+    const id = parseInt(req.params.id);
+    if (!proveedorId || !id) return res.status(400).json({ error: 'Producto inválido' });
+    const cfg = await readCfgDb({ id: c.id, codigo: c.code }, c.partnerId);
+    const mult = parseFloat(cfg.mult) || c.multiplicador || 2;
+    const ov = cfg.overrides || {};
+    const prods = await productosClienteMulti();
+    const p = prods.find(x => x.proveedorId === proveedorId && x.id === id);
+    if (!p) return res.status(404).json({ error: 'Este producto ya no está disponible' });
+    res.json({
+      id: p.id, proveedorId: p.proveedorId, sku: p.sku, nombre: p.nombre, descripcion: p.descripcion,
+      categoria: p.categoria, atributos: p.atributos, metal: p.metal || '', piedra: p.piedra || '', medida: p.medida || '', info: p.info || [],
+      stock: p.stock,
+      precioVenta: ov[p.sku] > 0 ? Math.round(ov[p.sku]) : Math.round(p.precio * mult)
+    });
+  } catch (e) { console.error('❌ /api/public/producto', e.message); res.status(500).json({ error: 'No se pudo cargar el producto' }); }
 });
 
 app.get('/api/public/:slug/imagen/:proveedorId/:id', async (req, res) => {
