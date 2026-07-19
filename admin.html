@@ -449,10 +449,12 @@ $('cfg-guardar').onclick = async () => {
 
 /* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
 async function loadCategorias() {
+  $('v-categorias').innerHTML = '<span class="note">Cargando…</span>';
   try {
     CATEGORIAS = await api('/categorias');
     $('v-categorias').innerHTML = CATEGORIAS.map(c => `
-      <label class="chk" data-cat="${esc(c)}"><input type="checkbox"/> ${esc(c)}</label>`).join('') || '<span class="note">No se pudo leer el catálogo de Odoo.</span>';
+      <label class="chk" data-cat="${esc(c)}"><input type="checkbox"/> ${esc(c)}</label>`).join('')
+      || '<span class="note">Ningún proveedor devolvió categorías — revisá Proveedores → Probar conexión, o que tengan productos con "Se puede vender" activado. <button class="btn btn-sm" id="cat-reintentar" style="margin-left:6px">Reintentar</button></span>';
     $('v-categorias').querySelectorAll('.chk').forEach(chk => {
       chk.onclick = e => {
         e.preventDefault();
@@ -462,7 +464,12 @@ async function loadCategorias() {
         chk.querySelector('input').checked = CATEGORIAS_SEL.has(cat);
       };
     });
-  } catch (e) { $('v-categorias').innerHTML = '<span class="note">' + esc(e.message) + '</span>'; }
+    const retryBtn = $('cat-reintentar');
+    if (retryBtn) retryBtn.onclick = loadCategorias;
+  } catch (e) {
+    $('v-categorias').innerHTML = '<span class="note">Error: ' + esc(e.message) + ' <button class="btn btn-sm" id="cat-reintentar">Reintentar</button></span>';
+    $('cat-reintentar').onclick = loadCategorias;
+  }
 }
 
 /* ── VENDEDORAS ── */

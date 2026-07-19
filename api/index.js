@@ -736,6 +736,12 @@ async function fetchProductosProveedor(proveedor) {
     // "Medida" (talla/tamaño) se identifica dentro de los atributos genéricos
     // por el nombre del atributo — no hace falta un campo aparte en Odoo.
     const MEDIDA_RE = /medid|talla|tama[ñn]o|size/i;
+    // metal_type/rock_type pueden ser un campo de texto simple O una relación
+    // many2one (Odoo los devuelve como [id, "Nombre"] en ese caso) — sin
+    // esto, un many2one queda como "1,Plata Rodinada" (el array coaccionado
+    // a texto) y encima nunca deduplica en el filtro (cada producto trae un
+    // array distinto, aunque el texto sea igual).
+    const nombreDe = v => Array.isArray(v) ? (v[1] || '') : (v || '');
 
     prods.forEach(p => {
       const tmplId = Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id;
@@ -755,8 +761,8 @@ async function fetchProductosProveedor(proveedor) {
         precio: parseFloat(p.list_price || 0),
         categoria: Array.isArray(p.categ_id) ? p.categ_id[1] : '',
         atributos,
-        metal: joy.metal_type || '',
-        piedra: joy.rock_type || '',
+        metal: nombreDe(joy.metal_type),
+        piedra: nombreDe(joy.rock_type),
         medida: medidas.map(m => m.val).filter(Boolean).join(', '),
         barcode: p.barcode || '',
         stock: parseFloat(p.qty_available || 0)
