@@ -230,6 +230,10 @@ tr:last-child td{border-bottom:none;}
           <div class="row" style="margin-bottom:10px">
             <input class="fld-in" id="cat-buscar" placeholder="Buscar por nombre, código o proveedor…" style="max-width:360px"/>
           </div>
+          <div style="margin-bottom:6px"><span class="fld-l">Proveedor</span></div>
+          <div class="chip-list" id="cat-filtro-prov" style="margin-bottom:12px"></div>
+          <div style="margin-bottom:6px"><span class="fld-l">Categoría</span></div>
+          <div class="chip-list" id="cat-filtro-categoria" style="margin-bottom:14px"></div>
           <div id="cat-list"><div class="empty">Cargando…</div></div>
         </div>
       </section>
@@ -647,16 +651,34 @@ async function loadCategoriasMult() {
     });
   } catch (e) { $('catmult-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
+let CAT_FILTRO_PROV = '', CAT_FILTRO_CATEGORIA = '';
 async function loadCatalogo() {
   try {
     CATALOGO = await api('/catalogo');
+    renderFiltrosCatalogo();
     renderCatalogo();
   } catch (e) { $('cat-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
+function chipsFiltro(elId, valores, current, onPick) {
+  const el = $(elId);
+  el.innerHTML = ['', ...valores].map(v =>
+    `<button type="button" class="chk ${current === v ? 'on' : ''}" data-v="${esc(v)}">${v ? esc(v) : 'Todos'}</button>`).join('');
+  el.querySelectorAll('[data-v]').forEach(b => b.onclick = () => onPick(b.dataset.v));
+}
+function renderFiltrosCatalogo() {
+  const proveedores = [...new Set(CATALOGO.map(p => p.proveedor))].filter(Boolean).sort();
+  const categorias = [...new Set(CATALOGO.map(p => p.categoria))].filter(Boolean).sort();
+  chipsFiltro('cat-filtro-prov', proveedores, CAT_FILTRO_PROV, v => { CAT_FILTRO_PROV = v; renderFiltrosCatalogo(); renderCatalogo(); });
+  chipsFiltro('cat-filtro-categoria', categorias, CAT_FILTRO_CATEGORIA, v => { CAT_FILTRO_CATEGORIA = v; renderFiltrosCatalogo(); renderCatalogo(); });
+}
 function renderCatalogo() {
   const q = ($('cat-buscar').value || '').trim().toLowerCase();
-  const rows = !q ? CATALOGO : CATALOGO.filter(p =>
-    (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.proveedor || '').toLowerCase().includes(q));
+  const rows = CATALOGO.filter(p => {
+    if (CAT_FILTRO_PROV && p.proveedor !== CAT_FILTRO_PROV) return false;
+    if (CAT_FILTRO_CATEGORIA && p.categoria !== CAT_FILTRO_CATEGORIA) return false;
+    if (q && !((p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.proveedor || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
   if (!rows.length) { $('cat-list').innerHTML = '<div class="empty">Sin productos.</div>'; return; }
   $('cat-list').innerHTML = `<table><thead><tr><th>Proveedor</th><th>Producto</th><th>Variantes</th><th>Stock</th><th>Disponible</th><th>Precio fijo</th><th>Precio de venta</th><th></th></tr></thead><tbody>
     ${rows.map(p => `<tr data-row="${esc(p.sku)}">
