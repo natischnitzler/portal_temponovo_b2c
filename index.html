@@ -55,7 +55,7 @@ h1,h2,h3,.t{font-family:var(--f1);}
 #app.open{display:flex;}
 .header{background:var(--hdr);color:var(--hdr-tx);height:58px;display:flex;align-items:center;padding:0 14px;position:sticky;top:0;z-index:100;gap:10px;}
 #brand{display:flex;align-items:center;gap:9px;min-width:0;flex:1;}
-#brand img{height:34px;max-width:140px;object-fit:contain;display:block;}
+#brand img{height:34px;width:34px;object-fit:contain;display:block;flex-shrink:0;border-radius:50%;background:#fff;padding:3px;box-shadow:0 0 0 1px rgba(255,255,255,.35);}
 #brand .bname{font-family:var(--f1);font-size:16px;letter-spacing:.1em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #brand .bslogan{font-size:10px;opacity:.65;letter-spacing:.12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
 .hbtn{background:none;border:none;padding:8px;color:var(--hdr-tx);display:flex;align-items:center;position:relative;opacity:.9;}
@@ -329,7 +329,7 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .swatch.active{border-color:var(--ink);}
 .swatch.custom{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);position:relative;overflow:hidden;}
 .swatch.custom input{position:absolute;inset:-8px;opacity:0;cursor:pointer;}
-.logo-preview{height:42px;max-width:170px;object-fit:contain;border:1px dashed var(--line);padding:4px 10px;background:var(--paper);display:none;}
+.logo-preview{height:56px;width:56px;object-fit:contain;border-radius:50%;background:var(--white);box-shadow:0 0 0 1px var(--line);padding:6px;display:none;}
 .logo-preview.show{display:block;}
 .cfg-btn{height:42px;padding:0 16px;border:1px solid var(--line);background:var(--white);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);display:inline-flex;align-items:center;gap:8px;}
 .cfg-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;}
@@ -1248,7 +1248,8 @@ async function initPublic(){
     const prodUrl = `${API}/public/${SLUG}/productos` + (SOLO_FAVORITOS_PUB ? '?favoritos=1' : '');
     const [cfg, prods] = await Promise.all([
       fetch(`${API}/public/${SLUG}/config`).then(r=>r.json()),
-      fetch(prodUrl).then(async r=>{ const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); return d; })
+      fetch(prodUrl).then(async r=>{ const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); return d; }),
+      cargarCategoriasDisplay()
     ]);
     CFG = { ...DEFAULT_CFG, ...cfg };
     PRODUCTOS_ALL = prods; PRODUCTOS = prods;
@@ -1317,6 +1318,7 @@ $('btn-eye').onclick = ()=>{
 /* ═══════════ INIT ═══════════ */
 async function initApp(){
   let esPrimeraVez = false;
+  cargarCategoriasDisplay(); // en paralelo — no bloquea el primer pintado de la colección
   try {
     const sc = await api('/config');
     if(sc && Object.keys(sc).length){
@@ -1512,17 +1514,56 @@ function famSub(p){
   }
   return { fam: parts[0]||'Otros', sub: parts.slice(1).join(' / ') };
 }
+// Librería de íconos con nombre — el admin puede elegir uno de estos por
+// categoría (ver /api/categorias-multiplicador); si no eligió ninguno, se
+// adivina por el nombre de la categoría (FAM_ICONS) y si nada matchea, cae
+// al ícono genérico "otros".
+const ICON_LIB = {
+  reloj:    '<circle cx="12" cy="12" r="7"/><path d="M12 8.5V12l2.3 2.3"/><path d="M9.5 5.2 9 2h6l-.5 3.2M9.5 18.8 9 22h6l-.5-3.2"/>',
+  calc:     '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01M8.5 19h.01M12 19h.01M15.5 19h.01" stroke-width="2" stroke-linecap="round"/>',
+  pila:     '<rect x="4" y="8" width="15" height="8" rx="1.5"/><path d="M19 10.5h2v3h-2M7.5 10.5v3"/>',
+  correa:   '<path d="M9 3h6v5a3 3 0 0 1-6 0V3zM9 21h6v-5a3 3 0 0 0-6 0v5z"/><circle cx="12" cy="12" r="2.5"/>',
+  audifono: '<path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>',
+  lentes:   '<circle cx="7.5" cy="14" r="3.5"/><circle cx="16.5" cy="14" r="3.5"/><path d="M11 14h2M4 14 3 8h4M20 14l1-6h-4"/>',
+  anillo:   '<circle cx="12" cy="15" r="6"/><path d="M9 6 12 2l3 4-1.5 3h-3L9 6z"/>',
+  argolla:  '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/>',
+  aro:      '<circle cx="12" cy="4.5" r="1.3"/><path d="M12 6a6.5 6.5 0 1 0 6.5 6.5"/>',
+  cadena:   '<path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8"/>',
+  colgante: '<path d="M4 5a9 7 0 0 0 16 0"/><path d="M12 10v2.5"/><path d="M9.5 16.5a2.5 2.5 0 1 0 5 0c0-1.8-2.5-4-2.5-4s-2.5 2.2-2.5 4z"/>',
+  charms:   '<circle cx="12" cy="4.5" r="1.5"/><path d="M12 6v2"/><path d="m12 9 1.5 3 3.3.3-2.5 2.2.8 3.2L12 16l-2.9 1.7.8-3.2-2.5-2.2 3.3-.3z"/>',
+  pulsera:  '<ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="12" rx="5.5" ry="2.8"/>',
+  collar:   '<path d="M3 4a10 8 0 0 0 18 0"/><path d="M12 10v3"/><circle cx="12" cy="16" r="2.3"/>',
+  otros:    '<rect x="4" y="7" width="16" height="13" rx="1.5"/><path d="M4 11h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>',
+};
 const FAM_ICONS = [
-  [/reloj|watch/i, '<circle cx="12" cy="12" r="7"/><path d="M12 8.5V12l2.3 2.3"/><path d="M9.5 5.2 9 2h6l-.5 3.2M9.5 18.8 9 22h6l-.5-3.2"/>'],
-  [/calc/i, '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01M8.5 19h.01M12 19h.01M15.5 19h.01" stroke-width="2" stroke-linecap="round"/>'],
-  [/pila|bater/i, '<rect x="4" y="8" width="15" height="8" rx="1.5"/><path d="M19 10.5h2v3h-2M7.5 10.5v3"/>'],
-  [/correa|pulsera|banda/i, '<path d="M9 3h6v5a3 3 0 0 1-6 0V3zM9 21h6v-5a3 3 0 0 0-6 0v5z"/><circle cx="12" cy="12" r="2.5"/>'],
-  [/audif|audio|parlante/i, '<path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>'],
-  [/lente|gafa|sol/i, '<circle cx="7.5" cy="14" r="3.5"/><circle cx="16.5" cy="14" r="3.5"/><path d="M11 14h2M4 14 3 8h4M20 14l1-6h-4"/>'],
+  [/reloj|watch/i, 'reloj'],
+  [/calc/i, 'calc'],
+  [/pila|bater/i, 'pila'],
+  [/correa|banda/i, 'correa'],
+  [/audif|audio|parlante/i, 'audifono'],
+  [/lente|gafa|sol/i, 'lentes'],
+  [/anillo/i, 'anillo'],
+  [/argolla/i, 'argolla'],
+  [/\baros?\b/i, 'aro'],
+  [/cadena/i, 'cadena'],
+  [/colgante|dije/i, 'colgante'],
+  [/charm/i, 'charms'],
+  [/pulsera|brazalete/i, 'pulsera'],
+  [/collar/i, 'collar'],
 ];
+// CAT_DISPLAY: { familia: {icono, nombre} } — lo que haya elegido el admin
+// a mano, se carga una vez al entrar (ver initApp/initPublic).
+let CAT_DISPLAY = {};
 function famIcon(f){
-  for(const [re, svg] of FAM_ICONS) if(re.test(f)) return svg;
-  return '<rect x="4" y="7" width="16" height="13" rx="1.5"/><path d="M4 11h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>';
+  const key = CAT_DISPLAY[f]?.icono;
+  if(key && ICON_LIB[key]) return ICON_LIB[key];
+  for(const [re, k] of FAM_ICONS) if(re.test(f)) return ICON_LIB[k];
+  return ICON_LIB.otros;
+}
+function famLabel(f){ return CAT_DISPLAY[f]?.nombre || f; }
+async function cargarCategoriasDisplay(){
+  try { CAT_DISPLAY = await fetch(`${API}/categorias-display`).then(r=>r.json()); }
+  catch(e){ CAT_DISPLAY = {}; }
 }
 function renderFams(){
   const fams = [...new Set(visibles().map(p=>famSub(p).fam))].sort();
@@ -1534,7 +1575,7 @@ function renderFams(){
     fams.map(f=>`
       <div class="fam-tile ${FILTRO_FAM===f?'active':''}" data-fam="${esc(f)}">
         <svg viewBox="0 0 24 24">${famIcon(f)}</svg>
-        <div class="fn2">${esc(f)}</div>
+        <div class="fn2">${esc(famLabel(f))}</div>
       </div>`).join('');
   $('fam-row').querySelectorAll('.fam-tile').forEach(el=>{
     el.onclick = ()=>{
@@ -2238,9 +2279,15 @@ function initCfgPanel(){
     const f = e.target.files[0]; if(!f) return;
     const img = new Image();
     img.onload = ()=>{
-      const h = 80, w = Math.round(img.width*h/img.height);
-      const c = document.createElement('canvas'); c.width=w; c.height=h;
-      c.getContext('2d').drawImage(img,0,0,w,h);
+      // Cuadrado centrado con fondo transparente — así una foto rectangular
+      // o un logo ya circular se ven igual de prolijos en el avatar redondo
+      // del header (que recorta a círculo), sin bordes raros ni recortes.
+      const size = 160;
+      const c = document.createElement('canvas'); c.width=size; c.height=size;
+      const ctx = c.getContext('2d');
+      const r = Math.min(size/img.width, size/img.height);
+      const w = img.width*r, h = img.height*r;
+      ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
       CFG.logo = c.toDataURL('image/png');
       saveCfg(); applyCfg(); refreshLogoUI(); toast('Logo cargado');
     };

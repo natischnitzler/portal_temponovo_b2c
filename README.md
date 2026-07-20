@@ -135,6 +135,16 @@ cambio grande que se entrega por fases:
   logo y nombre de la vendedora y la fecha, solo con productos que tienen
   stock. Se genera al vuelo con `pdfkit` (`GET /api/catalogo-pdf`), no se
   guarda en ningún lado.
+- ✅ **Logo circular + íconos de categoría editables**: subir el logo
+  ahora lo centra en un cuadrado transparente (sea foto rectangular o un
+  logo ya circular) y se muestra como avatar redondo prolijo en el
+  header. Los pills de categoría de la vitrina tienen más íconos
+  (joyería: anillo, argolla, aro, cadena, colgante, charms, pulsera,
+  collar, además de los que ya había) — se adivinan por el nombre de la
+  categoría, pero en Admin → Productos → Categorías el admin puede elegir
+  un ícono de la lista y/o un nombre más corto para mostrar, por
+  categoría (`GET/PUT /api/admin/categorias-multiplicador`, público vía
+  `GET /api/categorias-display`).
 
 ### 2. Base de datos (obligatorio)
 
@@ -199,6 +209,7 @@ vercel --prod
 | Método | Ruta                          | Descripción                                        |
 |--------|-------------------------------|-----------------------------------------------------|
 | GET    | /api/me                       | Perfil de la vendedora (requiere código + clave)    |
+| GET    | /api/categorias-display        | Ícono/nombre elegidos a mano por categoría (público, sin datos sensibles) |
 | GET    | /api/productos                | Catálogo combinado de todos los proveedores activos, con precio y sugerido |
 | GET    | /api/imagen/:proveedorId/:id   | Imagen del producto (el id de Odoo no es único entre proveedores) |
 | GET    | /api/imagen-extra/:proveedorId/:imgId | Foto adicional del producto (galería, modelo `product.image` de Odoo) |
@@ -216,8 +227,8 @@ vercel --prod
 | GET    | /api/admin/catalogo               | Catálogo completo con precio/disponibilidad resueltos (incluye lo apagado) |
 | PUT    | /api/admin/catalogo/:sku          | Fija precio y/o disponibilidad de un producto        |
 | POST   | /api/admin/catalogo/excel         | Carga masiva de precio/disponibilidad por Excel      |
-| GET    | /api/admin/categorias-multiplicador | Multiplicador por categoría (familia)              |
-| PUT    | /api/admin/categorias-multiplicador/:familia | Fija el multiplicador de una categoría        |
+| GET    | /api/admin/categorias-multiplicador | Multiplicador, ícono y nombre a mostrar por categoría (familia) |
+| PUT    | /api/admin/categorias-multiplicador/:familia | Fija multiplicador, ícono y nombre de una categoría |
 | GET    | /api/admin/ventas               | Ventas, filtrables por estado (enviada/error)        |
 | POST   | /api/admin/ventas/:id/reintentar | Reintenta el envío a Odoo de una venta con error     |
 | PUT    | /api/admin/ventas/:id/seguimiento | Cambia el avance logístico de una venta: recibido → preparando → en_transito → entregado |

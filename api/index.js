@@ -336,6 +336,12 @@ function ensureDb() {
       multiplicador NUMERIC NOT NULL DEFAULT 2,
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
+    // Ícono y nombre a mostrar por categoría (opcional) — si no se setea,
+    // la vitrina sigue adivinando el ícono por el nombre de la categoría y
+    // muestra el nombre tal cual viene de Odoo (ver ICON_LIB/famIcon en el
+    // frontend).
+    await sql`ALTER TABLE categoria_multiplicador ADD COLUMN IF NOT EXISTS icono TEXT DEFAULT ''`;
+    await sql`ALTER TABLE categoria_multiplicador ADD COLUMN IF NOT EXISTS nombre TEXT DEFAULT ''`;
 
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
@@ -928,7 +934,7 @@ async function getCategoriaMultMap() {
   return map;
 }
 function limpiarCacheCatalogoPrecios() {
-  Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
+  Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k === 'categorias_display' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
     .forEach(k => delete cache[k]);
 }
 // Catálogo con precio de venta y disponibilidad YA resueltos (precio fijo >
@@ -2259,8 +2265,13 @@ app.get('/api/admin/categorias-multiplicador', requireAdmin, async (_req, res) =
   try {
     const prods = await productosClienteMulti();
     const familias = [...new Set(prods.map(p => famOf(p)))].sort();
-    const multMap = await getCategoriaMultMap();
-    res.json(familias.map(f => ({ familia: f, multiplicador: multMap[f] || MULT_DEFAULT })));
+    const { rows } = await sql`SELECT familia, multiplicador, icono, nombre FROM categoria_multiplicador`;
+    const map = {}; rows.forEach(r => { map[r.familia] = r; });
+    res.json(familias.map(f => ({
+      familia: f,
+      multiplicador: map[f] ? parseFloat(map[f].multiplicador) || MULT_DEFAULT : MULT_DEFAULT,
+      icono: map[f]?.icono || '', nombre: map[f]?.nombre || ''
+    })));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req, res) => {
@@ -2268,11 +2279,26 @@ app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req
     const familia = decodeURIComponent(req.params.familia);
     const multiplicador = parseFloat(req.body?.multiplicador);
     if (!(multiplicador > 0)) return res.status(400).json({ error: 'Multiplicador inválido' });
+    const icono = String(req.body?.icono || '').trim();
+    const nombre = String(req.body?.nombre || '').trim();
     await sql`
-      INSERT INTO categoria_multiplicador (familia, multiplicador, updated_at) VALUES (${familia}, ${multiplicador}, now())
-      ON CONFLICT (familia) DO UPDATE SET multiplicador = ${multiplicador}, updated_at = now()`;
+      INSERT INTO categoria_multiplicador (familia, multiplicador, icono, nombre, updated_at) VALUES (${familia}, ${multiplicador}, ${icono}, ${nombre}, now())
+      ON CONFLICT (familia) DO UPDATE SET multiplicador = ${multiplicador}, icono = ${icono}, nombre = ${nombre}, updated_at = now()`;
     limpiarCacheCatalogoPrecios();
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+// Ícono/nombre a mostrar por categoría — público (sin datos sensibles), lo
+// consume tanto la app de la vendedora como la vitrina pública para pintar
+// los mismos pills en los dos lados.
+app.get('/api/categorias-display', async (_req, res) => {
+  try {
+    const hit = cacheGet('categorias_display'); if (hit) return res.json(hit);
+    const { rows } = await sql`SELECT familia, icono, nombre FROM categoria_multiplicador WHERE icono != '' OR nombre != ''`;
+    const map = {};
+    rows.forEach(r => { map[r.familia] = { icono: r.icono || '', nombre: r.nombre || '' }; });
+    cacheSet('categorias_display', map, 5 * 60 * 1000);
+    res.json(map);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 

@@ -186,8 +186,8 @@ tr:last-child td{border-bottom:none;}
         <p class="page-s">Un solo precio de venta para cualquier vendedora. Si un producto no tiene precio fijo acá, se calcula con el multiplicador de su categoría. Lo que apagues en "Disponible" desaparece de todas las vitrinas (de cada vendedora y de la pública).</p>
 
         <div class="card">
-          <div class="card-h">Multiplicador por categoría</div>
-          <p class="note">Precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo. Sin multiplicador propio, una categoría usa ×2.</p>
+          <div class="card-h">Categorías</div>
+          <p class="note">Multiplicador: precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo (sin multiplicador propio, una categoría usa ×2). Ícono y nombre son opcionales — "Auto" adivina el ícono por el nombre de la categoría; si no queda lindo, elegí uno de la lista o escribí un nombre más corto para mostrar.</p>
           <div id="catmult-list"><div class="empty">Cargando…</div></div>
         </div>
 
@@ -580,19 +580,76 @@ $('v-crear').onclick = async () => {
 
 /* ── PRODUCTOS (lista de precios global) ── */
 let CATALOGO = [];
+// Misma librería de íconos que el frontend de la vendedora (index.html) —
+// duplicada a propósito, no hay bundler que comparta código entre los dos.
+const ICON_LIB = {
+  reloj:    '<circle cx="12" cy="12" r="7"/><path d="M12 8.5V12l2.3 2.3"/><path d="M9.5 5.2 9 2h6l-.5 3.2M9.5 18.8 9 22h6l-.5-3.2"/>',
+  calc:     '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 15.5h.01M12 15.5h.01M15.5 15.5h.01M8.5 19h.01M12 19h.01M15.5 19h.01" stroke-width="2" stroke-linecap="round"/>',
+  pila:     '<rect x="4" y="8" width="15" height="8" rx="1.5"/><path d="M19 10.5h2v3h-2M7.5 10.5v3"/>',
+  correa:   '<path d="M9 3h6v5a3 3 0 0 1-6 0V3zM9 21h6v-5a3 3 0 0 0-6 0v5z"/><circle cx="12" cy="12" r="2.5"/>',
+  audifono: '<path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="13" width="4" height="7" rx="1.5"/><rect x="17" y="13" width="4" height="7" rx="1.5"/>',
+  lentes:   '<circle cx="7.5" cy="14" r="3.5"/><circle cx="16.5" cy="14" r="3.5"/><path d="M11 14h2M4 14 3 8h4M20 14l1-6h-4"/>',
+  anillo:   '<circle cx="12" cy="15" r="6"/><path d="M9 6 12 2l3 4-1.5 3h-3L9 6z"/>',
+  argolla:  '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/>',
+  aro:      '<circle cx="12" cy="4.5" r="1.3"/><path d="M12 6a6.5 6.5 0 1 0 6.5 6.5"/>',
+  cadena:   '<path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8"/>',
+  colgante: '<path d="M4 5a9 7 0 0 0 16 0"/><path d="M12 10v2.5"/><path d="M9.5 16.5a2.5 2.5 0 1 0 5 0c0-1.8-2.5-4-2.5-4s-2.5 2.2-2.5 4z"/>',
+  charms:   '<circle cx="12" cy="4.5" r="1.5"/><path d="M12 6v2"/><path d="m12 9 1.5 3 3.3.3-2.5 2.2.8 3.2L12 16l-2.9 1.7.8-3.2-2.5-2.2 3.3-.3z"/>',
+  pulsera:  '<ellipse cx="12" cy="12" rx="9" ry="5"/><ellipse cx="12" cy="12" rx="5.5" ry="2.8"/>',
+  collar:   '<path d="M3 4a10 8 0 0 0 18 0"/><path d="M12 10v3"/><circle cx="12" cy="16" r="2.3"/>',
+  otros:    '<rect x="4" y="7" width="16" height="13" rx="1.5"/><path d="M4 11h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>',
+};
+const ICON_LABELS = {
+  reloj: 'Reloj', calc: 'Calculadora', pila: 'Pila', correa: 'Correa', audifono: 'Audífonos', lentes: 'Lentes',
+  anillo: 'Anillo', argolla: 'Argolla', aro: 'Aro / Aros', cadena: 'Cadena', colgante: 'Colgante / Dije',
+  charms: 'Charms', pulsera: 'Pulsera', collar: 'Collar', otros: 'Otros (genérico)'
+};
+const FAM_ICONS_AUTO = [
+  [/reloj|watch/i, 'reloj'], [/calc/i, 'calc'], [/pila|bater/i, 'pila'], [/correa|banda/i, 'correa'],
+  [/audif|audio|parlante/i, 'audifono'], [/lente|gafa|sol/i, 'lentes'], [/anillo/i, 'anillo'],
+  [/argolla/i, 'argolla'], [/\baros?\b/i, 'aro'], [/cadena/i, 'cadena'], [/colgante|dije/i, 'colgante'],
+  [/charm/i, 'charms'], [/pulsera|brazalete/i, 'pulsera'], [/collar/i, 'collar'],
+];
+function autoIconKey(familia) {
+  for (const [re, k] of FAM_ICONS_AUTO) if (re.test(familia)) return k;
+  return 'otros';
+}
+function iconSvg(key) {
+  return `<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:#191b1e;fill:none;stroke-width:1.5">${ICON_LIB[key] || ICON_LIB.otros}</svg>`;
+}
 async function loadCategoriasMult() {
   try {
     const rows = await api('/categorias-multiplicador');
     if (!rows.length) { $('catmult-list').innerHTML = '<div class="empty">No se pudo leer el catálogo de Odoo.</div>'; return; }
     $('catmult-list').innerHTML = rows.map(r => `
-      <div class="row" style="align-items:center;margin-bottom:8px">
-        <div style="flex:1;font-size:13px">${esc(r.familia)}</div>
-        <input class="fld-in" style="max-width:90px" type="number" step="0.1" value="${r.multiplicador}" data-cm="${esc(r.familia)}"/>
+      <div class="row" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line)">
+        <div style="flex:1;min-width:110px;font-size:13px">${esc(r.familia)}</div>
+        <div data-cm-prev="${esc(r.familia)}" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;background:#fafaf8">${iconSvg(r.icono || autoIconKey(r.familia))}</div>
+        <select class="fld-in" style="max-width:160px" data-cm-icono="${esc(r.familia)}">
+          <option value="">Auto (${esc(ICON_LABELS[autoIconKey(r.familia)])})</option>
+          ${Object.keys(ICON_LIB).map(k => `<option value="${k}" ${r.icono === k ? 'selected' : ''}>${esc(ICON_LABELS[k])}</option>`).join('')}
+        </select>
+        <input class="fld-in" style="max-width:150px" placeholder="Nombre a mostrar" value="${esc(r.nombre || '')}" data-cm-nombre="${esc(r.familia)}"/>
+        <input class="fld-in" style="max-width:80px" type="number" step="0.1" value="${r.multiplicador}" data-cm-mult="${esc(r.familia)}" title="Multiplicador"/>
+        <button class="btn btn-sm dark" data-cm-guardar="${esc(r.familia)}">Guardar</button>
       </div>`).join('');
-    $('catmult-list').querySelectorAll('[data-cm]').forEach(inp => {
-      inp.onchange = async () => {
-        try { await api('/categorias-multiplicador/' + encodeURIComponent(inp.dataset.cm), { method: 'PUT', body: JSON.stringify({ multiplicador: parseFloat(inp.value) || 2 }) }); loadCatalogo(); }
-        catch (e) { alert(e.message); }
+    $('catmult-list').querySelectorAll('[data-cm-icono]').forEach(sel => {
+      sel.onchange = () => {
+        const prev = $('catmult-list').querySelector('[data-cm-prev="' + CSS.escape(sel.dataset.cmIcono) + '"]');
+        prev.innerHTML = iconSvg(sel.value || autoIconKey(sel.dataset.cmIcono));
+      };
+    });
+    $('catmult-list').querySelectorAll('[data-cm-guardar]').forEach(btn => {
+      btn.onclick = async () => {
+        const familia = btn.dataset.cmGuardar;
+        const icono = $('catmult-list').querySelector('[data-cm-icono="' + CSS.escape(familia) + '"]').value;
+        const nombre = $('catmult-list').querySelector('[data-cm-nombre="' + CSS.escape(familia) + '"]').value.trim();
+        const multiplicador = parseFloat($('catmult-list').querySelector('[data-cm-mult="' + CSS.escape(familia) + '"]').value) || 2;
+        try {
+          await api('/categorias-multiplicador/' + encodeURIComponent(familia), { method: 'PUT', body: JSON.stringify({ multiplicador, icono, nombre }) });
+          loadCatalogo();
+          btn.textContent = '✓ Guardado'; setTimeout(() => { btn.textContent = 'Guardar'; }, 1500);
+        } catch (e) { alert(e.message); }
       };
     });
   } catch (e) { $('catmult-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }

@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS catalogo_productos (
 CREATE TABLE IF NOT EXISTS categoria_multiplicador (
   familia TEXT PRIMARY KEY,
   multiplicador NUMERIC NOT NULL DEFAULT 2,
+  icono TEXT DEFAULT '',            -- clave de ICON_LIB (index.html/admin.html); vacío = se adivina por el nombre
+  nombre TEXT DEFAULT '',           -- nombre a mostrar en los pills; vacío = se usa "familia" tal cual
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
