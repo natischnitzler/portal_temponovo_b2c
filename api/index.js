@@ -4,6 +4,8 @@ const cors     = require('cors');
 const archiver = require('archiver');
 const PDFDocument = require('pdfkit');
 const crypto   = require('crypto');
+const path     = require('path');
+const fs       = require('fs');
 const { sql, pool } = require('./db');
 // nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
 let nodemailer = null;
@@ -1392,6 +1394,33 @@ app.get('/api/fotos', async (req, res) => {
 // ── CATÁLOGO EN PDF (por familia/subfamilia, con logo y nombre de la
 // vendedora) — un PDF en cuadrícula con foto, nombre y precio de venta,
 // solo de lo que tiene stock. Pensado para mandar por WhatsApp.
+// Las mismas 15 tipografías que la vendedora puede elegir en su Configuración
+// (ver F1_STACK/F2_STACK en index.html) — se bajaron una vez de Google Fonts
+// como .woff2 (carpeta /fonts) para poder incrustarlas de verdad en el PDF,
+// sin depender de una llamada a internet en cada descarga. La mayoría son
+// .woff2; 5 de ellas (marcellus, lato, poppins, bebas-neue, dm-serif-display)
+// están en .ttf a propósito — su .woff2 hace que pdfkit/fontkit crashee el
+// proceso entero al escribir el PDF (bug de esa versión de fontkit con esos
+// archivos puntuales, no atajable con try/catch porque revienta async
+// adentro de doc.end()) — verificado uno por uno, ver commit.
+const FONTS_DIR = path.join(__dirname, '..', 'fonts');
+const FONT_FILES = {
+  'Marcellus': 'marcellus.ttf', 'Playfair Display': 'playfair-display.woff2', 'Cormorant Garamond': 'cormorant-garamond.woff2',
+  'DM Serif Display': 'dm-serif-display.ttf', 'Lora': 'lora.woff2', 'Abril Fatface': 'abril-fatface.woff2',
+  'Bebas Neue': 'bebas-neue.ttf', 'Poppins': 'poppins.ttf', 'Jost': 'jost.woff2', 'Lato': 'lato.ttf',
+  'DM Sans': 'dm-sans.woff2', 'Montserrat': 'montserrat.woff2', 'Inter': 'inter.woff2', 'Nunito': 'nunito.woff2',
+  'Work Sans': 'work-sans.woff2'
+};
+function registrarFuenteMarca(doc, nombreFuente, fallback) {
+  const archivo = FONT_FILES[nombreFuente];
+  if (!archivo) return fallback;
+  try {
+    const ruta = path.join(FONTS_DIR, archivo);
+    if (!fs.existsSync(ruta)) return fallback;
+    doc.registerFont(nombreFuente, ruta);
+    return nombreFuente;
+  } catch (e) { return fallback; }
+}
 async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
   // Imágenes de a bloques, por proveedor (cada Odoo tiene su propia conexión).
   const porProveedor = new Map();
@@ -1426,6 +1455,12 @@ async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
   const chunks = [];
   doc.on('data', c => chunks.push(c));
 
+  // Mismos colores y tipografías que eligió en su Configuración — para que
+  // el PDF se sienta "la misma marca", no una plantilla genérica.
+  const hdr = /^#[0-9a-f]{6}$/i.test(vendedora.hdr || '') ? vendedora.hdr : '#191b1e';
+  const F1 = registrarFuenteMarca(doc, vendedora.f1, 'Helvetica-Bold'); // títulos/nombre de producto
+  const F2 = registrarFuenteMarca(doc, vendedora.f2, 'Helvetica');      // texto/precio
+
   const fecha = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const titulo = subfamilia ? familia + ' · ' + subfamilia : familia;
   let logoBuf = null;
@@ -1439,17 +1474,17 @@ async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
     if (logoBuf) {
       try { doc.image(logoBuf, mg, top, { fit: [40 * MM, 14 * MM] }); } catch (e) {}
     }
-    doc.fontSize(9).fillColor('#555555').font('Helvetica')
+    doc.fontSize(9).fillColor('#555555').font(F2)
       .text((vendedora.nombre || '').toUpperCase(), mg, top + 15 * MM, { width: 90 * MM, lineBreak: false });
-    doc.fontSize(15).fillColor('#191b1e').font('Helvetica-Bold')
+    doc.fontSize(16).fillColor(hdr).font(F1)
       .text(titulo, mg, top + 3 * MM, { width: PAGE_W - mg * 2, align: 'right' });
     doc.moveTo(mg, top + headerH - 3 * MM).lineTo(PAGE_W - mg, top + headerH - 3 * MM)
-      .strokeColor('#dddddd').lineWidth(0.5 * MM).stroke();
+      .strokeColor(hdr).lineWidth(0.5 * MM).stroke();
   }
   function drawFooter() {
     const fy = PAGE_H - mg - footerH + 3 * MM;
     doc.moveTo(mg, fy).lineTo(PAGE_W - mg, fy).strokeColor('#dddddd').lineWidth(0.15 * MM).stroke();
-    doc.fontSize(8).fillColor('#888888').font('Helvetica')
+    doc.fontSize(8).fillColor('#888888').font(F2)
       .text(fecha, mg, fy + 2 * MM, { width: PAGE_W - mg * 2, align: 'center' });
   }
 
@@ -1469,9 +1504,9 @@ async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
     }
 
     const infoY = y + imgAreaH + 2 * MM;
-    doc.fontSize(8.5).fillColor('#191b1e').font('Helvetica-Bold')
+    doc.fontSize(9).fillColor('#191b1e').font(F1)
       .text(p.nombre || '', x, infoY, { width: cellW, align: 'center', height: 8 * MM, ellipsis: true });
-    doc.fontSize(9).fillColor('#191b1e').font('Helvetica')
+    doc.fontSize(9).fillColor(hdr).font(F2)
       .text('$' + Math.round(p.precioVenta || 0).toLocaleString('es-CL'), x, infoY + 7 * MM, { width: cellW, align: 'center' });
 
     idx++;
@@ -1505,7 +1540,10 @@ app.get('/api/catalogo-pdf', async (req, res) => {
     const cfg0 = await getConfig();
     const cfg = await readCfgDb(v, cfg0.partner_id);
 
-    const buffer = await generarCatalogoPDF(prods, { nombre: cfg.nombre || v.nombre, logo: cfg.logo || '' }, familia, subfamilia);
+    const buffer = await generarCatalogoPDF(prods, {
+      nombre: cfg.nombre || v.nombre, logo: cfg.logo || '',
+      hdr: cfg.hdr || '#191b1e', f1: cfg.f1 || 'Marcellus', f2: cfg.f2 || 'Jost'
+    }, familia, subfamilia);
     const slug = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const nombreArchivo = 'catalogo-' + slug(familia) + (subfamilia ? '-' + slug(subfamilia) : '') + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');

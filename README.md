@@ -145,6 +145,18 @@ cambio grande que se entrega por fases:
   un ícono de la lista y/o un nombre más corto para mostrar, por
   categoría (`GET/PUT /api/admin/categorias-multiplicador`, público vía
   `GET /api/categorias-display`).
+- ✅ **Catálogos PDF con la marca real de la vendedora**: el color de
+  header y las dos tipografías que eligió en su Configuración (título y
+  texto) se usan de verdad en el PDF — no una aproximación. Las 15
+  tipografías que puede elegir (`F1_STACK`/`F2_STACK` de `index.html`)
+  están bajadas de Google Fonts una sola vez en `/fonts` (.woff2 o .ttf,
+  ~380 KB en total) para incrustarlas sin depender de internet en cada
+  descarga. 5 de esas 15 (Marcellus, Lato, Poppins, Bebas Neue, DM Serif
+  Display) están en `.ttf` a propósito: su `.woff2` hace que
+  `pdfkit`/`fontkit` crashee el proceso entero al escribir el PDF (bug
+  puntual de esos archivos con esa librería, no atajable con try/catch
+  porque revienta async adentro de `doc.end()`) — se verificaron las 15
+  una por una antes de decidir el formato de cada una.
 
 ### 2. Base de datos (obligatorio)
 
