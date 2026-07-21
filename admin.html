@@ -570,7 +570,7 @@ $('v-crear').onclick = async () => {
 };
 
 /* ── PRODUCTOS (lista de precios global) ── */
-let CATALOGO = [];
+// Tabla removida - todo se maneja por Excel (mejor performance)
 // Misma librería de íconos que el frontend de la vendedora (index.html) —
 // duplicada a propósito, no hay bundler que comparta código entre los dos.
 const ICON_LIB = {
@@ -696,7 +696,6 @@ $('cat-excel-input').onchange = async (e) => {
     if (!filas.length) return showMsg('cat-excel-msg', 'No se encontró ninguna fila con código de producto.', false);
     const r = await api('/catalogo/excel', { method: 'POST', body: JSON.stringify({ data: { filas } }) });
     showMsg('cat-excel-msg', `✓ ${r.cargados} producto(s) actualizado(s).`, true);
-    loadCatalogo();
   } catch (err) { showMsg('cat-excel-msg', 'No se pudo leer el archivo: ' + err.message, false); }
   e.target.value = '';
 };
