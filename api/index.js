@@ -2298,29 +2298,22 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // Descarga optimizada para Excel: todos los productos con costos (DEBE IR ANTES que /catalogo)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
-    const prods = await catalogoConPrecioGlobal(false);
-    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
-    const porSku = {};
-    catalogoBd.forEach(p => { porSku[p.sku] = p; });
+    const { rows } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
     // Formato optimizado para Excel: solo lo que el usuario necesita editar
-    const excel = prods.map(p => {
-      const bdData = porSku[p.sku.toUpperCase()];
-      return {
-        'Código': p.sku,
-        'Nombre': p.nombre,
-        'Proveedor': p.proveedor || '',
-        'Categoría': famOf(p),
-        'Stock': p.stock,
-        'Disponible': p.disponible ? 'Sí' : 'No',
-        'Precio': p.precioFijo || '',
-        'Costo': bdData?.costo || '',
-        'Precio PVP': bdData?.precio_pvp || '',
-        'IVA': bdData?.iva_porcentaje || 19,
-        'Comisión': bdData?.comision_vendedora_override || ''
-      };
-    });
+    const excel = rows.map(p => ({
+      'Código': p.sku,
+      'Precio': p.precio || '',
+      'Disponible': p.disponible ? 'Sí' : 'No',
+      'Costo': p.costo || '',
+      'Precio PVP': p.precio_pvp || '',
+      'IVA': p.iva_porcentaje || 19,
+      'Comisión': p.comision_vendedora_override || ''
+    }));
     res.json(excel);
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+  } catch (e) {
+    console.error('❌ /catalogo/excel-descargar:', e.message);
+    res.status(500).json({ error: 'No se pudo descargar: ' + shortErr(e) });
+  }
 });
 // GET /api/admin/catalogo — catálogo con todos los campos
 app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
