@@ -226,8 +226,7 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .tg-instr{text-align:center;font-size:12px;color:var(--steel);line-height:1.6;margin-bottom:14px;}
 .tg-card-step{font-size:12px;font-weight:500;color:var(--ink);text-align:center;margin-bottom:8px;}
 #tg-card-canvas{background:var(--paper);cursor:crosshair;max-width:100%;}
-.tg-unit-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
-.tg-unit-lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);flex-shrink:0;}
+#tg-card-video{width:100%;border-radius:8px;background:#000;display:block;}
 .tg-result{text-align:center;padding:12px;background:var(--paper);border-radius:8px;font-size:13px;}
 .tg-result strong{font-family:var(--f1);font-size:19px;font-weight:500;}
 .tg-result-sub{font-size:11px;color:var(--steel);}
@@ -778,9 +777,12 @@ body.public .priv{display:none!important;}
         <span class="tg-arrow" id="tg-arrow-1">›</span>
       </button>
       <div class="tg-body" id="tg-body-1">
-        <p class="tg-instr">Apoyá una tarjeta (crédito, débito o similar) en una mesa, con tu dedo justo al lado y a la misma altura. Sacá la foto de arriba, que se vean bien los dos bordes largos de la tarjeta y el ancho de tu dedo.</p>
-        <input type="file" accept="image/*" capture="environment" id="tg-card-input" style="display:none"/>
-        <button type="button" class="cfg-btn dark" id="tg-card-subir" style="width:100%;justify-content:center">Sacar o subir foto</button>
+        <p class="tg-instr">Apoyá una tarjeta (crédito, débito o similar) en una mesa, con tu dedo justo al lado y a la misma altura. Encuadrá que se vean bien los dos bordes largos de la tarjeta y el ancho de tu dedo, y capturá.</p>
+        <div id="tg-card-camera-wrap" style="display:none">
+          <video id="tg-card-video" autoplay playsinline muted></video>
+          <button type="button" class="cfg-btn dark" id="tg-card-capturar" style="width:100%;justify-content:center;margin-top:8px">Capturar foto</button>
+        </div>
+        <button type="button" class="cfg-btn dark" id="tg-card-abrir" style="width:100%;justify-content:center">Abrir cámara</button>
         <div id="tg-card-canvas-wrap" style="display:none;margin-top:12px">
           <div class="tg-card-step" id="tg-card-step">Paso 1 de 2 — Tocá los dos extremos del lado LARGO de la tarjeta</div>
           <canvas id="tg-card-canvas"></canvas>
@@ -824,15 +826,6 @@ body.public .priv{display:none!important;}
         <span class="tg-arrow" id="tg-arrow-3">›</span>
       </button>
       <div class="tg-body" id="tg-body-3">
-        <div class="tg-unit-row">
-          <span class="tg-unit-lbl">Sistema</span>
-          <div class="tallas-row" id="tg-unit-chips">
-            <button type="button" class="talla-btn sel" data-unit="eu">EU</button>
-            <button type="button" class="talla-btn" data-unit="us">US</button>
-            <button type="button" class="talla-btn" data-unit="uk">UK</button>
-            <button type="button" class="talla-btn" data-unit="jp">JP</button>
-          </div>
-        </div>
         <table class="tg-table">
           <thead><tr><th>Talla</th><th>Diámetro (mm)</th><th>Circunferencia (mm)</th></tr></thead>
           <tbody id="tg-tabla-body"></tbody>
@@ -840,7 +833,7 @@ body.public .priv{display:none!important;}
       </div>
     </div>
 
-    <div class="tg-note">💡 Si estás entre dos tallas, elegí la más grande — los anillos muy ajustados pueden incomodar con el calor.<br/><br/>La talla exacta disponible depende de cada diseño: revisá las tallas que muestra la ficha del anillo elegido.</div>
+    <div class="tg-note">💡 Si estás entre dos tallas, elegí la más grande — los anillos muy ajustados pueden incomodar con el calor.<br/><br/>Esta tabla es orientativa (talla 11 a 18). La talla exacta disponible depende de cada diseño: revisá las tallas que muestra la ficha del anillo elegido.</div>
   </div>
 </div>
 
@@ -1826,96 +1819,29 @@ $('sheet-close').onclick = closeFicha;
 $('sheet-back').onclick = closeFicha;
 
 /* ═══════════ GUÍA DE TALLAS (anillos) ═══════════ */
-// Tabla internacional talla ↔ diámetro/circunferencia interior, con
-// equivalencias EU (ISO/continental, = circunferencia en mm)/US/UK/JP.
-// Datos tomados de la tabla de equivalencias de Wikipedia ("Ring size"),
-// recalculados desde las pulgadas originales (no es una tabla propia de
-// un solo proveedor — sirve para cualquiera).
+// Tabla propia de Aviv (la única que hoy vende anillos con talla) — es la
+// que corresponde a los números que ya vienen en el catálogo (chips de
+// talla en la ficha), no una escala internacional aparte.
 const TALLAS_DATA = [
-  {d:11.63,c:36.5,eu:36.5,us:'0',uk:'',jp:''},
-  {d:11.84,c:37.2,eu:37.2,us:'1/4',uk:'',jp:''},
-  {d:12.04,c:37.8,eu:37.8,us:'1/2',uk:'A',jp:''},
-  {d:12.24,c:38.5,eu:38.5,us:'3/4',uk:'A 1/2',jp:''},
-  {d:12.45,c:39.1,eu:39.1,us:'1',uk:'B',jp:'1'},
-  {d:12.65,c:39.7,eu:39.7,us:'1 1/4',uk:'B 1/2',jp:''},
-  {d:12.85,c:40.4,eu:40.4,us:'1 1/2',uk:'C',jp:''},
-  {d:13.06,c:41,eu:41,us:'1 3/4',uk:'C 1/2',jp:''},
-  {d:13.26,c:41.7,eu:41.7,us:'2',uk:'D',jp:'2'},
-  {d:13.46,c:42.3,eu:42.3,us:'2 1/4',uk:'D 1/2',jp:''},
-  {d:13.67,c:42.9,eu:42.9,us:'2 1/2',uk:'E',jp:'3'},
-  {d:13.87,c:43.6,eu:43.6,us:'2 3/4',uk:'E 1/2',jp:''},
-  {d:14.07,c:44.2,eu:44.2,us:'3',uk:'F',jp:'4'},
-  {d:14.27,c:44.8,eu:44.8,us:'3 1/4',uk:'F 1/2',jp:'5'},
-  {d:14.48,c:45.5,eu:45.5,us:'3 1/2',uk:'G',jp:''},
-  {d:14.68,c:46.1,eu:46.1,us:'3 3/4',uk:'G 1/2',jp:'6'},
-  {d:14.88,c:46.7,eu:46.7,us:'4',uk:'H',jp:'7'},
-  {d:15.09,c:47.4,eu:47.4,us:'4 1/4',uk:'H 1/2',jp:''},
-  {d:15.29,c:48,eu:48,us:'4 1/2',uk:'I',jp:'8'},
-  {d:15.49,c:48.7,eu:48.7,us:'4 3/4',uk:'J',jp:''},
-  {d:15.7,c:49.3,eu:49.3,us:'5',uk:'J 1/2',jp:'9'},
-  {d:15.9,c:50,eu:50,us:'5 1/4',uk:'K',jp:''},
-  {d:16.1,c:50.6,eu:50.6,us:'5 1/2',uk:'K 1/2',jp:'10'},
-  {d:16.31,c:51.2,eu:51.2,us:'5 3/4',uk:'L',jp:''},
-  {d:16.51,c:51.9,eu:51.9,us:'6',uk:'L 1/2',jp:'11'},
-  {d:16.71,c:52.5,eu:52.5,us:'6 1/4',uk:'M',jp:'12'},
-  {d:16.92,c:53.2,eu:53.2,us:'6 1/2',uk:'M 1/2',jp:'13'},
-  {d:17.12,c:53.8,eu:53.8,us:'6 3/4',uk:'N',jp:''},
-  {d:17.32,c:54.4,eu:54.4,us:'7',uk:'N 1/2',jp:'14'},
-  {d:17.53,c:55.1,eu:55.1,us:'7 1/4',uk:'O',jp:''},
-  {d:17.73,c:55.7,eu:55.7,us:'7 1/2',uk:'O 1/2',jp:'15'},
-  {d:17.93,c:56.3,eu:56.3,us:'7 3/4',uk:'P',jp:''},
-  {d:18.14,c:57,eu:57,us:'8',uk:'P 1/2',jp:'16'},
-  {d:18.34,c:57.6,eu:57.6,us:'8 1/4',uk:'P 3/4',jp:''},
-  {d:18.54,c:58.2,eu:58.2,us:'8 1/2',uk:'Q 1/4',jp:'17'},
-  {d:18.75,c:58.9,eu:58.9,us:'8 3/4',uk:'R',jp:''},
-  {d:18.95,c:59.5,eu:59.5,us:'9',uk:'R 1/2',jp:'18'},
-  {d:19.15,c:60.2,eu:60.2,us:'9 1/4',uk:'S',jp:''},
-  {d:19.35,c:60.8,eu:60.8,us:'9 1/2',uk:'S 1/2',jp:'19'},
-  {d:19.56,c:61.4,eu:61.4,us:'9 3/4',uk:'T',jp:''},
-  {d:19.76,c:62.1,eu:62.1,us:'10',uk:'T 1/2',jp:'20'},
-  {d:19.96,c:62.7,eu:62.7,us:'10 1/4',uk:'U',jp:'21'},
-  {d:20.17,c:63.4,eu:63.4,us:'10 1/2',uk:'U 1/2',jp:'22'},
-  {d:20.37,c:64,eu:64,us:'10 3/4',uk:'V',jp:''},
-  {d:20.57,c:64.6,eu:64.6,us:'11',uk:'V 1/2',jp:'23'},
-  {d:20.78,c:65.3,eu:65.3,us:'11 1/4',uk:'W',jp:''},
-  {d:20.98,c:65.9,eu:65.9,us:'11 1/2',uk:'W 1/2',jp:'24'},
-  {d:21.18,c:66.5,eu:66.5,us:'11 3/4',uk:'X',jp:''},
-  {d:21.39,c:67.2,eu:67.2,us:'12',uk:'X 1/2',jp:'25'},
-  {d:21.59,c:67.8,eu:67.8,us:'12 1/4',uk:'Y',jp:''},
-  {d:21.79,c:68.5,eu:68.5,us:'12 1/2',uk:'Y 1/2',jp:'26'},
-  {d:22,c:69.1,eu:69.1,us:'12 3/4',uk:'Z',jp:''},
-  {d:22.2,c:69.7,eu:69.7,us:'13',uk:'Z 1/2',jp:'27'},
-  {d:22.4,c:70.4,eu:70.4,us:'13 1/4',uk:'Z1',jp:''},
-  {d:22.61,c:71,eu:71,us:'13 1/2',uk:'',jp:''},
-  {d:22.81,c:71.7,eu:71.7,us:'13 3/4',uk:'Z2',jp:''},
-  {d:23.01,c:72.3,eu:72.3,us:'14',uk:'Z3',jp:''},
-  {d:23.22,c:72.9,eu:72.9,us:'14 1/4',uk:'',jp:''},
-  {d:23.42,c:73.6,eu:73.6,us:'14 1/2',uk:'Z4',jp:''},
-  {d:23.62,c:74.2,eu:74.2,us:'14 3/4',uk:'',jp:''},
-  {d:23.83,c:74.9,eu:74.9,us:'15',uk:'',jp:''},
-  {d:24.03,c:75.5,eu:75.5,us:'15 1/4',uk:'',jp:''},
-  {d:24.23,c:76.1,eu:76.1,us:'15 1/2',uk:'',jp:''},
-  {d:24.43,c:76.7,eu:76.7,us:'15 3/4',uk:'',jp:''},
-  {d:24.64,c:77.4,eu:77.4,us:'16',uk:'',jp:''}
+  { talla:'11', d:14.8, c:46.5 },
+  { talla:'12', d:15.3, c:48.0 },
+  { talla:'13', d:15.7, c:49.3 },
+  { talla:'14', d:16.2, c:50.9 },
+  { talla:'15', d:16.6, c:52.1 },
+  { talla:'16', d:17.1, c:53.8 },
+  { talla:'17', d:17.5, c:54.9 },
+  { talla:'18', d:18.2, c:57.2 },
 ];
 function mmATalla(diam){
   let best = null, bestDiff = Infinity;
   TALLAS_DATA.forEach(t=>{ const diff = Math.abs(t.d-diam); if(diff<bestDiff){ bestDiff=diff; best=t; } });
   return best;
 }
-function tallaLabel(row, unit){ return (row && row[unit]) ? row[unit] : '—'; }
-let TG_UNIT = 'eu';
-function renderTallasTable(){
+(function(){
   const tbody = $('tg-tabla-body');
   if(!tbody) return;
-  tbody.innerHTML = TALLAS_DATA.map(t=>`<tr><td>${tallaLabel(t,TG_UNIT)}</td><td>${t.d} mm</td><td>${t.c} mm</td></tr>`).join('');
-}
-renderTallasTable();
-document.querySelectorAll('#tg-unit-chips [data-unit]').forEach(b=> b.onclick = ()=>{
-  TG_UNIT = b.dataset.unit;
-  document.querySelectorAll('#tg-unit-chips [data-unit]').forEach(x=> x.classList.toggle('sel', x===b));
-  renderTallasTable();
-});
+  tbody.innerHTML = TALLAS_DATA.map(t=>`<tr><td>${t.talla}</td><td>${t.d} mm</td><td>${t.c} mm</td></tr>`).join('');
+})();
 function toggleTallaMetodo(n){
   const el = $('tg-body-'+n), arrow = $('tg-arrow-'+n);
   const open = el.classList.contains('open');
@@ -1926,11 +1852,11 @@ document.querySelectorAll('.tg-head').forEach(b=> b.onclick = ()=> toggleTallaMe
 
 // Método "tarjeta": se calibra con el tamaño real y conocido de una
 // tarjeta de crédito/débito estándar (ISO/IEC 7810 ID-1) marcando sus dos
-// extremos sobre la foto, y con esa escala se mide el ancho del dedo
-// marcado a continuación — sin visión por computadora, la persona confirma
-// a ojo dónde están los bordes, así que es confiable.
+// extremos sobre la foto capturada con la cámara, y con esa escala se mide
+// el ancho del dedo marcado a continuación — sin visión por computadora,
+// la persona confirma a ojo dónde están los bordes, así que es confiable.
 const TARJETA_MM = 85.60;
-let tgCardImg = null, tgCardStep = 1, tgCardPts = [], tgCardCardPts = null;
+let tgCardImg = null, tgCardStep = 1, tgCardPts = [], tgCardCardPts = null, tgCardStream = null;
 function tgCardRedraw(){
   const canvas = $('tg-card-canvas'); if(!canvas || !tgCardImg) return;
   const ctx = canvas.getContext('2d');
@@ -1948,7 +1874,7 @@ function tgCardCalcular(){
   const dedoMm = dist(tgCardPts[0], tgCardPts[1]) / pxPerMm;
   const t = mmATalla(dedoMm);
   $('tg-card-resultado').innerHTML = t
-    ? `<strong>Talla ${tallaLabel(t,TG_UNIT)} (${TG_UNIT.toUpperCase()})</strong><br/><span class="tg-result-sub">Diámetro estimado: ${dedoMm.toFixed(1)} mm</span>`
+    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Diámetro estimado: ${dedoMm.toFixed(1)} mm</span>`
     : 'No se pudo calcular — probá de nuevo';
   $('tg-card-step').textContent = '✓ Listo. Tocá "Reiniciar" para medir de nuevo.';
 }
@@ -1975,20 +1901,31 @@ function tgCardReset(){
   $('tg-card-step').textContent = 'Paso 1 de 2 — Tocá los dos extremos del lado LARGO de la tarjeta';
   tgCardRedraw();
 }
-$('tg-card-subir')?.addEventListener('click', ()=> $('tg-card-input').click());
-$('tg-card-input')?.addEventListener('change', e=>{
-  const f = e.target.files[0]; if(!f) return;
-  const img = new Image();
-  img.onload = ()=>{
-    tgCardImg = img;
-    const canvas = $('tg-card-canvas');
-    const maxW = Math.min(canvas.parentElement.clientWidth || 460, 460);
-    canvas.width = maxW; canvas.height = Math.round(img.height*(maxW/img.width));
-    $('tg-card-canvas-wrap').style.display = '';
-    tgCardReset();
-  };
-  img.src = URL.createObjectURL(f);
-  e.target.value = '';
+function tgCardDetenerCamara(){
+  if(tgCardStream){ tgCardStream.getTracks().forEach(t=>t.stop()); tgCardStream=null; }
+  $('tg-card-camera-wrap').style.display = 'none';
+}
+$('tg-card-abrir')?.addEventListener('click', async ()=>{
+  $('tg-card-resultado').innerHTML = '';
+  try {
+    tgCardStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    $('tg-card-video').srcObject = tgCardStream;
+    $('tg-card-camera-wrap').style.display = '';
+    $('tg-card-canvas-wrap').style.display = 'none';
+  } catch(e){
+    $('tg-card-resultado').innerHTML = '<span class="tg-result-warn">No pudimos abrir la cámara — revisá los permisos del navegador.</span>';
+  }
+});
+$('tg-card-capturar')?.addEventListener('click', ()=>{
+  const video = $('tg-card-video'), canvas = $('tg-card-canvas');
+  const maxW = Math.min((canvas.parentElement && canvas.parentElement.clientWidth) || 460, 460);
+  canvas.width = maxW;
+  canvas.height = Math.round((video.videoHeight||300) * (maxW/(video.videoWidth||400)));
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  tgCardDetenerCamara();
+  const foto = new Image();
+  foto.onload = ()=>{ tgCardImg = foto; $('tg-card-canvas-wrap').style.display = ''; tgCardReset(); };
+  foto.src = canvas.toDataURL('image/png');
 });
 $('tg-card-canvas')?.addEventListener('click', tgCardOnTap);
 $('tg-card-reset')?.addEventListener('click', tgCardReset);
@@ -1996,17 +1933,16 @@ $('tg-card-reset')?.addEventListener('click', tgCardReset);
 $('tg-papel-mm')?.addEventListener('input', e=>{
   const mm = parseFloat(e.target.value);
   const res = $('tg-papel-resultado');
-  if(!mm || mm<30 || mm>90){ res.innerHTML = '<span class="tg-result-muted">Ingresá la medida en mm</span>'; return; }
-  const diamMm = mm/Math.PI;
-  const t = mmATalla(diamMm);
-  const minD = TALLAS_DATA[0].d, maxD = TALLAS_DATA[TALLAS_DATA.length-1].d;
-  const fuera = diamMm < minD-1 || diamMm > maxD+1;
+  if(!mm || mm<40 || mm>80){ res.innerHTML = '<span class="tg-result-muted">Ingresá la medida en mm</span>'; return; }
+  const diamMm = (mm/Math.PI).toFixed(1);
+  const t = mmATalla(parseFloat(diamMm));
+  const fuera = parseFloat(diamMm) < 14.8 || parseFloat(diamMm) > 18.2;
   res.innerHTML = (t && !fuera)
-    ? `<strong>Talla ${tallaLabel(t,TG_UNIT)} (${TG_UNIT.toUpperCase()})</strong><br/><span class="tg-result-sub">Circunferencia ${mm} mm · Diámetro ~${diamMm.toFixed(1)} mm</span>`
-    : '<span class="tg-result-warn">Esta medida queda fuera de la tabla de referencia.</span>';
+    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Circunferencia ${mm} mm · Diámetro ~${diamMm} mm</span>`
+    : '<span class="tg-result-warn">Esta medida queda fuera de la tabla de referencia (talla 11–18) — puede que este diseño en particular no la tenga.</span>';
 });
 function openTallaGuide(){ $('talla-back').classList.add('open'); $('talla-sheet').classList.add('open'); document.body.style.overflow='hidden'; }
-function closeTallaGuide(){ $('talla-back').classList.remove('open'); $('talla-sheet').classList.remove('open'); document.body.style.overflow=''; }
+function closeTallaGuide(){ $('talla-back').classList.remove('open'); $('talla-sheet').classList.remove('open'); document.body.style.overflow=''; tgCardDetenerCamara(); }
 $('talla-close').onclick = closeTallaGuide;
 $('talla-back').onclick = closeTallaGuide;
 </script>
