@@ -21,7 +21,12 @@
       "Bash(grep -n \"function ensureDb\\\\|dbReady = \\(async\\\\|oldEmpresas\\\\|^  }\\)\\(\\);$\\\\|return dbReady\" /Users/nati/Documents/GitHub/portal_temponovo_b2c/api/index.js)",
       "Bash(git fetch *)",
       "Bash(git push *)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(node -c api/calc.js)",
+      "Bash(git restore *)",
+      "Bash(curl -s http://localhost:3000/health)"
     ]
   }
 }
