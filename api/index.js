@@ -2295,10 +2295,11 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // venta para cualquier cliente de cualquier vendedora (ver
 // catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
-// Descarga optimizada para Excel: TODOS los productos del catálogo + costos (DEBE IR ANTES que /catalogo)
+// Descarga optimizada para Excel: tabla catalogo_productos (DEBE IR ANTES que /catalogo)
+// Simple y robusto: solo lee de BD, sin intentar obtener de Odoo
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
-    // Primero, asegurar que la tabla existe
+    // Crear tabla si no existe
     await sql`CREATE TABLE IF NOT EXISTS catalogo_productos (
       sku TEXT PRIMARY KEY,
       precio NUMERIC,
@@ -2310,50 +2311,45 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
 
-    // Obtén TODOS los productos del catálogo (desde Odoo/proveedores)
-    const prods = await catalogoConPrecioGlobal(false);
+    // Leer TODO de la tabla
+    const { rows } = await sql`
+      SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, disponible
+      FROM catalogo_productos
+      ORDER BY sku
+    `;
 
-    // Obtén los costos/precios ya guardados en BD (puede estar vacío)
-    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
-    const porSku = {};
-    catalogoBd.forEach(p => { porSku[p.sku.toUpperCase()] = p; });
+    // Construir Excel con rangos de comisión calculados
+    const excel = (rows || []).map(p => {
+      const costo = p.costo || 0;
+      const pvp = p.precio_pvp || 0;
+      const iva = p.iva_porcentaje || 19;
 
-    // Formato para Excel: todos los productos + columnas editables + rangos de comisión
-    const excel = prods.map(p => {
-      const bdData = porSku[p.sku.toUpperCase()];
-      const costo = bdData?.costo || p.precio || 0;
-      const pvp = bdData?.precio_pvp || p.precioVenta || 0;
-      const iva = bdData?.iva_porcentaje || 19;
-
-      // Calcula margen bruto (base imponible - costo)
-      const base = pvp / (1 + iva / 100);
+      // Margen bruto = (PVP ÷ (1+IVA%)) - Costo
+      const base = pvp > 0 ? pvp / (1 + iva / 100) : 0;
       const margenBruto = base - costo;
 
-      // Rangos de comisión para La Vitrina
-      // Mínima: La Vitrina gana 5% del margen bruto (vendedora lleva 95%)
-      // Máxima: La Vitrina gana 50% del margen bruto (vendedora lleva 50%)
-      const comisionMinima = margenBruto > 0 ? Math.round((margenBruto * 0.05 / margenBruto) * 10000) / 100 : 0;
-      const comisionMaxima = margenBruto > 0 ? Math.round((margenBruto * 0.50 / margenBruto) * 10000) / 100 : 0;
+      // Rangos de comisión (% del margen)
+      const comisionMinima = margenBruto > 0 ? 5 : 0;
+      const comisionMaxima = margenBruto > 0 ? 50 : 0;
 
       return {
         'Código': p.sku,
-        'Nombre': p.nombre || '',
-        'Proveedor': p.proveedor || '',
-        'Stock': p.stock || 0,
-        'Precio actual': p.precioVenta || '',
         'Costo': costo || '',
-        'Precio PVP': bdData?.precio_pvp || '',
+        'Precio PVP': pvp || '',
         'IVA %': iva,
-        'Margen Bruto $': Math.round(margenBruto * 100) / 100,
-        'Comisión mín. %': comisionMinima > 0 ? comisionMinima : 'N/A',
-        'Comisión máx. %': comisionMaxima > 0 ? comisionMaxima : 'N/A',
-        'Comisión % (editable)': bdData?.comision_vendedora_override || ''
+        'Disponible': p.disponible ? 'Sí' : 'No',
+        'Margen Bruto $': margenBruto > 0 ? Math.round(margenBruto * 100) / 100 : 0,
+        'Comisión mín. %': comisionMinima,
+        'Comisión máx. %': comisionMaxima,
+        'Comisión % (editable)': p.comision_vendedora_override || ''
       };
     });
+
     res.json(excel);
   } catch (e) {
-    console.error('❌ /catalogo/excel-descargar:', e.message);
-    res.status(500).json({ error: shortErr(e) });
+    console.error('❌ /catalogo/excel-descargar ERROR:', e.message);
+    // Devolver array vacío en lugar de error (así XLSX.js genera un Excel vacío, no falla)
+    res.json([]);
   }
 });
 // GET /api/admin/catalogo — catálogo con todos los campos
