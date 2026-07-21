@@ -2318,19 +2318,36 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     const porSku = {};
     catalogoBd.forEach(p => { porSku[p.sku.toUpperCase()] = p; });
 
-    // Formato para Excel: todos los productos + columnas editables
+    // Formato para Excel: todos los productos + columnas editables + rangos de comisión
     const excel = prods.map(p => {
       const bdData = porSku[p.sku.toUpperCase()];
+      const costo = bdData?.costo || p.precio || 0;
+      const pvp = bdData?.precio_pvp || p.precioVenta || 0;
+      const iva = bdData?.iva_porcentaje || 19;
+
+      // Calcula margen bruto (base imponible - costo)
+      const base = pvp / (1 + iva / 100);
+      const margenBruto = base - costo;
+
+      // Rangos de comisión para La Vitrina
+      // Mínima: La Vitrina gana 5% del margen bruto (vendedora lleva 95%)
+      // Máxima: La Vitrina gana 50% del margen bruto (vendedora lleva 50%)
+      const comisionMinima = margenBruto > 0 ? Math.round((margenBruto * 0.05 / margenBruto) * 10000) / 100 : 0;
+      const comisionMaxima = margenBruto > 0 ? Math.round((margenBruto * 0.50 / margenBruto) * 10000) / 100 : 0;
+
       return {
         'Código': p.sku,
         'Nombre': p.nombre || '',
         'Proveedor': p.proveedor || '',
         'Stock': p.stock || 0,
         'Precio actual': p.precioVenta || '',
-        'Costo': bdData?.costo || p.precio || '',  // Fallback a precio de Odoo si no hay costo grabado
+        'Costo': costo || '',
         'Precio PVP': bdData?.precio_pvp || '',
-        'IVA %': bdData?.iva_porcentaje || 19,
-        'Comisión %': bdData?.comision_vendedora_override || ''
+        'IVA %': iva,
+        'Margen Bruto $': Math.round(margenBruto * 100) / 100,
+        'Comisión mín. %': comisionMinima > 0 ? comisionMinima : 'N/A',
+        'Comisión máx. %': comisionMaxima > 0 ? comisionMaxima : 'N/A',
+        'Comisión % (editable)': bdData?.comision_vendedora_override || ''
       };
     });
     res.json(excel);
