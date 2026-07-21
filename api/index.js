@@ -2295,10 +2295,10 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // venta para cualquier cliente de cualquier vendedora (ver
 // catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
-// Descarga optimizada para Excel: todos los productos con costos (DEBE IR ANTES que /catalogo)
+// Descarga optimizada para Excel: TODOS los productos del catálogo + costos (DEBE IR ANTES que /catalogo)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
-    // Primero, asegurar que la tabla existe (trigger de la migración automática)
+    // Primero, asegurar que la tabla existe
     await sql`CREATE TABLE IF NOT EXISTS catalogo_productos (
       sku TEXT PRIMARY KEY,
       precio NUMERIC,
@@ -2310,19 +2310,29 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
 
-    // Ahora sí, leer los datos
-    const { rows } = await sql`SELECT sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos ORDER BY sku`;
+    // Obtén TODOS los productos del catálogo (desde Odoo/proveedores)
+    const prods = await catalogoConPrecioGlobal(false);
 
-    // Formato optimizado para Excel: solo lo que el usuario necesita editar
-    const excel = (rows || []).map(p => ({
-      'Código': p.sku,
-      'Precio': p.precio || '',
-      'Disponible': p.disponible ? 'Sí' : 'No',
-      'Costo': p.costo || '',
-      'Precio PVP': p.precio_pvp || '',
-      'IVA': p.iva_porcentaje || 19,
-      'Comisión': p.comision_vendedora_override || ''
-    }));
+    // Obtén los costos/precios ya guardados en BD (puede estar vacío)
+    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
+    const porSku = {};
+    catalogoBd.forEach(p => { porSku[p.sku.toUpperCase()] = p; });
+
+    // Formato para Excel: todos los productos + columnas editables
+    const excel = prods.map(p => {
+      const bdData = porSku[p.sku.toUpperCase()];
+      return {
+        'Código': p.sku,
+        'Nombre': p.nombre || '',
+        'Proveedor': p.proveedor || '',
+        'Stock': p.stock || 0,
+        'Precio actual': p.precioVenta || '',
+        'Costo': bdData?.costo || p.precio || '',  // Fallback a precio de Odoo si no hay costo grabado
+        'Precio PVP': bdData?.precio_pvp || '',
+        'IVA %': bdData?.iva_porcentaje || 19,
+        'Comisión %': bdData?.comision_vendedora_override || ''
+      };
+    });
     res.json(excel);
   } catch (e) {
     console.error('❌ /catalogo/excel-descargar:', e.message);
