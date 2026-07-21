@@ -7,6 +7,7 @@ const crypto   = require('crypto');
 const path     = require('path');
 const fs       = require('fs');
 const { sql, pool } = require('./db');
+const { getComision, calcularLinea, sumarLineas } = require('./calc');
 // nodemailer es opcional: si falta el paquete, el resto del portal sigue funcionando
 let nodemailer = null;
 try { nodemailer = require('nodemailer'); } catch (e) { console.warn('⚠ nodemailer no instalado — el formulario de contacto quedará solo en logs'); }
@@ -333,6 +334,12 @@ function ensureDb() {
       disponible BOOLEAN NOT NULL DEFAULT true,
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
+    // Nuevas columnas para costo y margen (Fase 2: sistema de precios escalable)
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS costo NUMERIC DEFAULT NULL`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS precio_pvp NUMERIC DEFAULT NULL`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC DEFAULT 19`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS comision_vendedora_override NUMERIC DEFAULT NULL`;
+
     await sql`CREATE TABLE IF NOT EXISTS categoria_multiplicador (
       familia TEXT PRIMARY KEY,
       multiplicador NUMERIC NOT NULL DEFAULT 2,
@@ -344,6 +351,8 @@ function ensureDb() {
     // frontend).
     await sql`ALTER TABLE categoria_multiplicador ADD COLUMN IF NOT EXISTS icono TEXT DEFAULT ''`;
     await sql`ALTER TABLE categoria_multiplicador ADD COLUMN IF NOT EXISTS nombre TEXT DEFAULT ''`;
+    // Override de comisión por categoría (Fase 2)
+    await sql`ALTER TABLE categoria_multiplicador ADD COLUMN IF NOT EXISTS comision_override NUMERIC DEFAULT NULL`;
 
     // ── ACADEMIA ───────────────────────────────────────────────────
     // Contenido de formación para las vendedoras. Lo crea solo el admin.
@@ -1600,23 +1609,66 @@ app.post('/api/pedido', requireClient, async (req, res) => {
       let proveedor = null;
       try { proveedor = await getProveedorActivo(proveedorId); } catch {}
 
-      // Se guarda categoría y total POR LÍNEA (no solo el sku/cantidad que
-      // pide Odoo) para poder reportar después por tipo de producto sin
-      // tener que volver a leer el catálogo — que puede haber cambiado.
-      // Costo y comisión también se graban por línea, en el momento de la
-      // venta: la comisión es sobre la GANANCIA (total − costo), no sobre
-      // el total facturado.
-      let total = 0, comisionTotal = 0;
-      const productosConDetalle = lineas.map(l => {
+      // Carga datos nuevos de BD y calcula snapshot inmutable de cada línea
+      // Fase 2: costo, precio_pvp, iva%, comisión con cascada (producto → categoría → vendedora)
+      let total = 0, utilidadTotal = 0, comisionTotal = 0;
+      const productosConDetalle = [];
+
+      for (const l of lineas) {
         const info = porPid[proveedorId + '::' + l.sku] || primeroPorSku[l.sku];
+        const categoria = info ? famOf(info) : '';
         const qty = parseFloat(l.quantity) || 1;
-        const costoUnit = info ? info.precio : 0;
-        const lineaTotal = Math.round((info ? info.precioVenta : 0) * qty);
-        const costoLinea = Math.round(costoUnit * qty);
-        const comisionLinea = Math.round((lineaTotal - costoLinea) * (comisionPct / 100));
-        total += lineaTotal; comisionTotal += comisionLinea;
-        return { sku: l.sku, quantity: qty, categoria: info ? famOf(info) : '', total: lineaTotal, costo: costoLinea, comision: comisionLinea };
-      });
+
+        // Obtén valores de BD para nuevo sistema (Fase 2)
+        let producto_bd = null;
+        try {
+          const { rows } = await sql`SELECT costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos WHERE sku = ${l.sku.toUpperCase()}`;
+          producto_bd = rows?.[0];
+        } catch (e) { console.warn('⚠ Fallo lectura producto en BD:', l.sku, e.message); }
+
+        // Obtén comisión override de categoría
+        let categoria_bd = null;
+        if (categoria) {
+          try {
+            const { rows } = await sql`SELECT comision_override FROM categoria_multiplicador WHERE familia = ${categoria}`;
+            categoria_bd = rows?.[0];
+          } catch (e) { console.warn('⚠ Fallo lectura categoría en BD:', categoria, e.message); }
+        }
+
+        // Usa valores nuevos si existen, sino fallback a old system
+        const costo_unitario = producto_bd?.costo != null ? parseFloat(producto_bd.costo) : (info?.precio || 0);
+        const precio_pvp = producto_bd?.precio_pvp != null ? parseFloat(producto_bd.precio_pvp) : (info?.precioVenta || 0);
+        const iva_porcentaje = producto_bd?.iva_porcentaje != null ? parseFloat(producto_bd.iva_porcentaje) : 19;
+
+        // Cascada de comisión: producto → categoría → vendedora
+        let comision_porcentaje = comisionPct; // default vendedora
+        if (producto_bd?.comision_vendedora_override != null) {
+          comision_porcentaje = parseFloat(producto_bd.comision_vendedora_override);
+        } else if (categoria_bd?.comision_override != null) {
+          comision_porcentaje = parseFloat(categoria_bd.comision_override);
+        }
+
+        // Calcula snapshot de línea
+        const calculos = calcularLinea({
+          cantidad: qty,
+          costo_unitario,
+          precio_pvp,
+          iva_porcentaje,
+          comision_porcentaje
+        });
+
+        total += calculos.total_linea;
+        comisionTotal += calculos.comision_monto;
+        utilidadTotal += calculos.utilidad_vitrina;
+
+        // Graba snapshot completo en el JSON
+        productosConDetalle.push({
+          sku: l.sku,
+          quantity: qty,
+          categoria,
+          ...calculos // spread de base_imponible, monto_iva, margen_bruto, comision_monto, utilidad_vitrina, total_linea, etc.
+        });
+      }
 
       let idVenta = null, nombreOdoo = null, errorMsg = null;
       if (!proveedor) {
@@ -2246,14 +2298,27 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
   try {
     const prods = await catalogoConPrecioGlobal(false);
+    // Obtén los nuevos campos (Fase 2) en un solo lookup
+    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
+    const porSku = {};
+    catalogoBd.forEach(p => { porSku[p.sku] = p; });
     const porGrupo = {};
     prods.forEach(p => { const k = p.proveedorId + '::' + p.nombre; porGrupo[k] = (porGrupo[k] || 0) + 1; });
-    res.json(prods.map(p => ({
-      proveedorId: p.proveedorId, proveedor: p.proveedorCodigo, sku: p.sku, nombre: p.nombre,
-      categoria: famOf(p), stock: p.stock, disponible: p.disponible,
-      precioFijo: p.precioFijo, precioVenta: p.precioVenta,
-      variantes: porGrupo[p.proveedorId + '::' + p.nombre]
-    })));
+    res.json(prods.map(p => {
+      const bdData = porSku[p.sku.toUpperCase()];
+      const margenBruto = bdData && bdData.precio_pvp ? (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) - bdData.costo : null;
+      const margenBrutoPct = margenBruto && bdData?.precio_pvp ? Math.round(margenBruto / (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) * 10000) / 100 : null;
+      return {
+        proveedorId: p.proveedorId, proveedor: p.proveedorCodigo, sku: p.sku, nombre: p.nombre,
+        categoria: famOf(p), stock: p.stock, disponible: p.disponible,
+        precioFijo: p.precioFijo, precioVenta: p.precioVenta,
+        // Fase 2: nuevos campos
+        costo: bdData?.costo, precio_pvp: bdData?.precio_pvp, iva_porcentaje: bdData?.iva_porcentaje || 19,
+        comision_vendedora_override: bdData?.comision_vendedora_override,
+        margenBruto, margenBrutoPct,
+        variantes: porGrupo[p.proveedorId + '::' + p.nombre]
+      };
+    }));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.put('/api/admin/catalogo/:sku', requireAdmin, async (req, res) => {
@@ -2262,10 +2327,23 @@ app.put('/api/admin/catalogo/:sku', requireAdmin, async (req, res) => {
     if (!sku) return res.status(400).json({ error: 'SKU inválido' });
     const precioNum = req.body?.precio != null && req.body.precio !== '' ? parseFloat(req.body.precio) : null;
     const disponible = req.body?.disponible !== false;
+    // Fase 2: nuevos campos
+    const costo = req.body?.costo != null && req.body.costo !== '' ? parseFloat(req.body.costo) : null;
+    const precio_pvp = req.body?.precio_pvp != null && req.body.precio_pvp !== '' ? parseFloat(req.body.precio_pvp) : null;
+    const iva_porcentaje = req.body?.iva_porcentaje != null ? parseFloat(req.body.iva_porcentaje) : 19;
+    const comision_vendedora_override = req.body?.comision_vendedora_override != null && req.body.comision_vendedora_override !== '' ? parseFloat(req.body.comision_vendedora_override) : null;
+
     await sql`
-      INSERT INTO catalogo_productos (sku, precio, disponible, updated_at)
-      VALUES (${sku}, ${precioNum > 0 ? precioNum : null}, ${disponible}, now())
-      ON CONFLICT (sku) DO UPDATE SET precio = ${precioNum > 0 ? precioNum : null}, disponible = ${disponible}, updated_at = now()`;
+      INSERT INTO catalogo_productos (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, updated_at)
+      VALUES (${sku}, ${precioNum > 0 ? precioNum : null}, ${disponible}, ${costo}, ${precio_pvp}, ${iva_porcentaje}, ${comision_vendedora_override}, now())
+      ON CONFLICT (sku) DO UPDATE SET
+        precio = ${precioNum > 0 ? precioNum : null},
+        disponible = ${disponible},
+        costo = ${costo},
+        precio_pvp = ${precio_pvp},
+        iva_porcentaje = ${iva_porcentaje},
+        comision_vendedora_override = ${comision_vendedora_override},
+        updated_at = now()`;
     limpiarCacheCatalogoPrecios();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
@@ -2278,7 +2356,16 @@ app.post('/api/admin/catalogo/excel', requireAdmin, async (req, res) => {
     const { filas } = req.body?.data || {};
     if (!Array.isArray(filas) || !filas.length) return res.status(400).json({ error: 'No hay filas para cargar' });
     const limpias = filas
-      .map(f => ({ sku: String(f?.sku || '').trim().toUpperCase(), precio: parseFloat(f?.precio), disponible: f?.disponible !== false }))
+      .map(f => ({
+        sku: String(f?.sku || '').trim().toUpperCase(),
+        precio: parseFloat(f?.precio),
+        disponible: f?.disponible !== false,
+        // Fase 2: nuevos campos
+        costo: f?.costo != null ? parseFloat(f.costo) : null,
+        precio_pvp: f?.precio_pvp != null ? parseFloat(f.precio_pvp) : null,
+        iva_porcentaje: f?.iva_porcentaje != null ? parseFloat(f.iva_porcentaje) : 19,
+        comision_vendedora_override: f?.comision_vendedora_override != null ? parseFloat(f.comision_vendedora_override) : null
+      }))
       .filter(f => f.sku);
     if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un código de producto reconocible' });
     const client = await pool.connect();
@@ -2286,9 +2373,11 @@ app.post('/api/admin/catalogo/excel', requireAdmin, async (req, res) => {
       await client.query('BEGIN');
       for (const f of limpias) {
         await client.query(
-          `INSERT INTO catalogo_productos (sku, precio, disponible, updated_at) VALUES ($1, $2, $3, now())
-           ON CONFLICT (sku) DO UPDATE SET precio = $2, disponible = $3, updated_at = now()`,
-          [f.sku, f.precio > 0 ? f.precio : null, f.disponible]
+          `INSERT INTO catalogo_productos (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+           ON CONFLICT (sku) DO UPDATE SET
+             precio = $2, disponible = $3, costo = $4, precio_pvp = $5, iva_porcentaje = $6, comision_vendedora_override = $7, updated_at = now()`,
+          [f.sku, f.precio > 0 ? f.precio : null, f.disponible, f.costo, f.precio_pvp, f.iva_porcentaje, f.comision_vendedora_override]
         );
       }
       await client.query('COMMIT');
@@ -2303,12 +2392,13 @@ app.get('/api/admin/categorias-multiplicador', requireAdmin, async (_req, res) =
   try {
     const prods = await productosClienteMulti();
     const familias = [...new Set(prods.map(p => famOf(p)))].sort();
-    const { rows } = await sql`SELECT familia, multiplicador, icono, nombre FROM categoria_multiplicador`;
+    const { rows } = await sql`SELECT familia, multiplicador, icono, nombre, comision_override FROM categoria_multiplicador`;
     const map = {}; rows.forEach(r => { map[r.familia] = r; });
     res.json(familias.map(f => ({
       familia: f,
       multiplicador: map[f] ? parseFloat(map[f].multiplicador) || MULT_DEFAULT : MULT_DEFAULT,
-      icono: map[f]?.icono || '', nombre: map[f]?.nombre || ''
+      icono: map[f]?.icono || '', nombre: map[f]?.nombre || '',
+      comision_override: map[f]?.comision_override || null
     })));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -2319,9 +2409,16 @@ app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req
     if (!(multiplicador > 0)) return res.status(400).json({ error: 'Multiplicador inválido' });
     const icono = String(req.body?.icono || '').trim();
     const nombre = String(req.body?.nombre || '').trim();
+    const comision_override = req.body?.comision_override != null && req.body.comision_override !== '' ? parseFloat(req.body.comision_override) : null;
     await sql`
-      INSERT INTO categoria_multiplicador (familia, multiplicador, icono, nombre, updated_at) VALUES (${familia}, ${multiplicador}, ${icono}, ${nombre}, now())
-      ON CONFLICT (familia) DO UPDATE SET multiplicador = ${multiplicador}, icono = ${icono}, nombre = ${nombre}, updated_at = now()`;
+      INSERT INTO categoria_multiplicador (familia, multiplicador, icono, nombre, comision_override, updated_at)
+      VALUES (${familia}, ${multiplicador}, ${icono}, ${nombre}, ${comision_override}, now())
+      ON CONFLICT (familia) DO UPDATE SET
+        multiplicador = ${multiplicador},
+        icono = ${icono},
+        nombre = ${nombre},
+        comision_override = ${comision_override},
+        updated_at = now()`;
     limpiarCacheCatalogoPrecios();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }

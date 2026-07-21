@@ -183,7 +183,7 @@ tr:last-child td{border-bottom:none;}
       <!-- PRODUCTOS (lista de precios global) -->
       <section class="section" id="sec-catalogo">
         <h2 class="page-t">Productos</h2>
-        <p class="page-s">Un solo precio de venta para cualquier vendedora. Si un producto no tiene precio fijo acá, se calcula con el multiplicador de su categoría. Lo que apagues en "Disponible" desaparece de todas las vitrinas (de cada vendedora y de la pública).</p>
+        <p class="page-s"><b>Fase 2: Sistema de costos y márgenes.</b> Por cada producto puedes definir Costo, Precio PVP (precio de venta al público), IVA%, y Comisión override (si quieres que esta categoria/producto tenga diferente % que el de la vendedora). El margen bruto se calcula automático. Lo que apagues en "Disponible" desaparece de todas las vitrinas.</p>
 
         <div class="card">
           <div class="card-h">Categorías</div>
@@ -193,7 +193,7 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Cargar precios y disponibilidad por Excel</div>
-          <p class="note">Primera columna: código del producto. Además: una columna con "Precio" (vacío = usa el multiplicador de su categoría) y opcionalmente "Disponible" (si o no / true o false — vacío = disponible).</p>
+          <p class="note"><b>Columnas soportadas:</b> "Código" (obligatoria), "Precio" (antiguo sistema, vacío = usa multiplicador), "Disponible" (si/no, vacío = disponible). <b>Fase 2 (nuevas):</b> "Costo", "Precio PVP", "IVA", "Comisión" (todas opcionales, vacío = no se modifica).</p>
           <div class="row" style="margin-top:10px">
             <button class="btn" id="cat-subir">Subir Excel</button>
           </div>
@@ -683,18 +683,27 @@ function renderCatalogo() {
     return true;
   });
   if (!rows.length) { $('cat-list').innerHTML = '<div class="empty">Sin productos.</div>'; return; }
-  $('cat-list').innerHTML = `<table><thead><tr><th>Proveedor</th><th>Producto</th><th>Variantes</th><th>Stock</th><th>Disponible</th><th>Precio fijo</th><th>Precio de venta</th><th></th></tr></thead><tbody>
-    ${rows.map(p => `<tr data-row="${esc(p.sku)}">
-      <td class="mono">${esc(p.proveedor)}</td>
-      <td>${esc(p.nombre)}<div class="note mono">${esc(p.sku)}</div></td>
-      <td class="mono">${p.variantes > 1 ? p.variantes : '—'}</td>
-      <td class="mono">${p.stock}</td>
-      <td><button class="toggle ${p.disponible?'on':''}" data-cat-toggle="${esc(p.sku)}" title="Disponible"><span class="dot"></span></button></td>
-      <td><input class="fld-in" style="max-width:110px" type="number" placeholder="—" value="${p.precioFijo != null ? p.precioFijo : ''}" data-cat-precio="${esc(p.sku)}"/></td>
-      <td class="mono">${fmt(p.precioVenta)}${p.precioFijo == null ? ' <span class="note">(×cat.)</span>' : ''}</td>
-      <td><button class="btn btn-sm dark" data-cat-guardar="${esc(p.sku)}">Guardar</button></td>
-    </tr>`).join('')}
-  </tbody></table>`;
+  $('cat-list').innerHTML = `<div style="overflow-x:auto"><table style="font-size:12px"><thead><tr><th>Proveedor</th><th>Producto</th><th>Variantes</th><th>Stock</th><th>Disp.</th><th>Costo<br><span class="note">(Fase 2)</span></th><th>PVP<br><span class="note">(Fase 2)</span></th><th>IVA %<br><span class="note">(Fase 2)</span></th><th>Comisión %<br><span class="note">Override</span></th><th>Margen<br>Bruto $</th><th>Margen %</th><th></th></tr></thead><tbody>
+    ${rows.map(p => {
+      const margenBruto = p.margenBruto != null ? p.margenBruto : 0;
+      const margenPct = p.margenBrutoPct != null ? p.margenBrutoPct : 0;
+      const margenColor = margenBruto < 0 ? '#ff4444' : (margenBruto < 1000 ? '#ffaa00' : '#44aa44');
+      return `<tr data-row="${esc(p.sku)}" style="${margenBruto < 0 ? 'background:#ffe6e6' : ''}">
+        <td class="mono">${esc(p.proveedor)}</td>
+        <td>${esc(p.nombre)}<div class="note mono">${esc(p.sku)}</div></td>
+        <td class="mono">${p.variantes > 1 ? p.variantes : '—'}</td>
+        <td class="mono">${p.stock}</td>
+        <td><button class="toggle ${p.disponible?'on':''}" data-cat-toggle="${esc(p.sku)}" title="Disponible"><span class="dot"></span></button></td>
+        <td><input class="fld-in" style="max-width:80px" type="number" placeholder="—" value="${p.costo != null ? p.costo : ''}" data-cat-costo="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
+        <td><input class="fld-in" style="max-width:80px" type="number" placeholder="—" value="${p.precio_pvp != null ? p.precio_pvp : ''}" data-cat-pvp="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
+        <td><input class="fld-in" style="max-width:60px" type="number" placeholder="19" value="${p.iva_porcentaje != null ? p.iva_porcentaje : 19}" data-cat-iva="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
+        <td><input class="fld-in" style="max-width:70px" type="number" placeholder="—" value="${p.comision_vendedora_override != null ? p.comision_vendedora_override : ''}" data-cat-comision="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
+        <td class="mono" style="color:${margenColor}">${fmt(margenBruto)}</td>
+        <td class="mono" style="color:${margenColor}">${margenPct.toFixed(1)}%</td>
+        <td><button class="btn btn-sm dark" data-cat-guardar="${esc(p.sku)}">Guardar</button></td>
+      </tr>`;
+    }).join('')}
+  </tbody></table></div>`;
   $('cat-list').querySelectorAll('[data-cat-toggle]').forEach(b => b.onclick = async () => {
     const sku = b.dataset.catToggle;
     const p = CATALOGO.find(x => x.sku === sku);
@@ -707,10 +716,22 @@ function renderCatalogo() {
   $('cat-list').querySelectorAll('[data-cat-guardar]').forEach(b => b.onclick = async () => {
     const sku = b.dataset.catGuardar;
     const p = CATALOGO.find(x => x.sku === sku);
-    const input = $('cat-list').querySelector('[data-cat-precio="' + CSS.escape(sku) + '"]');
-    const precio = input.value === '' ? null : parseFloat(input.value);
+    const precio = ($('cat-list').querySelector('[data-cat-precio="' + CSS.escape(sku) + '"]')?.value || '');
+    const costo = ($('cat-list').querySelector('[data-cat-costo="' + CSS.escape(sku) + '"]')?.value || '');
+    const precio_pvp = ($('cat-list').querySelector('[data-cat-pvp="' + CSS.escape(sku) + '"]')?.value || '');
+    const iva_porcentaje = ($('cat-list').querySelector('[data-cat-iva="' + CSS.escape(sku) + '"]')?.value || '');
+    const comision_vendedora_override = ($('cat-list').querySelector('[data-cat-comision="' + CSS.escape(sku) + '"]')?.value || '');
+    const body = {
+      precio: precio === '' ? null : parseFloat(precio),
+      disponible: p.disponible,
+      // Fase 2: nuevos campos
+      costo: costo === '' ? null : parseFloat(costo),
+      precio_pvp: precio_pvp === '' ? null : parseFloat(precio_pvp),
+      iva_porcentaje: iva_porcentaje === '' ? 19 : parseFloat(iva_porcentaje),
+      comision_vendedora_override: comision_vendedora_override === '' ? null : parseFloat(comision_vendedora_override)
+    };
     try {
-      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify({ precio, disponible: p.disponible }) });
+      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify(body) });
       loadCatalogo();
     } catch (e) { alert(e.message); }
   });
@@ -726,14 +747,32 @@ $('cat-excel-input').onchange = async (e) => {
     if (!raw.length) return showMsg('cat-excel-msg', 'El archivo está vacío.', false);
     const cols = Object.keys(raw[0]);
     const kSku = cols.find(k => /c[oó]d|sku/i.test(k)) || cols[0];
-    const kPrecio = cols.find(k => /precio/i.test(k));
+    const kPrecio = cols.find(k => /precio(?!\s*pvp)/i.test(k));
     const kDisp = cols.find(k => /dispon/i.test(k));
+    // Fase 2: nuevos campos
+    const kCosto = cols.find(k => /costo/i.test(k));
+    const kPrecioPvp = cols.find(k => /precio\s*pvp/i.test(k));
+    const kIva = cols.find(k => /iva/i.test(k));
+    const kComision = cols.find(k => /comisi[óo]n/i.test(k));
+    const parseNum = (str) => {
+      if (!str) return null;
+      const num = parseFloat(String(str || '').replace(/[^\d.,]/g, '').replace(',', '.'));
+      return isNaN(num) ? null : num;
+    };
     const filas = raw.map(r => {
       const sku = String(r[kSku] || '').trim();
       const precioStr = kPrecio ? String(r[kPrecio] || '').replace(/[^\d.,]/g, '').replace(',', '.') : '';
       const dispStr = kDisp ? String(r[kDisp] || '').trim().toLowerCase() : '';
       const disponible = !dispStr || ['si', 'sí', 'true', '1', 'x'].includes(dispStr);
-      return { sku, precio: precioStr ? parseFloat(precioStr) : null, disponible };
+      return {
+        sku,
+        precio: precioStr ? parseFloat(precioStr) : null,
+        disponible,
+        costo: parseNum(r[kCosto]),
+        precio_pvp: parseNum(r[kPrecioPvp]),
+        iva_porcentaje: parseNum(r[kIva]),
+        comision_vendedora_override: parseNum(r[kComision])
+      };
     }).filter(f => f.sku);
     if (!filas.length) return showMsg('cat-excel-msg', 'No se encontró ninguna fila con código de producto.', false);
     const r = await api('/catalogo/excel', { method: 'POST', body: JSON.stringify({ data: { filas } }) });
