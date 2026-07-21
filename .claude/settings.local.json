@@ -29,7 +29,8 @@
       "Bash(curl -s http://localhost:3000/health)",
       "Bash(git commit -m 'Fix: GET /catalogo/excel-descargar - mover antes de PUT para evitar conflicto de rutas *)",
       "Bash(git commit -m 'Fix: Simplificar endpoint descarga - leer directo de DB *)",
-      "Bash(git commit -m 'Fix: Agregar timeout al endpoint descarga \\(evitar 504\\) *)"
+      "Bash(git commit -m 'Fix: Agregar timeout al endpoint descarga \\(evitar 504\\) *)",
+      "Bash(git commit -m 'Fix: CREATE TABLE al inicio de descarga para auto-inicializar BD *)"
     ]
   }
 }

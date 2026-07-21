@@ -2298,14 +2298,21 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // Descarga optimizada para Excel: todos los productos con costos (DEBE IR ANTES que /catalogo)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
-    // Timeout: si la BD no responde en 5s, devolver error rápido
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout conectando a BD')), 5000)
-    );
-    const { rows } = await Promise.race([
-      sql`SELECT sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos ORDER BY sku`,
-      timeoutPromise
-    ]);
+    // Primero, asegurar que la tabla existe (trigger de la migración automática)
+    await sql`CREATE TABLE IF NOT EXISTS catalogo_productos (
+      sku TEXT PRIMARY KEY,
+      precio NUMERIC,
+      disponible BOOLEAN NOT NULL DEFAULT true,
+      costo NUMERIC DEFAULT NULL,
+      precio_pvp NUMERIC DEFAULT NULL,
+      iva_porcentaje NUMERIC DEFAULT 19,
+      comision_vendedora_override NUMERIC DEFAULT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`;
+
+    // Ahora sí, leer los datos
+    const { rows } = await sql`SELECT sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos ORDER BY sku`;
+
     // Formato optimizado para Excel: solo lo que el usuario necesita editar
     const excel = (rows || []).map(p => ({
       'Código': p.sku,
