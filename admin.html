@@ -202,17 +202,7 @@ tr:last-child td{border-bottom:none;}
           <input type="file" id="cat-excel-input" accept=".xlsx,.xls,.csv" style="display:none"/>
         </div>
 
-        <div class="card">
-          <div class="card-h">Catálogo completo</div>
-          <div class="row" style="margin-bottom:10px">
-            <input class="fld-in" id="cat-buscar" placeholder="Buscar por nombre, código o proveedor…" style="max-width:360px"/>
-          </div>
-          <div style="margin-bottom:6px"><span class="fld-l">Proveedor</span></div>
-          <div class="chip-list" id="cat-filtro-prov" style="margin-bottom:12px"></div>
-          <div style="margin-bottom:6px"><span class="fld-l">Categoría</span></div>
-          <div class="chip-list" id="cat-filtro-categoria" style="margin-bottom:14px"></div>
-          <div id="cat-list"><div class="empty">Cargando…</div></div>
-        </div>
+        <!-- Tabla eliminada - todo se maneja por Excel (mejor performance) -->
       </section>
 
       <!-- PROVEEDORES -->
@@ -427,7 +417,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
-  if (btn.dataset.sec === 'catalogo') { loadCatalogo(); loadCategoriasMult(); }
+  if (btn.dataset.sec === 'catalogo') { loadCategoriasMult(); }
 });
 
 /* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
@@ -648,7 +638,6 @@ async function loadCategoriasMult() {
         const multiplicador = parseFloat($('catmult-list').querySelector('[data-cm-mult="' + CSS.escape(familia) + '"]').value) || 2;
         try {
           await api('/categorias-multiplicador/' + encodeURIComponent(familia), { method: 'PUT', body: JSON.stringify({ multiplicador, icono, nombre }) });
-          loadCatalogo();
           btn.textContent = '✓ Guardado'; setTimeout(() => { btn.textContent = 'Guardar'; }, 1500);
         } catch (e) { alert(e.message); }
       };
@@ -656,88 +645,7 @@ async function loadCategoriasMult() {
   } catch (e) { $('catmult-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
 let CAT_FILTRO_PROV = '', CAT_FILTRO_CATEGORIA = '';
-async function loadCatalogo() {
-  try {
-    CATALOGO = await api('/catalogo');
-    renderFiltrosCatalogo();
-    renderCatalogo();
-  } catch (e) { $('cat-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
-}
-function chipsFiltro(elId, valores, current, onPick) {
-  const el = $(elId);
-  el.innerHTML = ['', ...valores].map(v =>
-    `<button type="button" class="chk ${current === v ? 'on' : ''}" data-v="${esc(v)}">${v ? esc(v) : 'Todos'}</button>`).join('');
-  el.querySelectorAll('[data-v]').forEach(b => b.onclick = () => onPick(b.dataset.v));
-}
-function renderFiltrosCatalogo() {
-  const proveedores = [...new Set(CATALOGO.map(p => p.proveedor))].filter(Boolean).sort();
-  const categorias = [...new Set(CATALOGO.map(p => p.categoria))].filter(Boolean).sort();
-  chipsFiltro('cat-filtro-prov', proveedores, CAT_FILTRO_PROV, v => { CAT_FILTRO_PROV = v; renderFiltrosCatalogo(); renderCatalogo(); });
-  chipsFiltro('cat-filtro-categoria', categorias, CAT_FILTRO_CATEGORIA, v => { CAT_FILTRO_CATEGORIA = v; renderFiltrosCatalogo(); renderCatalogo(); });
-}
-function renderCatalogo() {
-  const q = ($('cat-buscar').value || '').trim().toLowerCase();
-  const rows = CATALOGO.filter(p => {
-    if (CAT_FILTRO_PROV && p.proveedor !== CAT_FILTRO_PROV) return false;
-    if (CAT_FILTRO_CATEGORIA && p.categoria !== CAT_FILTRO_CATEGORIA) return false;
-    if (q && !((p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.proveedor || '').toLowerCase().includes(q))) return false;
-    return true;
-  });
-  if (!rows.length) { $('cat-list').innerHTML = '<div class="empty">Sin productos.</div>'; return; }
-  $('cat-list').innerHTML = `<div style="overflow-x:auto"><table style="font-size:12px"><thead><tr><th>Proveedor</th><th>Producto</th><th>Variantes</th><th>Stock</th><th>Disp.</th><th>Costo<br><span class="note">(Fase 2)</span></th><th>PVP<br><span class="note">(Fase 2)</span></th><th>IVA %<br><span class="note">(Fase 2)</span></th><th>Comisión %<br><span class="note">Override</span></th><th>Margen<br>Bruto $</th><th>Margen %</th><th></th></tr></thead><tbody>
-    ${rows.map(p => {
-      const margenBruto = p.margenBruto != null ? p.margenBruto : 0;
-      const margenPct = p.margenBrutoPct != null ? p.margenBrutoPct : 0;
-      const margenColor = margenBruto < 0 ? '#ff4444' : (margenBruto < 1000 ? '#ffaa00' : '#44aa44');
-      return `<tr data-row="${esc(p.sku)}" style="${margenBruto < 0 ? 'background:#ffe6e6' : ''}">
-        <td class="mono">${esc(p.proveedor)}</td>
-        <td>${esc(p.nombre)}<div class="note mono">${esc(p.sku)}</div></td>
-        <td class="mono">${p.variantes > 1 ? p.variantes : '—'}</td>
-        <td class="mono">${p.stock}</td>
-        <td><button class="toggle ${p.disponible?'on':''}" data-cat-toggle="${esc(p.sku)}" title="Disponible"><span class="dot"></span></button></td>
-        <td><input class="fld-in" style="max-width:80px" type="number" placeholder="—" value="${p.costo != null ? p.costo : ''}" data-cat-costo="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
-        <td><input class="fld-in" style="max-width:80px" type="number" placeholder="—" value="${p.precio_pvp != null ? p.precio_pvp : ''}" data-cat-pvp="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
-        <td><input class="fld-in" style="max-width:60px" type="number" placeholder="19" value="${p.iva_porcentaje != null ? p.iva_porcentaje : 19}" data-cat-iva="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
-        <td><input class="fld-in" style="max-width:70px" type="number" placeholder="—" value="${p.comision_vendedora_override != null ? p.comision_vendedora_override : ''}" data-cat-comision="${esc(p.sku)}" data-cat-row-sku="${esc(p.sku)}"/></td>
-        <td class="mono" style="color:${margenColor}">${fmt(margenBruto)}</td>
-        <td class="mono" style="color:${margenColor}">${margenPct.toFixed(1)}%</td>
-        <td><button class="btn btn-sm dark" data-cat-guardar="${esc(p.sku)}">Guardar</button></td>
-      </tr>`;
-    }).join('')}
-  </tbody></table></div>`;
-  $('cat-list').querySelectorAll('[data-cat-toggle]').forEach(b => b.onclick = async () => {
-    const sku = b.dataset.catToggle;
-    const p = CATALOGO.find(x => x.sku === sku);
-    try {
-      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify({ precio: p.precioFijo, disponible: !p.disponible }) });
-      p.disponible = !p.disponible;
-      renderCatalogo();
-    } catch (e) { alert(e.message); }
-  });
-  $('cat-list').querySelectorAll('[data-cat-guardar]').forEach(b => b.onclick = async () => {
-    const sku = b.dataset.catGuardar;
-    const p = CATALOGO.find(x => x.sku === sku);
-    const precio = ($('cat-list').querySelector('[data-cat-precio="' + CSS.escape(sku) + '"]')?.value || '');
-    const costo = ($('cat-list').querySelector('[data-cat-costo="' + CSS.escape(sku) + '"]')?.value || '');
-    const precio_pvp = ($('cat-list').querySelector('[data-cat-pvp="' + CSS.escape(sku) + '"]')?.value || '');
-    const iva_porcentaje = ($('cat-list').querySelector('[data-cat-iva="' + CSS.escape(sku) + '"]')?.value || '');
-    const comision_vendedora_override = ($('cat-list').querySelector('[data-cat-comision="' + CSS.escape(sku) + '"]')?.value || '');
-    const body = {
-      precio: precio === '' ? null : parseFloat(precio),
-      disponible: p.disponible,
-      // Fase 2: nuevos campos
-      costo: costo === '' ? null : parseFloat(costo),
-      precio_pvp: precio_pvp === '' ? null : parseFloat(precio_pvp),
-      iva_porcentaje: iva_porcentaje === '' ? 19 : parseFloat(iva_porcentaje),
-      comision_vendedora_override: comision_vendedora_override === '' ? null : parseFloat(comision_vendedora_override)
-    };
-    try {
-      await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify(body) });
-      loadCatalogo();
-    } catch (e) { alert(e.message); }
-  });
-}
-$('cat-buscar').oninput = renderCatalogo;
+// Tabla removida - todo por Excel (mejor performance)
 $('cat-descargar').onclick = async () => {
   try {
     const todos = await api('/catalogo/excel-descargar');
