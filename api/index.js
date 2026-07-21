@@ -2321,6 +2321,33 @@ app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
     }));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
+// Descarga optimizada para Excel: todos los productos con costos
+app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
+  try {
+    const prods = await catalogoConPrecioGlobal(false);
+    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
+    const porSku = {};
+    catalogoBd.forEach(p => { porSku[p.sku] = p; });
+    // Formato optimizado para Excel: solo lo que el usuario necesita editar
+    const excel = prods.map(p => {
+      const bdData = porSku[p.sku.toUpperCase()];
+      return {
+        'Código': p.sku,
+        'Nombre': p.nombre,
+        'Proveedor': p.proveedor || '',
+        'Categoría': famOf(p),
+        'Stock': p.stock,
+        'Disponible': p.disponible ? 'Sí' : 'No',
+        'Precio': p.precioFijo || '',
+        'Costo': bdData?.costo || '',
+        'Precio PVP': bdData?.precio_pvp || '',
+        'IVA': bdData?.iva_porcentaje || 19,
+        'Comisión': bdData?.comision_vendedora_override || ''
+      };
+    });
+    res.json(excel);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
 app.put('/api/admin/catalogo/:sku', requireAdmin, async (req, res) => {
   try {
     const sku = String(req.params.sku || '').trim().toUpperCase();
@@ -2368,20 +2395,25 @@ app.post('/api/admin/catalogo/excel', requireAdmin, async (req, res) => {
       }))
       .filter(f => f.sku);
     if (!limpias.length) return res.status(400).json({ error: 'Ninguna fila tenía un código de producto reconocible' });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const f of limpias) {
-        await client.query(
-          `INSERT INTO catalogo_productos (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-           ON CONFLICT (sku) DO UPDATE SET
-             precio = $2, disponible = $3, costo = $4, precio_pvp = $5, iva_porcentaje = $6, comision_vendedora_override = $7, updated_at = now()`,
-          [f.sku, f.precio > 0 ? f.precio : null, f.disponible, f.costo, f.precio_pvp, f.iva_porcentaje, f.comision_vendedora_override]
-        );
-      }
-      await client.query('COMMIT');
-    } catch (e) { try { await client.query('ROLLBACK'); } catch {} throw e; } finally { client.release(); }
+    // Optimización: batch insert/update en una sola query (UNNEST) en vez de loop
+    const skus = limpias.map(f => f.sku);
+    const precios = limpias.map(f => f.precio > 0 ? f.precio : null);
+    const disponibles = limpias.map(f => f.disponible);
+    const costos = limpias.map(f => f.costo);
+    const precios_pvp = limpias.map(f => f.precio_pvp);
+    const ivas = limpias.map(f => f.iva_porcentaje);
+    const comisiones = limpias.map(f => f.comision_vendedora_override);
+    await sql`
+      INSERT INTO catalogo_productos AS t (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, updated_at)
+      SELECT * FROM UNNEST(${skus}::text[], ${precios}::numeric[], ${disponibles}::boolean[], ${costos}::numeric[], ${precios_pvp}::numeric[], ${ivas}::numeric[], ${comisiones}::numeric[]) AS x(sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override)
+      ON CONFLICT (sku) DO UPDATE SET
+        precio = EXCLUDED.precio,
+        disponible = EXCLUDED.disponible,
+        costo = EXCLUDED.costo,
+        precio_pvp = EXCLUDED.precio_pvp,
+        iva_porcentaje = EXCLUDED.iva_porcentaje,
+        comision_vendedora_override = EXCLUDED.comision_vendedora_override,
+        updated_at = now()`;
     limpiarCacheCatalogoPrecios();
     res.json({ ok: true, cargados: limpias.length });
   } catch (e) { console.error('❌ /api/admin/catalogo/excel', e.message); res.status(500).json({ error: shortErr(e) }); }

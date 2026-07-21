@@ -193,9 +193,10 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Cargar precios y disponibilidad por Excel</div>
-          <p class="note"><b>Columnas soportadas:</b> "Código" (obligatoria), "Precio" (antiguo sistema, vacío = usa multiplicador), "Disponible" (si/no, vacío = disponible). <b>Fase 2 (nuevas):</b> "Costo", "Precio PVP", "IVA", "Comisión" (todas opcionales, vacío = no se modifica).</p>
-          <div class="row" style="margin-top:10px">
-            <button class="btn" id="cat-subir">Subir Excel</button>
+          <p class="note"><b>Columnas:</b> "Código" (obligatoria), "Precio", "Disponible", "Costo", "Precio PVP", "IVA", "Comisión" (todas opcionales, vacío = no se modifica).</p>
+          <div class="row" style="margin-top:10px; gap:8px">
+            <button class="btn" id="cat-descargar">📥 Descargar base (todos los productos)</button>
+            <button class="btn dark" id="cat-subir">📤 Subir Excel actualizado</button>
           </div>
           <div class="msg" id="cat-excel-msg"></div>
           <input type="file" id="cat-excel-input" accept=".xlsx,.xls,.csv" style="display:none"/>
@@ -737,6 +738,16 @@ function renderCatalogo() {
   });
 }
 $('cat-buscar').oninput = renderCatalogo;
+$('cat-descargar').onclick = async () => {
+  try {
+    const todos = await api('/catalogo/excel-descargar');
+    const ws = XLSX.utils.json_to_sheet(todos);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+    XLSX.writeFile(wb, 'productos_base_' + new Date().toISOString().split('T')[0] + '.xlsx');
+    showMsg('cat-excel-msg', '✓ Excel descargado.', true);
+  } catch (e) { showMsg('cat-excel-msg', 'Error: ' + e.message, false); }
+};
 $('cat-subir').onclick = () => { $('cat-excel-input').value = ''; $('cat-excel-input').click(); };
 $('cat-excel-input').onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
