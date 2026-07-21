@@ -2295,33 +2295,7 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // venta para cualquier cliente de cualquier vendedora (ver
 // catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
-app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
-  try {
-    const prods = await catalogoConPrecioGlobal(false);
-    // Obtén los nuevos campos (Fase 2) en un solo lookup
-    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
-    const porSku = {};
-    catalogoBd.forEach(p => { porSku[p.sku] = p; });
-    const porGrupo = {};
-    prods.forEach(p => { const k = p.proveedorId + '::' + p.nombre; porGrupo[k] = (porGrupo[k] || 0) + 1; });
-    res.json(prods.map(p => {
-      const bdData = porSku[p.sku.toUpperCase()];
-      const margenBruto = bdData && bdData.precio_pvp ? (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) - bdData.costo : null;
-      const margenBrutoPct = margenBruto && bdData?.precio_pvp ? Math.round(margenBruto / (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) * 10000) / 100 : null;
-      return {
-        proveedorId: p.proveedorId, proveedor: p.proveedorCodigo, sku: p.sku, nombre: p.nombre,
-        categoria: famOf(p), stock: p.stock, disponible: p.disponible,
-        precioFijo: p.precioFijo, precioVenta: p.precioVenta,
-        // Fase 2: nuevos campos
-        costo: bdData?.costo, precio_pvp: bdData?.precio_pvp, iva_porcentaje: bdData?.iva_porcentaje || 19,
-        comision_vendedora_override: bdData?.comision_vendedora_override,
-        margenBruto, margenBrutoPct,
-        variantes: porGrupo[p.proveedorId + '::' + p.nombre]
-      };
-    }));
-  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
-});
-// Descarga optimizada para Excel: todos los productos con costos
+// Descarga optimizada para Excel: todos los productos con costos (DEBE IR ANTES que /catalogo)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
     const prods = await catalogoConPrecioGlobal(false);
@@ -2346,6 +2320,33 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       };
     });
     res.json(excel);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+// GET /api/admin/catalogo — catálogo con todos los campos
+app.get('/api/admin/catalogo', requireAdmin, async (_req, res) => {
+  try {
+    const prods = await catalogoConPrecioGlobal(false);
+    // Obtén los nuevos campos (Fase 2) en un solo lookup
+    const { rows: catalogoBd } = await sql`SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos`;
+    const porSku = {};
+    catalogoBd.forEach(p => { porSku[p.sku] = p; });
+    const porGrupo = {};
+    prods.forEach(p => { const k = p.proveedorId + '::' + p.nombre; porGrupo[k] = (porGrupo[k] || 0) + 1; });
+    res.json(prods.map(p => {
+      const bdData = porSku[p.sku.toUpperCase()];
+      const margenBruto = bdData && bdData.precio_pvp ? (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) - bdData.costo : null;
+      const margenBrutoPct = margenBruto && bdData?.precio_pvp ? Math.round(margenBruto / (bdData.precio_pvp / (1 + (bdData.iva_porcentaje || 19) / 100)) * 10000) / 100 : null;
+      return {
+        proveedorId: p.proveedorId, proveedor: p.proveedorCodigo, sku: p.sku, nombre: p.nombre,
+        categoria: famOf(p), stock: p.stock, disponible: p.disponible,
+        precioFijo: p.precioFijo, precioVenta: p.precioVenta,
+        // Fase 2: nuevos campos
+        costo: bdData?.costo, precio_pvp: bdData?.precio_pvp, iva_porcentaje: bdData?.iva_porcentaje || 19,
+        comision_vendedora_override: bdData?.comision_vendedora_override,
+        margenBruto, margenBrutoPct,
+        variantes: porGrupo[p.proveedorId + '::' + p.nombre]
+      };
+    }));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 app.put('/api/admin/catalogo/:sku', requireAdmin, async (req, res) => {

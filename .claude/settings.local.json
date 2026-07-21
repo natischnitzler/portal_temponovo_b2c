@@ -26,7 +26,8 @@
       "mcp__visualize__show_widget",
       "Bash(node -c api/calc.js)",
       "Bash(git restore *)",
-      "Bash(curl -s http://localhost:3000/health)"
+      "Bash(curl -s http://localhost:3000/health)",
+      "Bash(git commit -m 'Fix: GET /catalogo/excel-descargar - mover antes de PUT para evitar conflicto de rutas *)"
     ]
   }
 }
