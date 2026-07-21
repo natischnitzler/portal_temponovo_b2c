@@ -2298,9 +2298,16 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // Descarga optimizada para Excel: todos los productos con costos (DEBE IR ANTES que /catalogo)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
+    // Timeout: si la BD no responde en 5s, devolver error rápido
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout conectando a BD')), 5000)
+    );
+    const { rows } = await Promise.race([
+      sql`SELECT sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override FROM catalogo_productos ORDER BY sku`,
+      timeoutPromise
+    ]);
     // Formato optimizado para Excel: solo lo que el usuario necesita editar
-    const excel = rows.map(p => ({
+    const excel = (rows || []).map(p => ({
       'Código': p.sku,
       'Precio': p.precio || '',
       'Disponible': p.disponible ? 'Sí' : 'No',
@@ -2312,7 +2319,7 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     res.json(excel);
   } catch (e) {
     console.error('❌ /catalogo/excel-descargar:', e.message);
-    res.status(500).json({ error: 'No se pudo descargar: ' + shortErr(e) });
+    res.status(500).json({ error: shortErr(e) });
   }
 });
 // GET /api/admin/catalogo — catálogo con todos los campos
