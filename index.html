@@ -224,11 +224,10 @@ h1,h2,h3,.t{font-family:var(--f1);}
 .tg-body{display:none;padding:16px;border-top:1px solid var(--line);}
 .tg-body.open{display:block;}
 .tg-instr{text-align:center;font-size:12px;color:var(--steel);line-height:1.6;margin-bottom:14px;}
-.tg-circ-wrap{display:flex;justify-content:center;margin-bottom:14px;}
-.tg-circ{border:3px solid var(--ink);border-radius:50%;width:180px;height:180px;display:flex;align-items:center;justify-content:center;}
-.tg-circ span{font-family:var(--f1);font-size:20px;color:var(--ink);}
-.tg-slider{width:100%;margin-bottom:8px;accent-color:var(--hdr);}
-.tg-slider-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--steel);margin-bottom:12px;}
+.tg-card-step{font-size:12px;font-weight:500;color:var(--ink);text-align:center;margin-bottom:8px;}
+#tg-card-canvas{background:var(--paper);cursor:crosshair;max-width:100%;}
+.tg-unit-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.tg-unit-lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);flex-shrink:0;}
 .tg-result{text-align:center;padding:12px;background:var(--paper);border-radius:8px;font-size:13px;}
 .tg-result strong{font-family:var(--f1);font-size:19px;font-weight:500;}
 .tg-result-sub{font-size:11px;color:var(--steel);}
@@ -773,17 +772,21 @@ body.public .priv{display:none!important;}
       <button type="button" class="tg-head" data-m="1">
         <div>
           <div class="tg-num">Método 01</div>
-          <div class="tg-title">Mide tu anillo en pantalla</div>
-          <div class="tg-desc">Coloca un anillo que te quede bien sobre la pantalla</div>
+          <div class="tg-title">Mide con una tarjeta</div>
+          <div class="tg-desc">Sacá una foto de tu dedo junto a una tarjeta</div>
         </div>
         <span class="tg-arrow" id="tg-arrow-1">›</span>
       </button>
       <div class="tg-body" id="tg-body-1">
-        <p class="tg-instr">Coloca un anillo que te quede bien sobre el círculo de abajo.<br/>Ajusta el tamaño hasta que coincida con el interior del anillo.</p>
-        <div class="tg-circ-wrap"><div class="tg-circ" id="tg-circ"><span id="tg-circ-label">—</span></div></div>
-        <input type="range" class="tg-slider" id="tg-slider" min="14.8" max="18.2" step="0.05" value="16.2"/>
-        <div class="tg-slider-labels"><span>Talla 11</span><span>Talla 18</span></div>
-        <div class="tg-result" id="tg-regla-resultado"></div>
+        <p class="tg-instr">Apoyá una tarjeta (crédito, débito o similar) en una mesa, con tu dedo justo al lado y a la misma altura. Sacá la foto de arriba, que se vean bien los dos bordes largos de la tarjeta y el ancho de tu dedo.</p>
+        <input type="file" accept="image/*" capture="environment" id="tg-card-input" style="display:none"/>
+        <button type="button" class="cfg-btn dark" id="tg-card-subir" style="width:100%;justify-content:center">Sacar o subir foto</button>
+        <div id="tg-card-canvas-wrap" style="display:none;margin-top:12px">
+          <div class="tg-card-step" id="tg-card-step">Paso 1 de 2 — Tocá los dos extremos del lado LARGO de la tarjeta</div>
+          <canvas id="tg-card-canvas"></canvas>
+          <button type="button" class="cfg-btn" id="tg-card-reset" style="width:100%;justify-content:center;margin-top:8px">Reiniciar</button>
+        </div>
+        <div class="tg-result" id="tg-card-resultado"></div>
       </div>
     </div>
 
@@ -821,6 +824,15 @@ body.public .priv{display:none!important;}
         <span class="tg-arrow" id="tg-arrow-3">›</span>
       </button>
       <div class="tg-body" id="tg-body-3">
+        <div class="tg-unit-row">
+          <span class="tg-unit-lbl">Sistema</span>
+          <div class="tallas-row" id="tg-unit-chips">
+            <button type="button" class="talla-btn sel" data-unit="eu">EU</button>
+            <button type="button" class="talla-btn" data-unit="us">US</button>
+            <button type="button" class="talla-btn" data-unit="uk">UK</button>
+            <button type="button" class="talla-btn" data-unit="jp">JP</button>
+          </div>
+        </div>
         <table class="tg-table">
           <thead><tr><th>Talla</th><th>Diámetro (mm)</th><th>Circunferencia (mm)</th></tr></thead>
           <tbody id="tg-tabla-body"></tbody>
@@ -828,7 +840,7 @@ body.public .priv{display:none!important;}
       </div>
     </div>
 
-    <div class="tg-note">💡 Si estás entre dos tallas, elegí la más grande — los anillos muy ajustados pueden incomodar con el calor.<br/><br/>Esta tabla es orientativa (talla 11 a 18). La talla exacta disponible depende de cada diseño: revisá las tallas que muestra la ficha del anillo elegido.</div>
+    <div class="tg-note">💡 Si estás entre dos tallas, elegí la más grande — los anillos muy ajustados pueden incomodar con el calor.<br/><br/>La talla exacta disponible depende de cada diseño: revisá las tallas que muestra la ficha del anillo elegido.</div>
   </div>
 </div>
 
@@ -1814,67 +1826,184 @@ $('sheet-close').onclick = closeFicha;
 $('sheet-back').onclick = closeFicha;
 
 /* ═══════════ GUÍA DE TALLAS (anillos) ═══════════ */
-// Tabla talla ↔ diámetro/circunferencia interior — la misma que se usa en
-// Aviv para su herramienta "Mi talla" (rango 11 a 18, es orientativa: cada
-// diseño puede tener otras tallas disponibles, eso ya lo muestran los
-// chips de la ficha).
+// Tabla internacional talla ↔ diámetro/circunferencia interior, con
+// equivalencias EU (ISO/continental, = circunferencia en mm)/US/UK/JP.
+// Datos tomados de la tabla de equivalencias de Wikipedia ("Ring size"),
+// recalculados desde las pulgadas originales (no es una tabla propia de
+// un solo proveedor — sirve para cualquiera).
 const TALLAS_DATA = [
-  { talla:'11', diam:14.8, circ:46.5 },
-  { talla:'12', diam:15.3, circ:48.0 },
-  { talla:'13', diam:15.7, circ:49.3 },
-  { talla:'14', diam:16.2, circ:50.9 },
-  { talla:'15', diam:16.6, circ:52.1 },
-  { talla:'16', diam:17.1, circ:53.8 },
-  { talla:'17', diam:17.5, circ:54.9 },
-  { talla:'18', diam:18.2, circ:57.2 },
+  {d:11.63,c:36.5,eu:36.5,us:'0',uk:'',jp:''},
+  {d:11.84,c:37.2,eu:37.2,us:'1/4',uk:'',jp:''},
+  {d:12.04,c:37.8,eu:37.8,us:'1/2',uk:'A',jp:''},
+  {d:12.24,c:38.5,eu:38.5,us:'3/4',uk:'A 1/2',jp:''},
+  {d:12.45,c:39.1,eu:39.1,us:'1',uk:'B',jp:'1'},
+  {d:12.65,c:39.7,eu:39.7,us:'1 1/4',uk:'B 1/2',jp:''},
+  {d:12.85,c:40.4,eu:40.4,us:'1 1/2',uk:'C',jp:''},
+  {d:13.06,c:41,eu:41,us:'1 3/4',uk:'C 1/2',jp:''},
+  {d:13.26,c:41.7,eu:41.7,us:'2',uk:'D',jp:'2'},
+  {d:13.46,c:42.3,eu:42.3,us:'2 1/4',uk:'D 1/2',jp:''},
+  {d:13.67,c:42.9,eu:42.9,us:'2 1/2',uk:'E',jp:'3'},
+  {d:13.87,c:43.6,eu:43.6,us:'2 3/4',uk:'E 1/2',jp:''},
+  {d:14.07,c:44.2,eu:44.2,us:'3',uk:'F',jp:'4'},
+  {d:14.27,c:44.8,eu:44.8,us:'3 1/4',uk:'F 1/2',jp:'5'},
+  {d:14.48,c:45.5,eu:45.5,us:'3 1/2',uk:'G',jp:''},
+  {d:14.68,c:46.1,eu:46.1,us:'3 3/4',uk:'G 1/2',jp:'6'},
+  {d:14.88,c:46.7,eu:46.7,us:'4',uk:'H',jp:'7'},
+  {d:15.09,c:47.4,eu:47.4,us:'4 1/4',uk:'H 1/2',jp:''},
+  {d:15.29,c:48,eu:48,us:'4 1/2',uk:'I',jp:'8'},
+  {d:15.49,c:48.7,eu:48.7,us:'4 3/4',uk:'J',jp:''},
+  {d:15.7,c:49.3,eu:49.3,us:'5',uk:'J 1/2',jp:'9'},
+  {d:15.9,c:50,eu:50,us:'5 1/4',uk:'K',jp:''},
+  {d:16.1,c:50.6,eu:50.6,us:'5 1/2',uk:'K 1/2',jp:'10'},
+  {d:16.31,c:51.2,eu:51.2,us:'5 3/4',uk:'L',jp:''},
+  {d:16.51,c:51.9,eu:51.9,us:'6',uk:'L 1/2',jp:'11'},
+  {d:16.71,c:52.5,eu:52.5,us:'6 1/4',uk:'M',jp:'12'},
+  {d:16.92,c:53.2,eu:53.2,us:'6 1/2',uk:'M 1/2',jp:'13'},
+  {d:17.12,c:53.8,eu:53.8,us:'6 3/4',uk:'N',jp:''},
+  {d:17.32,c:54.4,eu:54.4,us:'7',uk:'N 1/2',jp:'14'},
+  {d:17.53,c:55.1,eu:55.1,us:'7 1/4',uk:'O',jp:''},
+  {d:17.73,c:55.7,eu:55.7,us:'7 1/2',uk:'O 1/2',jp:'15'},
+  {d:17.93,c:56.3,eu:56.3,us:'7 3/4',uk:'P',jp:''},
+  {d:18.14,c:57,eu:57,us:'8',uk:'P 1/2',jp:'16'},
+  {d:18.34,c:57.6,eu:57.6,us:'8 1/4',uk:'P 3/4',jp:''},
+  {d:18.54,c:58.2,eu:58.2,us:'8 1/2',uk:'Q 1/4',jp:'17'},
+  {d:18.75,c:58.9,eu:58.9,us:'8 3/4',uk:'R',jp:''},
+  {d:18.95,c:59.5,eu:59.5,us:'9',uk:'R 1/2',jp:'18'},
+  {d:19.15,c:60.2,eu:60.2,us:'9 1/4',uk:'S',jp:''},
+  {d:19.35,c:60.8,eu:60.8,us:'9 1/2',uk:'S 1/2',jp:'19'},
+  {d:19.56,c:61.4,eu:61.4,us:'9 3/4',uk:'T',jp:''},
+  {d:19.76,c:62.1,eu:62.1,us:'10',uk:'T 1/2',jp:'20'},
+  {d:19.96,c:62.7,eu:62.7,us:'10 1/4',uk:'U',jp:'21'},
+  {d:20.17,c:63.4,eu:63.4,us:'10 1/2',uk:'U 1/2',jp:'22'},
+  {d:20.37,c:64,eu:64,us:'10 3/4',uk:'V',jp:''},
+  {d:20.57,c:64.6,eu:64.6,us:'11',uk:'V 1/2',jp:'23'},
+  {d:20.78,c:65.3,eu:65.3,us:'11 1/4',uk:'W',jp:''},
+  {d:20.98,c:65.9,eu:65.9,us:'11 1/2',uk:'W 1/2',jp:'24'},
+  {d:21.18,c:66.5,eu:66.5,us:'11 3/4',uk:'X',jp:''},
+  {d:21.39,c:67.2,eu:67.2,us:'12',uk:'X 1/2',jp:'25'},
+  {d:21.59,c:67.8,eu:67.8,us:'12 1/4',uk:'Y',jp:''},
+  {d:21.79,c:68.5,eu:68.5,us:'12 1/2',uk:'Y 1/2',jp:'26'},
+  {d:22,c:69.1,eu:69.1,us:'12 3/4',uk:'Z',jp:''},
+  {d:22.2,c:69.7,eu:69.7,us:'13',uk:'Z 1/2',jp:'27'},
+  {d:22.4,c:70.4,eu:70.4,us:'13 1/4',uk:'Z1',jp:''},
+  {d:22.61,c:71,eu:71,us:'13 1/2',uk:'',jp:''},
+  {d:22.81,c:71.7,eu:71.7,us:'13 3/4',uk:'Z2',jp:''},
+  {d:23.01,c:72.3,eu:72.3,us:'14',uk:'Z3',jp:''},
+  {d:23.22,c:72.9,eu:72.9,us:'14 1/4',uk:'',jp:''},
+  {d:23.42,c:73.6,eu:73.6,us:'14 1/2',uk:'Z4',jp:''},
+  {d:23.62,c:74.2,eu:74.2,us:'14 3/4',uk:'',jp:''},
+  {d:23.83,c:74.9,eu:74.9,us:'15',uk:'',jp:''},
+  {d:24.03,c:75.5,eu:75.5,us:'15 1/4',uk:'',jp:''},
+  {d:24.23,c:76.1,eu:76.1,us:'15 1/2',uk:'',jp:''},
+  {d:24.43,c:76.7,eu:76.7,us:'15 3/4',uk:'',jp:''},
+  {d:24.64,c:77.4,eu:77.4,us:'16',uk:'',jp:''}
 ];
 function mmATalla(diam){
   let best = null, bestDiff = Infinity;
-  TALLAS_DATA.forEach(t=>{ const diff = Math.abs(t.diam-diam); if(diff<bestDiff){ bestDiff=diff; best=t; } });
+  TALLAS_DATA.forEach(t=>{ const diff = Math.abs(t.d-diam); if(diff<bestDiff){ bestDiff=diff; best=t; } });
   return best;
 }
-(function(){
+function tallaLabel(row, unit){ return (row && row[unit]) ? row[unit] : '—'; }
+let TG_UNIT = 'eu';
+function renderTallasTable(){
   const tbody = $('tg-tabla-body');
   if(!tbody) return;
-  tbody.innerHTML = TALLAS_DATA.map(t=>`<tr><td>${t.talla}</td><td>${t.diam} mm</td><td>${t.circ} mm</td></tr>`).join('');
-})();
+  tbody.innerHTML = TALLAS_DATA.map(t=>`<tr><td>${tallaLabel(t,TG_UNIT)}</td><td>${t.d} mm</td><td>${t.c} mm</td></tr>`).join('');
+}
+renderTallasTable();
+document.querySelectorAll('#tg-unit-chips [data-unit]').forEach(b=> b.onclick = ()=>{
+  TG_UNIT = b.dataset.unit;
+  document.querySelectorAll('#tg-unit-chips [data-unit]').forEach(x=> x.classList.toggle('sel', x===b));
+  renderTallasTable();
+});
 function toggleTallaMetodo(n){
   const el = $('tg-body-'+n), arrow = $('tg-arrow-'+n);
   const open = el.classList.contains('open');
   el.classList.toggle('open', !open);
   arrow.textContent = open ? '›' : '‹';
-  if(n==='1' && !open){ const sl = $('tg-slider'); if(sl) actualizarReglaTalla(sl.value); }
 }
 document.querySelectorAll('.tg-head').forEach(b=> b.onclick = ()=> toggleTallaMetodo(b.dataset.m));
-function actualizarReglaTalla(val){
-  const diamMm = parseFloat(val);
-  const circ = $('tg-circ'), label = $('tg-circ-label'), res = $('tg-regla-resultado');
-  // mm → px según el DPI real de la pantalla (para que el círculo tenga el
-  // tamaño físico correcto y de verdad sirva de referencia con un anillo).
-  const dpiEl = document.createElement('div');
-  dpiEl.style.cssText = 'width:1in;position:absolute;left:-9999px;';
-  document.body.appendChild(dpiEl);
-  const dpi = dpiEl.offsetWidth || 96;
-  document.body.removeChild(dpiEl);
-  const px = diamMm * (dpi/25.4);
-  circ.style.width = px+'px'; circ.style.height = px+'px';
-  label.textContent = diamMm.toFixed(1)+' mm';
-  const t = mmATalla(diamMm);
-  res.innerHTML = t
-    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Diámetro interior: ${t.diam} mm</span>`
-    : 'Ajustá el círculo hasta que coincida con tu anillo';
+
+// Método "tarjeta": se calibra con el tamaño real y conocido de una
+// tarjeta de crédito/débito estándar (ISO/IEC 7810 ID-1) marcando sus dos
+// extremos sobre la foto, y con esa escala se mide el ancho del dedo
+// marcado a continuación — sin visión por computadora, la persona confirma
+// a ojo dónde están los bordes, así que es confiable.
+const TARJETA_MM = 85.60;
+let tgCardImg = null, tgCardStep = 1, tgCardPts = [], tgCardCardPts = null;
+function tgCardRedraw(){
+  const canvas = $('tg-card-canvas'); if(!canvas || !tgCardImg) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(tgCardImg, 0, 0, canvas.width, canvas.height);
+  const marcar = (p,color)=>{ ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fillStyle=color; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke(); };
+  const linea = (a,b,color)=>{ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.strokeStyle=color; ctx.lineWidth=3; ctx.stroke(); };
+  if(tgCardCardPts){ linea(tgCardCardPts[0], tgCardCardPts[1], '#5b9c6e'); tgCardCardPts.forEach(p=>marcar(p,'#5b9c6e')); }
+  if(tgCardStep===2 && tgCardPts.length===2) linea(tgCardPts[0], tgCardPts[1], '#b3423a');
+  tgCardPts.forEach(p=>marcar(p, tgCardStep===1?'#5b9c6e':'#b3423a'));
 }
-$('tg-slider')?.addEventListener('input', e=> actualizarReglaTalla(e.target.value));
+function tgCardCalcular(){
+  const dist = (a,b)=> Math.hypot(b.x-a.x, b.y-a.y);
+  const pxPerMm = dist(tgCardCardPts[0], tgCardCardPts[1]) / TARJETA_MM;
+  const dedoMm = dist(tgCardPts[0], tgCardPts[1]) / pxPerMm;
+  const t = mmATalla(dedoMm);
+  $('tg-card-resultado').innerHTML = t
+    ? `<strong>Talla ${tallaLabel(t,TG_UNIT)} (${TG_UNIT.toUpperCase()})</strong><br/><span class="tg-result-sub">Diámetro estimado: ${dedoMm.toFixed(1)} mm</span>`
+    : 'No se pudo calcular — probá de nuevo';
+  $('tg-card-step').textContent = '✓ Listo. Tocá "Reiniciar" para medir de nuevo.';
+}
+function tgCardOnTap(e){
+  if(!tgCardImg) return;
+  const canvas = $('tg-card-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.touches ? e.touches[0].clientX : e.clientX;
+  const cy = e.touches ? e.touches[0].clientY : e.clientY;
+  const p = { x: (cx-rect.left)*(canvas.width/rect.width), y: (cy-rect.top)*(canvas.height/rect.height) };
+  tgCardPts.push(p);
+  if(tgCardPts.length > 2) tgCardPts = [p];
+  tgCardRedraw();
+  if(tgCardPts.length===2){
+    if(tgCardStep===1){
+      tgCardCardPts = tgCardPts; tgCardPts = []; tgCardStep = 2;
+      $('tg-card-step').textContent = 'Paso 2 de 2 — Tocá los dos bordes de tu dedo (donde iría el anillo)';
+    } else { tgCardCalcular(); }
+  }
+}
+function tgCardReset(){
+  tgCardStep = 1; tgCardPts = []; tgCardCardPts = null;
+  $('tg-card-resultado').innerHTML = '';
+  $('tg-card-step').textContent = 'Paso 1 de 2 — Tocá los dos extremos del lado LARGO de la tarjeta';
+  tgCardRedraw();
+}
+$('tg-card-subir')?.addEventListener('click', ()=> $('tg-card-input').click());
+$('tg-card-input')?.addEventListener('change', e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const img = new Image();
+  img.onload = ()=>{
+    tgCardImg = img;
+    const canvas = $('tg-card-canvas');
+    const maxW = Math.min(canvas.parentElement.clientWidth || 460, 460);
+    canvas.width = maxW; canvas.height = Math.round(img.height*(maxW/img.width));
+    $('tg-card-canvas-wrap').style.display = '';
+    tgCardReset();
+  };
+  img.src = URL.createObjectURL(f);
+  e.target.value = '';
+});
+$('tg-card-canvas')?.addEventListener('click', tgCardOnTap);
+$('tg-card-reset')?.addEventListener('click', tgCardReset);
+
 $('tg-papel-mm')?.addEventListener('input', e=>{
   const mm = parseFloat(e.target.value);
   const res = $('tg-papel-resultado');
-  if(!mm || mm<40 || mm>80){ res.innerHTML = '<span class="tg-result-muted">Ingresá la medida en mm</span>'; return; }
-  const diamMm = (mm/Math.PI).toFixed(1);
-  const t = mmATalla(parseFloat(diamMm));
-  const fuera = parseFloat(diamMm) < 14.8 || parseFloat(diamMm) > 18.2;
+  if(!mm || mm<30 || mm>90){ res.innerHTML = '<span class="tg-result-muted">Ingresá la medida en mm</span>'; return; }
+  const diamMm = mm/Math.PI;
+  const t = mmATalla(diamMm);
+  const minD = TALLAS_DATA[0].d, maxD = TALLAS_DATA[TALLAS_DATA.length-1].d;
+  const fuera = diamMm < minD-1 || diamMm > maxD+1;
   res.innerHTML = (t && !fuera)
-    ? `<strong>Talla ${t.talla}</strong><br/><span class="tg-result-sub">Circunferencia ${mm} mm · Diámetro ~${diamMm} mm</span>`
-    : '<span class="tg-result-warn">Esta medida queda fuera de la tabla de referencia (talla 11–18) — puede que este diseño en particular no la tenga.</span>';
+    ? `<strong>Talla ${tallaLabel(t,TG_UNIT)} (${TG_UNIT.toUpperCase()})</strong><br/><span class="tg-result-sub">Circunferencia ${mm} mm · Diámetro ~${diamMm.toFixed(1)} mm</span>`
+    : '<span class="tg-result-warn">Esta medida queda fuera de la tabla de referencia.</span>';
 });
 function openTallaGuide(){ $('talla-back').classList.add('open'); $('talla-sheet').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeTallaGuide(){ $('talla-back').classList.remove('open'); $('talla-sheet').classList.remove('open'); document.body.style.overflow=''; }
