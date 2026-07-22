@@ -2483,13 +2483,11 @@ app.get('/api/admin/categorias-multiplicador', requireAdmin, async (_req, res) =
   try {
     const prods = await productosClienteMulti();
     const familias = [...new Set(prods.map(p => famOf(p)))].sort();
-    const { rows } = await sql`SELECT familia, multiplicador, icono, nombre, comision_override FROM categoria_multiplicador`;
+    const { rows } = await sql`SELECT familia, multiplicador FROM categoria_multiplicador`;
     const map = {}; rows.forEach(r => { map[r.familia] = r; });
     res.json(familias.map(f => ({
       familia: f,
-      multiplicador: map[f] ? parseFloat(map[f].multiplicador) || MULT_DEFAULT : MULT_DEFAULT,
-      icono: map[f]?.icono || '', nombre: map[f]?.nombre || '',
-      comision_override: map[f]?.comision_override || null
+      multiplicador: map[f] ? parseFloat(map[f].multiplicador) || MULT_DEFAULT : MULT_DEFAULT
     })));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -2498,17 +2496,11 @@ app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req
     const familia = decodeURIComponent(req.params.familia);
     const multiplicador = parseFloat(req.body?.multiplicador);
     if (!(multiplicador > 0)) return res.status(400).json({ error: 'Multiplicador inválido' });
-    const icono = String(req.body?.icono || '').trim();
-    const nombre = String(req.body?.nombre || '').trim();
-    const comision_override = req.body?.comision_override != null && req.body.comision_override !== '' ? parseFloat(req.body.comision_override) : null;
     await sql`
-      INSERT INTO categoria_multiplicador (familia, multiplicador, icono, nombre, comision_override, updated_at)
-      VALUES (${familia}, ${multiplicador}, ${icono}, ${nombre}, ${comision_override}, now())
+      INSERT INTO categoria_multiplicador (familia, multiplicador, updated_at)
+      VALUES (${familia}, ${multiplicador}, now())
       ON CONFLICT (familia) DO UPDATE SET
         multiplicador = ${multiplicador},
-        icono = ${icono},
-        nombre = ${nombre},
-        comision_override = ${comision_override},
         updated_at = now()`;
     limpiarCacheCatalogoPrecios();
     res.json({ ok: true });

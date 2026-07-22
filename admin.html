@@ -187,7 +187,7 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Categorías</div>
-          <p class="note">Multiplicador: precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo (sin multiplicador propio, una categoría usa ×2). Ícono y nombre son opcionales — "Auto" adivina el ícono por el nombre de la categoría; si no queda lindo, elegí uno de la lista o escribí un nombre más corto para mostrar.</p>
+          <p class="note">Multiplicador: precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo (sin multiplicador propio, una categoría usa ×2).</p>
           <div id="catmult-list"><div class="empty">Cargando…</div></div>
         </div>
 
@@ -615,29 +615,15 @@ async function loadCategoriasMult() {
     $('catmult-list').innerHTML = rows.map(r => `
       <div class="row" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line)">
         <div style="flex:1;min-width:110px;font-size:13px">${esc(r.familia)}</div>
-        <div data-cm-prev="${esc(r.familia)}" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;background:#fafaf8">${iconSvg(r.icono || autoIconKey(r.familia))}</div>
-        <select class="fld-in" style="max-width:160px" data-cm-icono="${esc(r.familia)}">
-          <option value="">Auto (${esc(ICON_LABELS[autoIconKey(r.familia)])})</option>
-          ${Object.keys(ICON_LIB).map(k => `<option value="${k}" ${r.icono === k ? 'selected' : ''}>${esc(ICON_LABELS[k])}</option>`).join('')}
-        </select>
-        <input class="fld-in" style="max-width:150px" placeholder="Nombre a mostrar" value="${esc(r.nombre || '')}" data-cm-nombre="${esc(r.familia)}"/>
-        <input class="fld-in" style="max-width:80px" type="number" step="0.1" value="${r.multiplicador}" data-cm-mult="${esc(r.familia)}" title="Multiplicador"/>
+        <input class="fld-in" style="max-width:120px" type="number" step="0.1" value="${r.multiplicador}" data-cm-mult="${esc(r.familia)}" title="Multiplicador"/>
         <button class="btn btn-sm dark" data-cm-guardar="${esc(r.familia)}">Guardar</button>
       </div>`).join('');
-    $('catmult-list').querySelectorAll('[data-cm-icono]').forEach(sel => {
-      sel.onchange = () => {
-        const prev = $('catmult-list').querySelector('[data-cm-prev="' + CSS.escape(sel.dataset.cmIcono) + '"]');
-        prev.innerHTML = iconSvg(sel.value || autoIconKey(sel.dataset.cmIcono));
-      };
-    });
     $('catmult-list').querySelectorAll('[data-cm-guardar]').forEach(btn => {
       btn.onclick = async () => {
         const familia = btn.dataset.cmGuardar;
-        const icono = $('catmult-list').querySelector('[data-cm-icono="' + CSS.escape(familia) + '"]').value;
-        const nombre = $('catmult-list').querySelector('[data-cm-nombre="' + CSS.escape(familia) + '"]').value.trim();
         const multiplicador = parseFloat($('catmult-list').querySelector('[data-cm-mult="' + CSS.escape(familia) + '"]').value) || 2;
         try {
-          await api('/categorias-multiplicador/' + encodeURIComponent(familia), { method: 'PUT', body: JSON.stringify({ multiplicador, icono, nombre }) });
+          await api('/categorias-multiplicador/' + encodeURIComponent(familia), { method: 'PUT', body: JSON.stringify({ multiplicador }) });
           btn.textContent = '✓ Guardado'; setTimeout(() => { btn.textContent = 'Guardar'; }, 1500);
         } catch (e) { alert(e.message); }
       };
