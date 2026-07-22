@@ -148,7 +148,7 @@ tr:last-child td{border-bottom:none;}
       <!-- VENDEDORAS -->
       <section class="section active" id="sec-vendedoras">
         <h2 class="page-t">Vendedoras</h2>
-        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. El precio de venta es el mismo para todas (se configura en Productos) — acá solo elegís qué categorías vende y su % de comisión. Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
+        <p class="page-s">Cada vendedora entra a su propia vitrina con código y clave. El precio de venta y comisión se fijan por producto (en Excel). Sus ventas se envían solas a Odoo; acá puedes ver o forzar el cierre de la venta que tiene abierta.</p>
 
         <div class="card">
           <div class="card-h">Nueva vendedora</div>
@@ -160,10 +160,9 @@ tr:last-child td{border-bottom:none;}
           </div>
           <p class="note" style="margin-top:6px">Las ventas siempre se crean en Odoo desde la cuenta admin — este email es solo para tus registros, no se manda a la API.</p>
           <div class="row" style="margin-top:10px">
-            <div class="fld" style="max-width:140px"><label class="fld-l">Comisión (%)</label><input class="fld-in" id="v-comision" type="number" step="1" value="0" placeholder="Ej: 20"/></div>
+            <div class="fld"><label class="fld-l">RUT</label><input class="fld-in" id="v-rut" placeholder="Ej: 12.345.678-9"/></div>
             <div class="fld"><label class="fld-l">Sucursales</label><input class="fld-in" id="v-sucursales" placeholder="Santiago, Providencia…"/></div>
           </div>
-          <p class="note" style="margin-top:6px">La comisión es lo que se lleva la vendedora sobre la ganancia de cada venta (precio de venta − costo del proveedor) × este %. El precio de venta lo fija Productos, es igual para todas.</p>
           <div class="fld" style="margin-top:10px">
             <label class="fld-l">Categorías que vende (vacío = todas)</label>
             <div class="chip-list" id="v-categorias"></div>
@@ -447,9 +446,11 @@ async function loadCategorias() {
 
 /* ── VENDEDORAS ── */
 let VENDEDORAS = [];
+let STATS = { categorias_totales: 0, productos_listos: 0 };
 async function loadVendedoras() {
   try {
     VENDEDORAS = await api('/vendedoras');
+    STATS = await api('/stats');
     renderVendedoras();
     api('/vendedoras/logos').then(m => { LOGOS = m || {}; renderVendedoras(); }).catch(() => {});
   } catch (e) { $('v-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
@@ -489,51 +490,25 @@ function toggleCategoriasEdit(id) {
 // Fila expandible para editar la comisión de una vendedora ya creada (al
 // crearla se pone una vez; acá se puede ajustar después). El precio de
 // venta ya no es por vendedora — eso vive en Productos.
-function toggleComisionEdit(id) {
-  const row = document.querySelector('[data-precio-row="' + id + '"]');
-  if (!row) return;
-  const abrir = row.style.display === 'none';
-  document.querySelectorAll('.precio-edit-row').forEach(r => r.style.display = 'none');
-  if (!abrir) return;
-  const v = VENDEDORAS.find(x => x.id == id);
-  const cell = row.children[1];
-  cell.innerHTML = `
-    <div class="row">
-      <div class="fld" style="max-width:140px"><label class="fld-l">Comisión (%)</label><input class="fld-in" id="pe-comision-${id}" type="number" step="1" value="${v.comision || 0}"/></div>
-    </div>
-    <div class="row" style="margin-top:8px"><button class="btn btn-sm dark" data-precio-guardar="${id}">Guardar</button></div>`;
-  cell.querySelector('[data-precio-guardar]').onclick = async () => {
-    try {
-      const comision = parseFloat($('pe-comision-' + id).value) || 0;
-      await api('/vendedoras/' + id, { method: 'PUT', body: JSON.stringify({ comision }) });
-      row.style.display = 'none';
-      loadVendedoras();
-    } catch (e) { alert(e.message); }
-  };
-  row.style.display = '';
-}
 function renderVendedoras() {
   if (!VENDEDORAS.length) { $('v-list').innerHTML = '<div class="empty">No hay vendedoras todavía.</div>'; return; }
-  $('v-list').innerHTML = `<table><thead><tr><th></th><th>Código</th><th>Nombre</th><th>Email</th><th>Comisión</th><th>Categorías</th><th>Estado</th><th></th></tr></thead><tbody>
+  $('v-list').innerHTML = `<table><thead><tr><th></th><th>Código</th><th>Nombre</th><th>RUT</th><th>Categorías</th><th>Productos listos</th><th>Estado</th><th></th></tr></thead><tbody>
     ${VENDEDORAS.map(v => `<tr>
       <td>${LOGOS[v.codigo] ? `<img src="${esc(LOGOS[v.codigo])}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:#f2f1ee;display:block"/>` : ''}</td>
       <td class="mono">${esc(v.codigo)}</td>
       <td>${esc(v.nombre)}</td>
-      <td class="mono">${esc(v.email)||'<span class="note">—</span>'}</td>
-      <td class="mono">${v.comision || 0}%</td>
-      <td>${(v.categorias||[]).length ? esc(v.categorias.join(', ')) : '<span class="note">Todas</span>'}</td>
+      <td class="mono">${esc(v.rut)||'—'}</td>
+      <td>${(v.categorias||[]).length ? esc(v.categorias.length) + ' cat.' : '<span class="note">Todas</span>'}</td>
+      <td class="mono">${STATS.productos_listos || 0}</td>
       <td><button class="toggle ${v.activo?'on':''}" data-toggle="${v.id}" title="Activo/Inactivo"><span class="dot"></span></button></td>
       <td>
-        <button class="btn btn-sm" data-precio="${v.id}">Comisión</button>
         <button class="btn btn-sm" data-cats="${v.id}">Categorías</button>
         <button class="btn btn-sm" data-reset="${v.id}">Nueva clave</button>
         <button class="btn btn-sm danger" data-del-v="${v.id}">Eliminar</button>
       </td>
     </tr>
-    <tr class="precio-edit-row" data-precio-row="${v.id}" style="display:none"><td></td><td colspan="7"></td></tr>
     <tr class="cat-edit-row" data-cats-row="${v.id}" style="display:none"><td></td><td colspan="7"></td></tr>`).join('')}
   </tbody></table>`;
-  $('v-list').querySelectorAll('[data-precio]').forEach(b => b.onclick = () => toggleComisionEdit(b.dataset.precio));
   $('v-list').querySelectorAll('[data-cats]').forEach(b => b.onclick = () => toggleCategoriasEdit(b.dataset.cats));
   $('v-list').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
     const v = VENDEDORAS.find(x => x.id == b.dataset.toggle);
@@ -557,12 +532,12 @@ $('v-crear').onclick = async () => {
   const clave = $('v-clave').value;
   const nombre = $('v-nombre').value.trim();
   const email = $('v-email').value.trim();
-  const comision = parseFloat($('v-comision').value) || 0;
+  const rut = $('v-rut').value.trim();
   const sucursales = $('v-sucursales').value.split(',').map(s => s.trim()).filter(Boolean);
   if (!codigo || !clave || !nombre) return showMsg('v-msg', 'Código, clave y nombre son obligatorios', false);
   try {
-    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, email, comision, categorias: [...CATEGORIAS_SEL], sucursales }) });
-    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-email').value = ''; $('v-sucursales').value = ''; $('v-comision').value = 0;
+    await api('/vendedoras', { method: 'POST', body: JSON.stringify({ codigo, clave, nombre, email, rut, categorias: [...CATEGORIAS_SEL], sucursales }) });
+    $('v-codigo').value = ''; $('v-clave').value = ''; $('v-nombre').value = ''; $('v-email').value = ''; $('v-rut').value = ''; $('v-sucursales').value = '';
     CATEGORIAS_SEL.clear(); $('v-categorias').querySelectorAll('.chk').forEach(c => { c.classList.remove('on'); c.querySelector('input').checked = false; });
     showMsg('v-msg', '✓ Vendedora creada', true);
     loadVendedoras();

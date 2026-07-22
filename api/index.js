@@ -313,6 +313,7 @@ function ensureDb() {
     // así lo ya ganado no cambia si el proveedor sube el costo o el admin
     // ajusta el % más adelante.
     await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
+    await sql`ALTER TABLE vendedoras ADD COLUMN IF NOT EXISTS rut TEXT DEFAULT ''`;
     await sql`ALTER TABLE ventas_pendientes ADD COLUMN IF NOT EXISTS comision NUMERIC DEFAULT 0`;
 
     // ── LISTA DE PRECIOS GLOBAL ───────────────────────────────────────
@@ -2104,8 +2105,18 @@ app.put('/api/admin/config', requireAdmin, async (req, res) => {
 // ── Vendedoras ──
 app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await sql`SELECT id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
+    const { rows } = await sql`SELECT id, codigo, nombre, email, rut, categorias, sucursales, activo, created_at FROM vendedoras ORDER BY nombre`;
     res.json(rows); // nunca se devuelve clave_hash
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
+  try {
+    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT familia) as total FROM (SELECT DISTINCT familia FROM catalogo_productos UNION SELECT DISTINCT familia FROM (SELECT familia FROM productosClienteMulti()) p) t`;
+    const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND iva_porcentaje IS NOT NULL`;
+    res.json({
+      categorias_totales: parseInt(catRows[0]?.total || 0),
+      productos_listos: parseInt(prodRows[0]?.total || 0)
+    });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 // Logo de cada vendedora (vive en su config visual, guardada en Postgres) —
@@ -2124,14 +2135,14 @@ app.get('/api/admin/vendedoras/logos', requireAdmin, async (_req, res) => {
 });
 app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
   try {
-    const { codigo, clave, nombre, email, multiplicador, comision, categorias, sucursales } = req.body || {};
+    const { codigo, clave, nombre, email, rut, categorias, sucursales } = req.body || {};
     if (!codigo || !clave || !nombre) return res.status(400).json({ error: 'Código, clave y nombre son obligatorios' });
     const hash = hashPassword(clave);
     const { rows } = await sql`
-      INSERT INTO vendedoras (codigo, clave_hash, nombre, email, multiplicador, comision, categorias, sucursales)
-      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${email || ''}, ${multiplicador || 2}, ${comision || 0},
+      INSERT INTO vendedoras (codigo, clave_hash, nombre, email, rut, categorias, sucursales)
+      VALUES (${String(codigo).toUpperCase()}, ${hash}, ${nombre}, ${email || ''}, ${rut || ''},
               ${JSON.stringify(categorias || [])}, ${JSON.stringify(sucursales || [])})
-      RETURNING id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, rut, categorias, sucursales, activo, created_at`;
     res.json(rows[0]);
   } catch (e) {
     if (String(e.message || '').includes('duplicate key')) return res.status(409).json({ error: 'Ese código de usuario ya existe' });
@@ -2140,22 +2151,21 @@ app.post('/api/admin/vendedoras', requireAdmin, async (req, res) => {
 });
 app.put('/api/admin/vendedoras/:id', requireAdmin, async (req, res) => {
   try {
-    const { nombre, clave, email, multiplicador, comision, categorias, sucursales, activo } = req.body || {};
+    const { nombre, clave, email, rut, categorias, sucursales, activo } = req.body || {};
     const claveHash = clave ? hashPassword(clave) : null;
     const { rows } = await sql`
       UPDATE vendedoras SET
         nombre = COALESCE(${nombre}, nombre),
         clave_hash = COALESCE(${claveHash}, clave_hash),
         email = COALESCE(${email}, email),
-        multiplicador = COALESCE(${multiplicador}, multiplicador),
-        comision = COALESCE(${comision}, comision),
+        rut = COALESCE(${rut}, rut),
         categorias = COALESCE(${categorias ? JSON.stringify(categorias) : null}, categorias),
         sucursales = COALESCE(${sucursales ? JSON.stringify(sucursales) : null}, sucursales),
         activo = COALESCE(${activo}, activo)
       WHERE id = ${req.params.id}
-      RETURNING id, codigo, nombre, email, multiplicador, comision, categorias, sucursales, activo, created_at`;
+      RETURNING id, codigo, nombre, email, rut, categorias, sucursales, activo, created_at`;
     if (!rows.length) return res.status(404).json({ error: 'Vendedora no encontrada' });
-    delete cache['cat_' + rows[0].codigo]; // refresca catálogo si cambió multiplicador/categorías
+    delete cache['cat_' + rows[0].codigo];
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
