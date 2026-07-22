@@ -2295,7 +2295,7 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // venta para cualquier cliente de cualquier vendedora (ver
 // catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
-// Descarga optimizada para Excel: TODOS los productos (DEBE IR ANTES que /catalogo)
+// Descarga optimizada para Excel: solo de BD local (sin Odoo - evita 504)
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
     // Crear tabla si no existe
@@ -2310,31 +2310,18 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
 
-    // Intentar obtener TODOS los productos del catálogo (Odoo)
-    let prods = [];
-    try {
-      prods = await catalogoConPrecioGlobal(false);
-      console.log('✅ Catálogo desde Odoo:', prods.length, 'productos');
-    } catch (e) {
-      console.warn('⚠ Odoo no disponible, usando tabla local:', e.message);
-      const { rows } = await sql`SELECT sku FROM catalogo_productos ORDER BY sku`;
-      prods = rows.map(r => ({ sku: r.sku }));
-    }
-
-    // Obtén datos guardados en BD
-    const { rows: catalogoBd } = await sql`
+    // Leer SOLO de BD (rápido, sin timeout)
+    const { rows } = await sql`
       SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, disponible
       FROM catalogo_productos
+      ORDER BY sku
     `;
-    const porSku = {};
-    catalogoBd.forEach(p => { porSku[p.sku.toUpperCase()] = p; });
 
     // Construir Excel
-    const excel = prods.map(p => {
-      const bdData = porSku[p.sku.toUpperCase()];
-      const costo = bdData?.costo || 0;
-      const pvp = bdData?.precio_pvp || 0;
-      const iva = bdData?.iva_porcentaje || 19;
+    const excel = (rows || []).map(p => {
+      const costo = p.costo || 0;
+      const pvp = p.precio_pvp || 0;
+      const iva = p.iva_porcentaje || 19;
 
       // Margen bruto
       const base = pvp > 0 ? pvp / (1 + iva / 100) : 0;
@@ -2349,18 +2336,18 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
         'Costo': costo || '',
         'Precio PVP': pvp || '',
         'IVA %': iva,
-        'Disponible': bdData?.disponible !== false ? 'Sí' : 'No',
+        'Disponible': p.disponible !== false ? 'Sí' : 'No',
         'Margen Bruto $': margenBruto > 0 ? Math.round(margenBruto * 100) / 100 : 0,
         'Comisión mín. %': comisionMinima,
         'Comisión máx. %': comisionMaxima,
-        'Comisión % (editable)': bdData?.comision_vendedora_override || ''
+        'Comisión % (editable)': p.comision_vendedora_override || ''
       };
     });
 
     res.json(excel);
   } catch (e) {
-    console.error('❌ /catalogo/excel-descargar FATAL:', e.message);
-    res.json([]);
+    console.error('❌ /catalogo/excel-descargar ERROR:', e.message);
+    res.status(500).json({ error: shortErr(e) });
   }
 });
 // GET /api/admin/catalogo — catálogo con todos los campos
