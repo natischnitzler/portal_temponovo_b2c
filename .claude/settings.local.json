@@ -35,7 +35,8 @@
       "Bash(git commit -m 'Excel: Agregar Comisión mín/máx para calcular rango de ganancias *)",
       "Bash(git commit -m 'Fix: Simplificar endpoint descarga - ultra robusto *)",
       "Bash(git commit -m 'Fix: Intentar obtener catálogo de Odoo \\(con fallback a BD local\\) *)",
-      "Bash(git commit -m 'Fix: Remover dependencia de Odoo en descarga \\(evitar 504 timeout\\) *)"
+      "Bash(git commit -m 'Fix: Remover dependencia de Odoo en descarga \\(evitar 504 timeout\\) *)",
+      "Bash(git commit -m 'Fix: Usar productosClienteMulti + multiplicador \\(sin calcular precio global\\) *)"
     ]
   }
 }

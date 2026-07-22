@@ -2310,24 +2310,28 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
 
-    // Intentar obtener del catálogo (con timeout de 3s)
+    // Obtener productos de Odoo (sin calcular precio)
     let prods = [];
     try {
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Timeout 3s')), 3000)
       );
       prods = await Promise.race([
-        catalogoConPrecioGlobal(false),
+        productosClienteMulti(),
         timeoutPromise
       ]);
     } catch (e) {
-      console.warn('⚠ Catálogo timeout, usando BD local:', e.message);
-      // Fallback: leer lo que hay en BD
+      console.warn('⚠ Odoo timeout, usando BD local:', e.message);
       const { rows: local } = await sql`SELECT sku FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku }));
     }
 
-    // Obtén datos guardados en BD
+    // Obtén multiplicadores por categoría
+    const { rows: multMap } = await sql`SELECT familia, multiplicador FROM categoria_multiplicador`;
+    const multByFamilia = {};
+    multMap.forEach(m => { multByFamilia[m.familia] = m.multiplicador || 2; });
+
+    // Obtén datos guardados en BD (costo, PVP, IVA, comisión)
     const { rows: catalogoBd } = await sql`
       SELECT sku, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, disponible
       FROM catalogo_productos
@@ -2338,8 +2342,15 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     // Construir Excel
     const excel = (prods || []).map(p => {
       const bdData = porSku[p.sku.toUpperCase()];
-      const costo = bdData?.costo || 0;
-      const pvp = bdData?.precio_pvp || 0;
+      const familia = famOf(p);
+      const multiplicador = multByFamilia[familia] || 2;
+
+      // Costo es el precio de Odoo
+      const costo = p.precio || 0;
+
+      // PVP sugerido = costo * multiplicador (pero el usuario puede editarlo)
+      const pvpSugerido = Math.round(costo * multiplicador);
+      const pvp = bdData?.precio_pvp || pvpSugerido; // Si ya está grabado, usa ese
       const iva = bdData?.iva_porcentaje || 19;
 
       // Margen bruto
