@@ -561,6 +561,10 @@ body.public .priv{display:none!important;}
             <p class="fp-t">Piedra</p>
             <div class="tag-chips" id="piedra-chips"></div>
           </div>
+          <div class="fp-group">
+            <p class="fp-t">Disponibilidad</p>
+            <label class="chk" style="margin-top:6px"><input type="checkbox" id="solo-con-foto"/> Solo con foto</label>
+          </div>
         </div>
       </div>
       <div id="vit-grid" class="vit-grid" style="padding-top:4px"></div>
@@ -1418,7 +1422,7 @@ function renderFavFilter(){
 }
 
 /* ═══════════ VITRINA ═══════════ */
-let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '', FILTRO_METAL = '', FILTRO_PIEDRA = '', FILTRO_FAVORITOS = false;
+let FILTRO_FAM = '', FILTRO_SUB = '', FILTRO_TXT = '', ORDEN = '', FILTRO_TAG = '', FILTRO_PRECIO = '', FILTRO_METAL = '', FILTRO_PIEDRA = '', FILTRO_FAVORITOS = false, FILTRO_FOTO = false;
 const PRICE_RANGES = [
   { id:'p1', label:'Hasta $10.000',    min:0,      max:10000 },
   { id:'p2', label:'$10.000–$30.000',  min:10000,  max:30000 },
@@ -1444,8 +1448,14 @@ $('refresh-btn').onclick = async ()=>{
   $('refresh-btn').classList.remove('spin');
 };
 function updateFilterBtn(){
-  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA || FILTRO_FAVORITOS));
+  $('filter-btn').classList.toggle('on', !!(FILTRO_TAG || FILTRO_PRECIO || FILTRO_METAL || FILTRO_PIEDRA || FILTRO_FAVORITOS || FILTRO_FOTO));
 }
+// Event listener para filtro "Solo con foto"
+$('solo-con-foto').onchange = (e) => {
+  FILTRO_FOTO = e.target.checked;
+  renderGrid();
+  updateFilterBtn();
+};
 // Metal/piedra solo existen para proveedores de joyería (Aviv) — si nadie en
 // el catálogo actual los tiene, ni se muestra el grupo de filtro.
 function renderMetalPiedraFilter(){
@@ -1628,6 +1638,7 @@ function filtrados(){
     if(FILTRO_METAL && p.metal!==FILTRO_METAL) return false;
     if(FILTRO_PIEDRA && p.piedra!==FILTRO_PIEDRA) return false;
     if(FILTRO_FAVORITOS && !esFavorito(p)) return false;
+    if(FILTRO_FOTO && !p.tieneImagen) return false;
     if(FILTRO_PRECIO){
       const r = PRICE_RANGES.find(x=>x.id===FILTRO_PRECIO);
       const v = sugerido(p);
