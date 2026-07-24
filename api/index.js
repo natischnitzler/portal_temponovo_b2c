@@ -2327,16 +2327,19 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     let prods = [];
     let fuente = 'desconocido';
     try {
+      // Timeout de 60s para catálogos grandes (5.000+ productos)
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout 10s')), 10000)
+        setTimeout(() => reject(new Error('Timeout 60s')), 60000)
       );
+      const startTime = Date.now();
       prods = await Promise.race([
         productosClienteMulti(),
         timeoutPromise
       ]);
+      const elapsed = Date.now() - startTime;
       if (prods && prods.length > 0) {
-        fuente = 'odoo (' + prods.length + ' productos)';
-        console.log('✅ Catálogo de Odoo:', prods.length, 'productos');
+        fuente = 'odoo (' + prods.length + ' productos en ' + Math.round(elapsed/1000) + 's)';
+        console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', elapsed/1000, 'segundos');
       } else {
         console.warn('⚠ productosClienteMulti devolvió lista vacía, usando BD local');
         const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
@@ -2347,7 +2350,7 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       console.warn('⚠ Error trayendo productos de Odoo:', e.message, '- usando BD local');
       const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
-      fuente = 'bd local (fallback) (' + prods.length + ' productos)';
+      fuente = 'bd local (fallback, error: ' + e.message + ') (' + prods.length + ' productos)';
     }
 
     // Obtén multiplicadores por categoría
