@@ -206,6 +206,7 @@ tr:last-child td{border-bottom:none;}
           <div class="card-h">Cargar precios y disponibilidad por Excel</div>
           <p class="note"><b>Columnas:</b> "Código" (obligatoria), "Precio", "Disponible", "Costo", "Precio PVP", "IVA", "Comisión" (todas opcionales, vacío = no se modifica).</p>
           <div class="row" style="margin-top:10px; gap:8px">
+            <button class="btn" id="cat-forzar-recarga">🔄 Forzar recarga del catálogo</button>
             <button class="btn" id="cat-descargar">📥 Descargar base (todos los productos)</button>
             <button class="btn dark" id="cat-subir">📤 Subir Excel actualizado</button>
           </div>
@@ -615,6 +616,16 @@ async function loadCatalogoStats() {
   }
 }
 let CAT_FILTRO_PROV = '', CAT_FILTRO_CATEGORIA = '';
+// Forzar recarga del catálogo (limpiar caché)
+$('cat-forzar-recarga').onclick = async () => {
+  $('cat-forzar-recarga').disabled = true;
+  try {
+    await api('/catalogo/forzar-recarga', { method: 'POST' });
+    showMsg('cat-excel-msg', '✓ Catálogo recargado. Ahora descarga el Excel.', true);
+    loadCatalogoStats();
+  } catch (e) { showMsg('cat-excel-msg', 'Error: ' + e.message, false); }
+  $('cat-forzar-recarga').disabled = false;
+};
 // Tabla removida - todo por Excel (mejor performance)
 $('cat-descargar').onclick = async () => {
   try {

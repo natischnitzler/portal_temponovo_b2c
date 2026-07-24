@@ -2309,6 +2309,16 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // catalogoConPrecioGlobal). "Variantes" cuenta cuántos SKU comparten mismo
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
 // Descarga optimizada para Excel: obtiene catálogo con timeout corto
+// Forzar recarga completa del catálogo (limpiar todas las cachés)
+app.post('/api/admin/catalogo/forzar-recarga', requireAdmin, async (_req, res) => {
+  try {
+    limpiarCacheCatalogoPrecios();
+    Object.keys(cache).filter(k => k.startsWith('productos_')).forEach(k => delete cache[k]);
+    res.json({ ok: true, mensaje: 'Catálogo recargado, caché limpiado' });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// Descargar catálogo como Excel
 app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) => {
   try {
     // Crear tabla si no existe
