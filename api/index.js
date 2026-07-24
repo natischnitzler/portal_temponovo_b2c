@@ -2114,10 +2114,11 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
     const { rows: catRows } = await sql`SELECT COUNT(DISTINCT familia) as total FROM categoria_multiplicador`;
     const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos`;
     const { rows: margenRows } = await sql`SELECT COALESCE(AVG((precio_pvp - costo) / NULLIF(costo, 0) * 100), 0) as promedio FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND costo > 0`;
+    const margenVal = margenRows[0]?.promedio;
     res.json({
       categorias_totales: parseInt(catRows[0]?.total || 0),
       productos_totales: parseInt(prodRows[0]?.total || 0),
-      margen_promedio: parseFloat((margenRows[0]?.promedio || 0).toFixed(2))
+      margen_promedio: margenVal ? parseFloat(String(margenVal)) : 0
     });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -2326,16 +2327,20 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     let prods = [];
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout 3s')), 3000)
+        setTimeout(() => reject(new Error('Timeout 10s')), 10000)
       );
       prods = await Promise.race([
         productosClienteMulti(),
         timeoutPromise
       ]);
     } catch (e) {
-      console.warn('⚠ Odoo timeout, usando BD local:', e.message);
-      const { rows: local } = await sql`SELECT sku FROM catalogo_productos ORDER BY sku`;
-      prods = local.map(r => ({ sku: r.sku }));
+      console.warn('⚠ Odoo timeout, intentando BD local:', e.message);
+      const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
+      prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
+    }
+    if (!prods || prods.length === 0) {
+      console.warn('⚠ Sin productos de Odoo ni BD local');
+      prods = [];
     }
 
     // Obtén multiplicadores por categoría

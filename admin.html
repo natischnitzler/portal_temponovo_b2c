@@ -424,7 +424,7 @@ $('btn-logout').onclick = logout;
 function openApp() {
   $('login-screen').style.display = 'none';
   $('app').classList.add('open');
-  loadCategorias(); loadVendedoras();
+  loadCategorias(); loadVendedoras(); loadCatalogoStats();
 }
 if (TOKEN) openApp();
 
