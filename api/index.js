@@ -898,14 +898,28 @@ async function productosClienteProveedor(proveedor) {
 // caído, credenciales vencidas), se loguea y se salta — no tumba a los demás.
 async function productosClienteMulti() {
   const proveedores = await getActiveProveedores();
+  console.log('🔍 productosClienteMulti:', proveedores.length, 'proveedores activos');
+  if (!proveedores.length) {
+    console.warn('⚠ No hay proveedores activos');
+    return [];
+  }
+  proveedores.forEach(p => console.log('  -', p.codigo, '(tipo:', p.tipo + ')'));
+
   // En paralelo — uno por uno, un proveedor lento (aunque tenga timeout)
   // sumaría su demora completa a la de los demás en vez de superponerse.
   const resultados = await Promise.allSettled(proveedores.map(p => productosClienteProveedor(p)));
   let todos = [];
   resultados.forEach((r, i) => {
-    if (r.status === 'fulfilled') todos = todos.concat(r.value);
-    else console.warn('⚠ catálogo de ' + proveedores[i].codigo + ':', r.reason.message);
+    if (r.status === 'fulfilled') {
+      const count = (r.value || []).length;
+      console.log('✅', proveedores[i].codigo + ':', count, 'productos');
+      todos = todos.concat(r.value);
+    } else {
+      console.warn('❌', proveedores[i].codigo + ':', r.reason.message);
+    }
   });
+  console.log('📊 productosClienteMulti total:', todos.length, 'productos de', proveedores.length, 'proveedores');
+
   // Info libre del Excel del admin — keyeada por SKU puro (no por proveedor,
   // simplificación deliberada: Temponovo y Aviv usan formatos de código
   // visiblemente distintos, ver plan).
