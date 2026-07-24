@@ -2582,6 +2582,26 @@ app.put('/api/admin/categorias-multiplicador/:familia', requireAdmin, async (req
 // Ícono/nombre a mostrar por categoría — público (sin datos sensibles), lo
 // consume tanto la app de la vendedora como la vitrina pública para pintar
 // los mismos pills en los dos lados.
+// Endpoint para selector de categorías + subfamilias en dos pasos
+app.get('/api/categorias-jerarquico', async (_req, res) => {
+  try {
+    const hit = cacheGet('categorias_jerarquico'); if (hit) return res.json(hit);
+    const prods = await catalogoConPrecioGlobal(false);
+    const catMap = new Map();
+    prods.forEach(p => {
+      const { fam, sub } = famSub(p);
+      if (!catMap.has(fam)) catMap.set(fam, new Set());
+      if (sub) catMap.get(fam).add(sub);
+    });
+    const resultado = Array.from(catMap.entries()).map(([fam, subs]) => ({
+      familia: fam,
+      subfamilias: Array.from(subs).sort()
+    })).sort((a, b) => a.familia.localeCompare(b.familia));
+    cacheSet('categorias_jerarquico', resultado, 5 * 60 * 1000);
+    res.json(resultado);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
 app.get('/api/categorias-display', async (_req, res) => {
   try {
     const hit = cacheGet('categorias_display'); if (hit) return res.json(hit);
