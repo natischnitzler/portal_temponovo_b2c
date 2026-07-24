@@ -2168,7 +2168,7 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
 });
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
-    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT familia) as total FROM categoria_multiplicador`;
+    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT categoria) as total FROM catalogo_productos WHERE categoria IS NOT NULL`;
     const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos`;
     const { rows: margenRows } = await sql`SELECT COALESCE(AVG((precio_pvp - costo) / NULLIF(costo, 0) * 100), 0) as promedio FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND costo > 0`;
     const margenVal = margenRows[0]?.promedio;
