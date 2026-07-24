@@ -2337,30 +2337,37 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     let prods = [];
     let fuente = 'desconocido';
     try {
-      // Timeout de 60s para catálogos grandes (5.000+ productos)
+      // Timeout de 120s para catálogos grandes (5.000+ productos)
+      // xmlrpc + múltiples llamadas pueden tardar bastante
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout 60s')), 60000)
+        setTimeout(() => reject(new Error('Timeout 120s')), 120000)
       );
       const startTime = Date.now();
+      console.log('📥 Iniciando descarga de catálogo...');
       prods = await Promise.race([
-        productosClienteMulti(),
+        productosClienteMulti().catch(e => {
+          console.error('❌ productosClienteMulti error:', e.message);
+          throw e;
+        }),
         timeoutPromise
       ]);
       const elapsed = Date.now() - startTime;
       if (prods && prods.length > 0) {
         fuente = 'odoo (' + prods.length + ' productos en ' + Math.round(elapsed/1000) + 's)';
-        console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', elapsed/1000, 'segundos');
+        console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', (elapsed/1000).toFixed(1), 's');
       } else {
         console.warn('⚠ productosClienteMulti devolvió lista vacía, usando BD local');
         const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
         prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
         fuente = 'bd local (' + prods.length + ' productos)';
+        console.warn('⚠ Usando', prods.length, 'productos de BD local');
       }
     } catch (e) {
-      console.warn('⚠ Error trayendo productos de Odoo:', e.message, '- usando BD local');
+      console.error('❌ Error en descarga Excel:', e.message, e.stack);
       const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
       fuente = 'bd local (fallback, error: ' + e.message + ') (' + prods.length + ' productos)';
+      console.warn('⚠ Fallback a BD local:', prods.length, 'productos');
     }
 
     // Obtén multiplicadores por categoría
