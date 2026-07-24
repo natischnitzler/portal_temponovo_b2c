@@ -2422,6 +2422,10 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       const costoVitrina = 2000;
       const gananciaVitrina = gananciaBruta > 0 ? Math.round((gananciaBruta - comisionVendedor - costoVitrina) * 100) / 100 : 0;
 
+      // Si ganancia vitrina es negativa, NO se publica (disponible = No)
+      const disponiblePorGanancia = gananciaVitrina >= 0;
+      const disponible = bdData?.disponible !== false && disponiblePorGanancia ? 'Sí' : 'No';
+
       // Rangos
       const comisionMinima = gananciaBruta > 0 ? 5 : 0;
       const comisionMaxima = gananciaBruta > 0 ? 50 : 0;
@@ -2433,7 +2437,7 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
         'Costo': costo > 0 ? Math.round(costo * 100) / 100 : '',
         'Precio PVP': pvp > 0 ? Math.round(pvp * 100) / 100 : '',
         'IVA %': iva,
-        'Disponible': bdData?.disponible !== false ? 'Sí' : 'No',
+        'Disponible': disponible,
         'Ganancia Bruta $': gananciaBruta > 0 ? Math.round(gananciaBruta * 100) / 100 : '',
         'Comisión mín. %': comisionMinima,
         'Comisión máx. %': comisionMaxima,
