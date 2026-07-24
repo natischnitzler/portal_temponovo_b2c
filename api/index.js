@@ -2357,29 +2357,33 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       const familia = famOf(p);
       const multiplicador = multByFamilia[familia] || 2;
 
-      // Costo es el precio de Odoo
-      const costo = p.precio || 0;
-
-      // PVP sugerido = costo * multiplicador (pero el usuario puede editarlo)
-      const pvpSugerido = Math.round(costo * multiplicador);
-      const pvp = bdData?.precio_pvp || pvpSugerido; // Si ya está grabado, usa ese
+      // Costo es el precio de Odoo (asumiendo que incluye IVA)
+      const costoConIva = p.precio || 0;
       const iva = bdData?.iva_porcentaje || 19;
 
-      // Margen bruto
-      const base = pvp > 0 ? pvp / (1 + iva / 100) : 0;
-      const margenBruto = base - costo;
+      // Costo sin IVA
+      const costo = costoConIva > 0 ? Math.round((costoConIva / (1 + iva / 100)) * 100) / 100 : 0;
+
+      // PVP sugerido = (costo sin IVA) * multiplicador (default 2)
+      const pvpSugerido = costo > 0 ? Math.round(costo * multiplicador) : 0;
+      const pvp = bdData?.precio_pvp || pvpSugerido; // Si ya está grabado, usa ese
+
+      // Margen bruto (en pesos, no porcentaje)
+      const margenBruto = pvp > 0 ? pvp - costo : 0;
 
       // Rangos
       const comisionMinima = margenBruto > 0 ? 5 : 0;
       const comisionMaxima = margenBruto > 0 ? 50 : 0;
 
       return {
-        'Código': p.sku,
-        'Costo': costo || '',
-        'Precio PVP': pvp || '',
+        'Categoría': familia || '',
+        'Código de barra': p.barcode || '',
+        'Código': p.sku || '',
+        'Costo': costo > 0 ? Math.round(costo * 100) / 100 : '',
+        'Precio PVP': pvp > 0 ? Math.round(pvp * 100) / 100 : '',
         'IVA %': iva,
         'Disponible': bdData?.disponible !== false ? 'Sí' : 'No',
-        'Margen Bruto $': margenBruto > 0 ? Math.round(margenBruto * 100) / 100 : 0,
+        'Margen Bruto $': margenBruto > 0 ? Math.round(margenBruto * 100) / 100 : '',
         'Comisión mín. %': comisionMinima,
         'Comisión máx. %': comisionMaxima,
         'Comisión % (editable)': bdData?.comision_vendedora_override || ''
