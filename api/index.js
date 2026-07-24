@@ -1011,6 +1011,12 @@ app.get('/api/productos', async (req, res) => {
       });
     }
 
+    // Agregar flag si tiene foto (para filtro "solo con foto")
+    prods = prods.map(p => ({
+      ...p,
+      tieneImagen: !!(p.id && p.proveedorId) // true si tiene ID de producto y proveedor
+    }));
+
     cacheSet('cat_' + v.codigo, prods, VENDEDORA_TTL_MS);
     res.json(prods);
   } catch (e) { console.error('❌ /api/productos', e.message); res.status(500).json({ error: shortErr(e) }); }
