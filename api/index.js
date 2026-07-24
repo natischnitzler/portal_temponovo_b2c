@@ -991,7 +991,25 @@ app.get('/api/productos', async (req, res) => {
 
     let prods = await catalogoConPrecioGlobal(true);
     const categorias = v.categorias || [];
-    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
+
+    if (categorias.length) {
+      // Soporta dos formatos:
+      // 1. "Familia" (legacy) - solo familia
+      // 2. "Familia/Subfamilia" (nuevo) - familia + subfamilia
+      prods = prods.filter(p => {
+        const { fam, sub } = famSub(p);
+        return categorias.some(cat => {
+          if (cat.includes('/')) {
+            // Formato nuevo: "Familia/Subfamilia"
+            const [famFilter, subFilter] = cat.split('/').map(s => s.trim());
+            return fam === famFilter && sub === subFilter;
+          } else {
+            // Formato legacy: solo "Familia"
+            return fam === cat;
+          }
+        });
+      });
+    }
 
     cacheSet('cat_' + v.codigo, prods, VENDEDORA_TTL_MS);
     res.json(prods);
