@@ -2123,6 +2123,25 @@ app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
+app.get('/api/admin/categorias-jerarquico', requireAdmin, async (_req, res) => {
+  try {
+    const hit = cacheGet('categorias_jerarquico'); if (hit) return res.json(hit);
+    const prods = await catalogoConPrecioGlobal(false);
+    const catMap = new Map();
+    prods.forEach(p => {
+      const { fam, sub } = famSub(p);
+      if (!catMap.has(fam)) catMap.set(fam, new Set());
+      if (sub) catMap.get(fam).add(sub);
+    });
+    const resultado = Array.from(catMap.entries()).map(([fam, subs]) => ({
+      familia: fam,
+      subfamilias: Array.from(subs).sort()
+    })).sort((a, b) => a.familia.localeCompare(b.familia));
+    cacheSet('categorias_jerarquico', resultado, 5 * 60 * 1000);
+    res.json(resultado);
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
 // ── Configuración de la empresa (una sola, global) ──
 app.get('/api/admin/config', requireAdmin, async (_req, res) => {
   try { res.json(await getConfig()); }
