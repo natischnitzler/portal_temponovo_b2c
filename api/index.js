@@ -2111,11 +2111,13 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
 });
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
-    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT familia) as total FROM (SELECT DISTINCT familia FROM catalogo_productos UNION SELECT DISTINCT familia FROM (SELECT familia FROM productosClienteMulti()) p) t`;
-    const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND iva_porcentaje IS NOT NULL`;
+    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT familia) as total FROM categoria_multiplicador`;
+    const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos`;
+    const { rows: margenRows } = await sql`SELECT COALESCE(AVG((precio_pvp - costo) / NULLIF(costo, 0) * 100), 0) as promedio FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND costo > 0`;
     res.json({
       categorias_totales: parseInt(catRows[0]?.total || 0),
-      productos_listos: parseInt(prodRows[0]?.total || 0)
+      productos_totales: parseInt(prodRows[0]?.total || 0),
+      margen_promedio: parseFloat((margenRows[0]?.promedio || 0).toFixed(2))
     });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
@@ -2620,27 +2622,38 @@ app.delete('/api/admin/producto-info', requireAdmin, async (_req, res) => {
 app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
   try {
     const estado = req.query.estado;
+    const fechaDesde = req.query.fecha_desde;
+    const fechaHasta = req.query.fecha_hasta;
+    const pedidoFiltro = req.query.pedido;
+    const seguimiento = req.query.seguimiento;
     // COALESCE(orden_secuencia, id): las filas nuevas (post-split) ya traen
     // orden_secuencia calculado una vez por grupo_id (así dos envíos del
     // mismo pedido comparten el mismo número de venta); las filas viejas
     // (antes de este cambio) no lo tienen, usan su propio id de respaldo —
     // mismo criterio que en GET /api/pedidos.
-    const { rows } = estado
-      ? await sql`
-          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
-                 pr.nombre AS proveedor_nombre,
-                 COALESCE(vp.orden_secuencia, vp.id) AS secuencia
-          FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
-          LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
-          WHERE vp.estado = ${estado} ORDER BY vp.created_at DESC`
-      : await sql`
-          SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
-                 pr.nombre AS proveedor_nombre,
-                 COALESCE(vp.orden_secuencia, vp.id) AS secuencia
-          FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
-          LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
-          ORDER BY vp.created_at DESC LIMIT 500`;
-    const seguimiento = req.query.seguimiento;
+    let rows = [];
+    if (estado || fechaDesde || fechaHasta) {
+      const { rows: filteredRows } = await sql`
+        SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
+               pr.nombre AS proveedor_nombre,
+               COALESCE(vp.orden_secuencia, vp.id) AS secuencia
+        FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+        LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
+        WHERE (${estado ? sql`vp.estado = ${estado}` : sql`1=1`})
+          AND (${fechaDesde ? sql`DATE(vp.created_at) >= ${fechaDesde}` : sql`1=1`})
+          AND (${fechaHasta ? sql`DATE(vp.created_at) <= ${fechaHasta}` : sql`1=1`})
+        ORDER BY vp.created_at DESC LIMIT 500`;
+      rows = filteredRows;
+    } else {
+      const { rows: allRows } = await sql`
+        SELECT vp.*, v.nombre AS vendedora_nombre, v.codigo AS vendedora_codigo,
+               pr.nombre AS proveedor_nombre,
+               COALESCE(vp.orden_secuencia, vp.id) AS secuencia
+        FROM ventas_pendientes vp JOIN vendedoras v ON v.id = vp.vendedora_id
+        LEFT JOIN proveedores pr ON pr.id = vp.proveedor_id
+        ORDER BY vp.created_at DESC LIMIT 500`;
+      rows = allRows;
+    }
     // Cuenta cuántas filas de este resultado comparten grupo_id — sirve para
     // que el admin vea "esta venta es parte de un pedido con otro proveedor".
     const porGrupo = {};
@@ -2650,7 +2663,8 @@ app.get('/api/admin/ventas', requireAdmin, async (req, res) => {
         ...r, numero_venta: numeroVenta(r.vendedora_codigo, r.secuencia),
         proveedor_nombre: r.proveedor_nombre || 'Temponovo',
         otros_proveedores_mismo_pedido: r.grupo_id && porGrupo[r.grupo_id] > 1
-      }));
+      }))
+      .filter(r => !pedidoFiltro || r.numero_venta.toUpperCase().includes(pedidoFiltro.toUpperCase()));
     res.json(list);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });

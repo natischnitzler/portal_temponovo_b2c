@@ -182,12 +182,24 @@ tr:last-child td{border-bottom:none;}
       <!-- PRODUCTOS (lista de precios global) -->
       <section class="section" id="sec-catalogo">
         <h2 class="page-t">Productos</h2>
-        <p class="page-s"><b>Fase 2: Sistema de costos y márgenes.</b> Por cada producto puedes definir Costo, Precio PVP (precio de venta al público), IVA%, y Comisión override (si quieres que esta categoria/producto tenga diferente % que el de la vendedora). El margen bruto se calcula automático. Lo que apagues en "Disponible" desaparece de todas las vitrinas.</p>
+        <p class="page-s">Carga precios, costos y disponibilidad de tus productos por Excel. El sistema calcula márgenes automáticamente.</p>
 
         <div class="card">
-          <div class="card-h">Categorías</div>
-          <p class="note">Multiplicador: precio de venta por defecto = costo del proveedor × este número, para lo que no tiene precio fijo (sin multiplicador propio, una categoría usa ×2).</p>
-          <div id="catmult-list"><div class="empty">Cargando…</div></div>
+          <div class="card-h">Resumen</div>
+          <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+            <div>
+              <div style="font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--steel); margin-bottom: 4px;">Productos subidos</div>
+              <div style="font-size: 24px; font-weight: 600;" id="stat-productos">—</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--steel); margin-bottom: 4px;">Categorías</div>
+              <div style="font-size: 24px; font-weight: 600;" id="stat-categorias">—</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--steel); margin-bottom: 4px;">Margen promedio</div>
+              <div style="font-size: 24px; font-weight: 600;" id="stat-margen">—</div>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -200,8 +212,6 @@ tr:last-child td{border-bottom:none;}
           <div class="msg" id="cat-excel-msg"></div>
           <input type="file" id="cat-excel-input" accept=".xlsx,.xls,.csv" style="display:none"/>
         </div>
-
-        <!-- Tabla eliminada - todo se maneja por Excel (mejor performance) -->
       </section>
 
       <!-- PROVEEDORES -->
@@ -300,6 +310,15 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="row">
+            <div class="fld" style="max-width:160px"><label class="fld-l">Desde</label>
+              <input class="fld-in" type="date" id="vt-fecha-desde"/>
+            </div>
+            <div class="fld" style="max-width:160px"><label class="fld-l">Hasta</label>
+              <input class="fld-in" type="date" id="vt-fecha-hasta"/>
+            </div>
+            <div class="fld" style="max-width:180px"><label class="fld-l">Nº Pedido</label>
+              <input class="fld-in" type="text" id="vt-pedido" placeholder="Ej: S01887"/>
+            </div>
             <div class="fld" style="max-width:180px"><label class="fld-l">Estado envío</label>
               <select class="fld-select" id="vt-estado">
                 <option value="">Todas</option>
@@ -416,7 +435,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
-  if (btn.dataset.sec === 'catalogo') { loadCategoriasMult(); }
+  if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); }
 });
 
 /* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
@@ -583,27 +602,17 @@ function autoIconKey(familia) {
 function iconSvg(key) {
   return `<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:#191b1e;fill:none;stroke-width:1.5">${ICON_LIB[key] || ICON_LIB.otros}</svg>`;
 }
-async function loadCategoriasMult() {
+async function loadCatalogoStats() {
   try {
-    const rows = await api('/categorias-multiplicador');
-    if (!rows.length) { $('catmult-list').innerHTML = '<div class="empty">No se pudo leer el catálogo de Odoo.</div>'; return; }
-    $('catmult-list').innerHTML = rows.map(r => `
-      <div class="row" style="align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line)">
-        <div style="flex:1;min-width:110px;font-size:13px">${esc(r.familia)}</div>
-        <input class="fld-in" style="max-width:120px" type="number" step="0.1" value="${r.multiplicador}" data-cm-mult="${esc(r.familia)}" title="Multiplicador"/>
-        <button class="btn btn-sm dark" data-cm-guardar="${esc(r.familia)}">Guardar</button>
-      </div>`).join('');
-    $('catmult-list').querySelectorAll('[data-cm-guardar]').forEach(btn => {
-      btn.onclick = async () => {
-        const familia = btn.dataset.cmGuardar;
-        const multiplicador = parseFloat($('catmult-list').querySelector('[data-cm-mult="' + CSS.escape(familia) + '"]').value) || 2;
-        try {
-          await api('/categorias-multiplicador/' + encodeURIComponent(familia), { method: 'PUT', body: JSON.stringify({ multiplicador }) });
-          btn.textContent = '✓ Guardado'; setTimeout(() => { btn.textContent = 'Guardar'; }, 1500);
-        } catch (e) { alert(e.message); }
-      };
-    });
-  } catch (e) { $('catmult-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+    const stats = await api('/stats');
+    $('stat-productos').textContent = stats.productos_totales || 0;
+    $('stat-categorias').textContent = stats.categorias_totales || 0;
+    $('stat-margen').textContent = (stats.margen_promedio || 0).toFixed(1) + '%';
+  } catch (e) {
+    $('stat-productos').textContent = '—';
+    $('stat-categorias').textContent = '—';
+    $('stat-margen').textContent = '—';
+  }
 }
 let CAT_FILTRO_PROV = '', CAT_FILTRO_CATEGORIA = '';
 // Tabla removida - todo por Excel (mejor performance)
@@ -677,10 +686,16 @@ applyVtCompact();
 async function loadVentas() {
   const estado = $('vt-estado').value;
   const seguimiento = $('vt-seguimiento').value;
+  const fechaDesde = $('vt-fecha-desde').value;
+  const fechaHasta = $('vt-fecha-hasta').value;
+  const pedido = $('vt-pedido').value;
   try {
     const params = [];
     if (estado) params.push('estado=' + estado);
     if (seguimiento) params.push('seguimiento=' + seguimiento);
+    if (fechaDesde) params.push('fecha_desde=' + fechaDesde);
+    if (fechaHasta) params.push('fecha_hasta=' + fechaHasta);
+    if (pedido) params.push('pedido=' + encodeURIComponent(pedido));
     const q = params.length ? '?' + params.join('&') : '';
     const ventas = await api('/ventas' + q);
     renderVentas(ventas);
