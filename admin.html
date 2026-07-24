@@ -165,7 +165,16 @@ tr:last-child td{border-bottom:none;}
           </div>
           <div class="fld" style="margin-top:10px">
             <label class="fld-l">Categorías que vende (vacío = todas)</label>
-            <div class="chip-list" id="v-categorias"></div>
+            <p class="note" style="margin-bottom:8px">Paso 1: Selecciona familia</p>
+            <div style="display:flex;gap:10px;margin-bottom:10px">
+              <select id="v-familia" class="fld-select" style="flex:1">
+                <option value="">-- Todas las familias --</option>
+              </select>
+            </div>
+            <p class="note" style="margin-bottom:8px">Paso 2: Selecciona subfamilias</p>
+            <div class="chip-list" id="v-subfamilias"></div>
+            <p class="note" style="margin-top:8px">Seleccionadas:</p>
+            <div class="chip-list" id="v-categorias" style="background:#f0f0f0;padding:8px;border-radius:6px"></div>
           </div>
           <div class="row" style="margin-top:14px">
             <button class="btn dark" id="v-crear">Crear vendedora</button>
@@ -439,29 +448,65 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); }
 });
 
-/* ── CATEGORÍAS (para elegir qué vende cada vendedora) ── */
+/* ── CATEGORÍAS JERÁRQUICAS (Familia → Subfamilias) ── */
+let CATEGORIAS_JERARQUICO = [];
 async function loadCategorias() {
-  $('v-categorias').innerHTML = '<span class="note">Cargando…</span>';
   try {
-    CATEGORIAS = await api('/categorias');
-    $('v-categorias').innerHTML = CATEGORIAS.map(c => `
-      <label class="chk" data-cat="${esc(c)}"><input type="checkbox"/> ${esc(c)}</label>`).join('')
-      || '<span class="note">Ningún proveedor devolvió categorías — revisá Proveedores → Probar conexión, o que tengan productos con "Se puede vender" activado. <button class="btn btn-sm" id="cat-reintentar" style="margin-left:6px">Reintentar</button></span>';
-    $('v-categorias').querySelectorAll('.chk').forEach(chk => {
-      chk.onclick = e => {
-        e.preventDefault();
-        const cat = chk.dataset.cat;
-        if (CATEGORIAS_SEL.has(cat)) CATEGORIAS_SEL.delete(cat); else CATEGORIAS_SEL.add(cat);
-        chk.classList.toggle('on', CATEGORIAS_SEL.has(cat));
-        chk.querySelector('input').checked = CATEGORIAS_SEL.has(cat);
-      };
-    });
-    const retryBtn = $('cat-reintentar');
-    if (retryBtn) retryBtn.onclick = loadCategorias;
+    CATEGORIAS_JERARQUICO = await api('/categorias-jerarquico');
+    const familiaSelect = $('v-familia');
+    familiaSelect.innerHTML = '<option value="">-- Selecciona familia --</option>' +
+      CATEGORIAS_JERARQUICO.map(c => `<option value="${esc(c.familia)}">${esc(c.familia)}</option>`).join('');
+
+    familiaSelect.onchange = () => actualizarSubfamilias(familiaSelect.value);
+    actualizarSubfamilias('');
   } catch (e) {
-    $('v-categorias').innerHTML = '<span class="note">Error: ' + esc(e.message) + ' <button class="btn btn-sm" id="cat-reintentar">Reintentar</button></span>';
-    $('cat-reintentar').onclick = loadCategorias;
+    $('v-familia').innerHTML = '<option>Error: ' + esc(e.message) + '</option>';
   }
+}
+
+function actualizarSubfamilias(familia) {
+  const container = $('v-subfamilias');
+  const catSelected = $('v-categorias');
+
+  if (!familia) {
+    container.innerHTML = '<span class="note">Selecciona una familia arriba</span>';
+    return;
+  }
+
+  const fam = CATEGORIAS_JERARQUICO.find(c => c.familia === familia);
+  if (!fam || !fam.subfamilias.length) {
+    container.innerHTML = '<span class="note">Sin subfamilias</span>';
+    return;
+  }
+
+  container.innerHTML = fam.subfamilias.map(sub => {
+    const key = familia + '/' + sub;
+    const checked = CATEGORIAS_SEL.has(key);
+    return `<label class="chk ${checked ? 'on' : ''}" data-subcat="${esc(key)}"><input type="checkbox" ${checked ? 'checked' : ''}/> ${esc(sub)}</label>`;
+  }).join('');
+
+  container.querySelectorAll('.chk').forEach(chk => {
+    chk.onclick = e => {
+      e.preventDefault();
+      const key = chk.dataset.subcat;
+      if (CATEGORIAS_SEL.has(key)) CATEGORIAS_SEL.delete(key); else CATEGORIAS_SEL.add(key);
+      chk.classList.toggle('on', CATEGORIAS_SEL.has(key));
+      chk.querySelector('input').checked = CATEGORIAS_SEL.has(key);
+      actualizarMostrado();
+    };
+  });
+}
+
+function actualizarMostrado() {
+  const catSelected = $('v-categorias');
+  if (!CATEGORIAS_SEL.size) {
+    catSelected.innerHTML = '<span class="note">Ninguna seleccionada (venderá todas)</span>';
+    return;
+  }
+  catSelected.innerHTML = [...CATEGORIAS_SEL].map(c => {
+    const [fam, sub] = c.split('/');
+    return `<span class="chip">${esc(sub || fam)} <button style="margin-left:4px;cursor:pointer" onclick="CATEGORIAS_SEL.delete('${c}');actualizarMostrado();actualizarSubfamilias($('v-familia').value)">✕</button></span>`;
+  }).join('');
 }
 
 /* ── VENDEDORAS ── */
