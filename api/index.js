@@ -2334,40 +2334,30 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
     )`;
 
     // Obtener productos de Odoo (sin calcular precio)
+    // Mismo método que la vitrina: sin timeout, que tarde lo que sea necesario
     let prods = [];
     let fuente = 'desconocido';
     try {
-      // Timeout de 120s para catálogos grandes (5.000+ productos)
-      // xmlrpc + múltiples llamadas pueden tardar bastante
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout 120s')), 120000)
-      );
       const startTime = Date.now();
-      console.log('📥 Iniciando descarga de catálogo...');
-      prods = await Promise.race([
-        productosClienteMulti().catch(e => {
-          console.error('❌ productosClienteMulti error:', e.message);
-          throw e;
-        }),
-        timeoutPromise
-      ]);
+      console.log('📥 Iniciando descarga de catálogo desde Odoo...');
+      prods = await productosClienteMulti();
       const elapsed = Date.now() - startTime;
       if (prods && prods.length > 0) {
         fuente = 'odoo (' + prods.length + ' productos en ' + Math.round(elapsed/1000) + 's)';
-        console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', (elapsed/1000).toFixed(1), 's');
+        console.log('✅ Catálogo de Odoo completado:', prods.length, 'productos en', (elapsed/1000).toFixed(1), 'segundos');
       } else {
         console.warn('⚠ productosClienteMulti devolvió lista vacía, usando BD local');
         const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
         prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
         fuente = 'bd local (' + prods.length + ' productos)';
-        console.warn('⚠ Usando', prods.length, 'productos de BD local');
+        console.warn('⚠ Usando', prods.length, 'productos de BD local como fallback');
       }
     } catch (e) {
-      console.error('❌ Error en descarga Excel:', e.message, e.stack);
+      console.error('❌ Error trayendo catálogo de Odoo:', e.message);
       const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
-      fuente = 'bd local (fallback, error: ' + e.message + ') (' + prods.length + ' productos)';
-      console.warn('⚠ Fallback a BD local:', prods.length, 'productos');
+      fuente = 'bd local (fallback por error: ' + e.message + ') (' + prods.length + ' productos)';
+      console.warn('⚠ Fallback a BD local:', prods.length, 'productos, error:', e.message);
     }
 
     // Obtén multiplicadores por categoría
