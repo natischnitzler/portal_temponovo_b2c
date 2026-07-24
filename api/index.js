@@ -2325,6 +2325,7 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
 
     // Obtener productos de Odoo (sin calcular precio)
     let prods = [];
+    let fuente = 'desconocido';
     try {
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Timeout 10s')), 10000)
@@ -2333,14 +2334,20 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
         productosClienteMulti(),
         timeoutPromise
       ]);
+      if (prods && prods.length > 0) {
+        fuente = 'odoo (' + prods.length + ' productos)';
+        console.log('✅ Catálogo de Odoo:', prods.length, 'productos');
+      } else {
+        console.warn('⚠ productosClienteMulti devolvió lista vacía, usando BD local');
+        const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
+        prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
+        fuente = 'bd local (' + prods.length + ' productos)';
+      }
     } catch (e) {
-      console.warn('⚠ Odoo timeout, intentando BD local:', e.message);
+      console.warn('⚠ Error trayendo productos de Odoo:', e.message, '- usando BD local');
       const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
-    }
-    if (!prods || prods.length === 0) {
-      console.warn('⚠ Sin productos de Odoo ni BD local');
-      prods = [];
+      fuente = 'bd local (fallback) (' + prods.length + ' productos)';
     }
 
     // Obtén multiplicadores por categoría
