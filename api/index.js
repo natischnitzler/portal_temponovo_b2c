@@ -2411,12 +2411,20 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       const pvpSugerido = costo > 0 ? Math.round(costo * multiplicador) : 0;
       const pvp = bdData?.precio_pvp || pvpSugerido; // Si ya está grabado, usa ese
 
-      // Margen bruto (en pesos, no porcentaje)
-      const margenBruto = pvp > 0 ? pvp - costo : 0;
+      // Ganancia bruta (en pesos)
+      const gananciaBruta = pvp > 0 ? pvp - costo : 0;
+
+      // Comisión vendedor en pesos (basada en % editable)
+      const comisionPct = bdData?.comision_vendedora_override ? parseFloat(bdData.comision_vendedora_override) : 0;
+      const comisionVendedor = gananciaBruta > 0 ? Math.round(gananciaBruta * comisionPct / 100 * 100) / 100 : 0;
+
+      // Ganancia vitrina = Ganancia bruta - Comisión vendedor - $2.000
+      const costoVitrina = 2000;
+      const gananciaVitrina = gananciaBruta > 0 ? Math.round((gananciaBruta - comisionVendedor - costoVitrina) * 100) / 100 : 0;
 
       // Rangos
-      const comisionMinima = margenBruto > 0 ? 5 : 0;
-      const comisionMaxima = margenBruto > 0 ? 50 : 0;
+      const comisionMinima = gananciaBruta > 0 ? 5 : 0;
+      const comisionMaxima = gananciaBruta > 0 ? 50 : 0;
 
       return {
         'Categoría': familia || '',
@@ -2426,10 +2434,12 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
         'Precio PVP': pvp > 0 ? Math.round(pvp * 100) / 100 : '',
         'IVA %': iva,
         'Disponible': bdData?.disponible !== false ? 'Sí' : 'No',
-        'Margen Bruto $': margenBruto > 0 ? Math.round(margenBruto * 100) / 100 : '',
+        'Ganancia Bruta $': gananciaBruta > 0 ? Math.round(gananciaBruta * 100) / 100 : '',
         'Comisión mín. %': comisionMinima,
         'Comisión máx. %': comisionMaxima,
-        'Comisión % (editable)': bdData?.comision_vendedora_override || ''
+        'Comisión % (editable)': bdData?.comision_vendedora_override || '',
+        'Comisión Vendedor $': comisionVendedor > 0 ? comisionVendedor : '',
+        'Ganancia Vitrina $': gananciaVitrina > 0 ? gananciaVitrina : ''
       };
     });
 
