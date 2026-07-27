@@ -37,7 +37,10 @@
       "Bash(git commit -m 'Fix: Intentar obtener catálogo de Odoo \\(con fallback a BD local\\) *)",
       "Bash(git commit -m 'Fix: Remover dependencia de Odoo en descarga \\(evitar 504 timeout\\) *)",
       "Bash(git commit -m 'Fix: Usar productosClienteMulti + multiplicador \\(sin calcular precio global\\) *)",
-      "Bash(curl -s http://localhost:3000/api/admin/catalogo/excel-descargar -H \"x-admin-token: test\")"
+      "Bash(curl -s http://localhost:3000/api/admin/catalogo/excel-descargar -H \"x-admin-token: test\")",
+      "Bash(git update-index *)",
+      "Bash(git reset *)",
+      "Bash(grep -E \"\\\\.\\(sql|md\\)$|schema|init\")"
     ]
   }
 }
