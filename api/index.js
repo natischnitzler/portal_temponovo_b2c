@@ -2395,35 +2395,21 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       updated_at TIMESTAMPTZ DEFAULT now()
     )`;
 
-    // Para catálogos grandes (>5000 productos), usar BD local para evitar timeout
-    // Si quieres TODOS los productos de Odoo, necesitas plan Enterprise en Vercel (900s)
+    // Para Excel, obtener TODOS los productos de Odoo (es lo que quiere el admin)
     let prods = [];
     let fuente = 'desconocido';
     try {
-      // Primero check: ¿cuántos productos hay en BD local?
-      const { rows: bdCount } = await sql`SELECT COUNT(*) as total FROM catalogo_productos`;
-      const bdTotal = parseInt(bdCount[0]?.total || 0);
-
-      if (bdTotal > 0) {
-        // Si hay productos en BD local, usarlos (rápido, sin timeout)
-        console.log('⚡ Usando BD local:', bdTotal, 'productos (evita timeout)');
-        const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
-        prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
-        fuente = 'bd local (' + prods.length + ' productos - rápido)';
-      } else {
-        // Si BD local está vacía, intentar Odoo (puede timeout con catálogos grandes)
-        const startTime = Date.now();
-        console.log('📥 Iniciando descarga de catálogo desde Odoo (sin BD local)...');
-        prods = await productosClienteMulti();
-        const elapsed = Date.now() - startTime;
-        if (prods && prods.length > 0) {
-          fuente = 'odoo (' + prods.length + ' productos en ' + Math.round(elapsed/1000) + 's)';
-          console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', (elapsed/1000).toFixed(1), 's');
-        }
+      const startTime = Date.now();
+      console.log('📥 Descargando catálogo completo desde Odoo para Excel...');
+      prods = await productosClienteMulti();
+      const elapsed = Date.now() - startTime;
+      if (prods && prods.length > 0) {
+        fuente = 'odoo (' + prods.length + ' productos en ' + Math.round(elapsed/1000) + 's)';
+        console.log('✅ Catálogo de Odoo:', prods.length, 'productos en', (elapsed/1000).toFixed(1), 's');
       }
     } catch (e) {
-      console.error('❌ Error:', e.message);
-      // Fallback silencioso a BD local vacía
+      console.error('❌ Error Odoo:', e.message);
+      // Fallback a BD local si Odoo falla
       const { rows: local } = await sql`SELECT * FROM catalogo_productos ORDER BY sku`;
       prods = local.map(r => ({ sku: r.sku, precio: 0, barcode: '' }));
       fuente = 'bd local (fallback, ' + prods.length + ' productos)';
