@@ -2168,17 +2168,20 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
 });
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
+    const hit = cacheGet('admin_stats'); if (hit) return res.json(hit);
     const prods = await catalogoConPrecioGlobal(false);
     const cats = [...new Set(prods.map(p => famOf(p)).filter(Boolean))];
     const margenes = prods
       .filter(p => p.costo > 0 && p.precio && p.precio > 0)
       .map(p => ((p.precio - p.costo) / p.costo) * 100);
     const margenPromedio = margenes.length ? margenes.reduce((a, b) => a + b, 0) / margenes.length : 0;
-    res.json({
+    const resultado = {
       categorias_totales: cats.length,
       productos_totales: prods.length,
       margen_promedio: parseFloat(margenPromedio.toFixed(2))
-    });
+    };
+    cacheSet('admin_stats', resultado, 5 * 60 * 1000);
+    res.json(resultado);
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 // Logo de cada vendedora (vive en su config visual, guardada en Postgres) —
