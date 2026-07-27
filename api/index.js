@@ -2464,20 +2464,18 @@ app.get('/api/admin/catalogo/excel-descargar', requireAdmin, async (_req, res) =
       const comisionMinima = gananciaBruta > 0 ? 5 : 0;
       const comisionMaxima = gananciaBruta > 0 ? 50 : 0;
 
+      const { fam, sub } = famSub(p);
       return {
-        'Categoría': familia || '',
-        'Código de barra': p.barcode || '',
+        'Categoría Padre': fam || '',
+        'Categoría Hijo': sub || '',
         'Código': p.sku || '',
-        'Costo': costo > 0 ? Math.round(costo * 100) / 100 : '',
-        'Precio PVP': pvp > 0 ? Math.round(pvp * 100) / 100 : '',
+        'Nombre': p.nombre || '',
+        'PVP Editable': pvp > 0 ? Math.round(pvp * 100) / 100 : '',
         'IVA %': iva,
         'Disponible': disponible,
-        'Ganancia Bruta $': gananciaBruta > 0 ? Math.round(gananciaBruta * 100) / 100 : '',
-        'Comisión mín. %': comisionMinima,
-        'Comisión máx. %': comisionMaxima,
-        'Comisión % (editable)': bdData?.comision_vendedora_override || '',
-        'Comisión Vendedor $': comisionVendedor > 0 ? comisionVendedor : '',
-        'Ganancia Vitrina $': gananciaVitrina > 0 ? gananciaVitrina : ''
+        'Comisión % Editable': bdData?.comision_vendedora_override || 0,
+        'Comisión $ (Automático)': comisionVendedor > 0 ? comisionVendedor : 0,
+        'Ganancia Vitrina $': gananciaVitrina > 0 ? gananciaVitrina : 0
       };
     });
 
