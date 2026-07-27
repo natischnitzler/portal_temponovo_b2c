@@ -2168,14 +2168,16 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
 });
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
-    const { rows: catRows } = await sql`SELECT COUNT(DISTINCT categoria) as total FROM catalogo_productos WHERE categoria IS NOT NULL`;
-    const { rows: prodRows } = await sql`SELECT COUNT(*) as total FROM catalogo_productos`;
-    const { rows: margenRows } = await sql`SELECT COALESCE(AVG((precio_pvp - costo) / NULLIF(costo, 0) * 100), 0) as promedio FROM catalogo_productos WHERE costo IS NOT NULL AND precio_pvp IS NOT NULL AND costo > 0`;
-    const margenVal = margenRows[0]?.promedio;
+    const prods = await catalogoConPrecioGlobal(false);
+    const cats = [...new Set(prods.map(p => famOf(p)).filter(Boolean))];
+    const margenes = prods
+      .filter(p => p.costo > 0 && p.precio && p.precio > 0)
+      .map(p => ((p.precio - p.costo) / p.costo) * 100);
+    const margenPromedio = margenes.length ? margenes.reduce((a, b) => a + b, 0) / margenes.length : 0;
     res.json({
-      categorias_totales: parseInt(catRows[0]?.total || 0),
-      productos_totales: parseInt(prodRows[0]?.total || 0),
-      margen_promedio: margenVal ? parseFloat(String(margenVal)) : 0
+      categorias_totales: cats.length,
+      productos_totales: prods.length,
+      margen_promedio: parseFloat(margenPromedio.toFixed(2))
     });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
