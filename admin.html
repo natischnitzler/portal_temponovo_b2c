@@ -428,7 +428,14 @@ $('login-btn').onclick = async () => {
   $('login-btn').disabled = false;
 };
 $('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('login-btn').click(); });
-function logout() { TOKEN = ''; localStorage.removeItem('tn_admin_token'); $('app').classList.remove('open'); $('login-screen').style.display = 'flex'; }
+function logout() {
+  localStorage.removeItem('tn_admin_token');
+  // Recarga en limpio en vez de solo esconder #app con CSS: así no importa
+  // en qué estado haya quedado la pantalla (un selector con datos a medio
+  // cargar, un modal abierto, etc.) — arranca de cero y, sin token, la
+  // pantalla de login se muestra sola (es el estado por defecto en el CSS).
+  location.reload();
+}
 $('btn-logout').onclick = logout;
 
 function openApp() {
@@ -460,7 +467,12 @@ async function loadCategorias() {
     familiaSelect.onchange = () => actualizarSubfamilias(familiaSelect.value);
     actualizarSubfamilias('');
   } catch (e) {
-    $('v-familia').innerHTML = '<option>Error: ' + esc(e.message) + '</option>';
+    // Si fue por sesión vencida, logout() ya está recargando la página —
+    // no tiene sentido (ni conviene) seguir tocando este selector.
+    if (/[Ss]esión/.test(e.message)) return;
+    const familiaSelect = $('v-familia');
+    familiaSelect.innerHTML = '<option value="" disabled selected>⚠ No se pudo cargar: ' + esc(e.message) + '</option>';
+    familiaSelect.disabled = true;
   }
 }
 
