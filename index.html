@@ -12,7 +12,18 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" id="pwa-apple-title" content="Vitrina"/>
 <link rel="apple-touch-icon" id="pwa-apple-icon"/>
-<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400;500;600&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600&family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500&family=DM+Serif+Display&family=Abril+Fatface&family=Bebas+Neue&family=Lora:wght@400;500&family=Poppins:wght@300;400;500&family=Inter:wght@300;400;500&family=Nunito:wght@300;400;600&family=Work+Sans:wght@300;400;500&family=Karla:wght@300;400;500&display=swap" rel="stylesheet"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<!-- NOTA: se sacó "Karla" de esta lista — no aparece en ningún selector de
+     tipografía (F1_STACK/F2_STACK) ni en el CSS, solo estaba declarada acá
+     sin usarse en ningún lado. El resto de las fuentes SÍ se usa: son las
+     opciones del selector de tipografía que cada vendedora elige para su
+     vitrina (ver "Personalización" en el panel) — no se pueden sacar sin
+     romper esa opción para quien ya la eligió. Cargar solo la elegida por
+     cada vendedora (en vez de las ~16 de una) es la optimización real
+     pendiente, marcada aparte porque conviene probarla visualmente antes
+     de subirla. -->
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@400;500;600&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600&family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500&family=DM+Serif+Display&family=Abril+Fatface&family=Bebas+Neue&family=Lora:wght@400;500&family=Poppins:wght@300;400;500&family=Inter:wght@300;400;500&family=Nunito:wght@300;400;600&family=Work+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>

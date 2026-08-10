@@ -461,6 +461,17 @@ function ensureDb() {
       }
       await sql`DROP TABLE IF EXISTS empresas CASCADE`;
     }
+
+    // ── ÍNDICES DE RENDIMIENTO ────────────────────────────────────────
+    // Sin esto, filtrar/reportar ventas (por vendedora, por estado, por
+    // fecha) hace table scan completo — no se nota con pocas filas, sí
+    // cuando ventas_pendientes crece. CREATE INDEX CONCURRENTLY no aplica
+    // acá (no se puede usar dentro de una transacción implícita como esta),
+    // pero para el volumen de este proyecto el IF NOT EXISTS normal alcanza.
+    await sql`CREATE INDEX IF NOT EXISTS idx_ventas_vendedora ON ventas_pendientes (vendedora_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ventas_estado ON ventas_pendientes (estado)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ventas_created ON ventas_pendientes (created_at)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ventas_proveedor ON ventas_pendientes (proveedor_id)`;
   })();
   return dbReady;
 }
@@ -497,6 +508,27 @@ function verifyPassword(plain, stored) {
 // fuente, que vive en un repo de GitHub).
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ADMIN_SECRET   = process.env.ADMIN_SECRET   || '';
+
+// ── VALIDACIÓN DE ENTORNO AL ARRANCAR ──────────────────────────────
+// Sin esto, faltar una variable obligatoria recién se nota cuando llega el
+// primer request que la necesita (ej. el primer login de admin del día),
+// con un error que hay que rastrear. Acá se avisa fuerte y temprano, en el
+// arranque, apuntando a la variable exacta que falta.
+(function validarEntorno() {
+  const faltantes = [];
+  if (!ADMIN_SECRET)   faltantes.push('ADMIN_SECRET');
+  if (!ADMIN_PASSWORD) faltantes.push('ADMIN_PASSWORD');
+  if (!process.env.POSTGRES_URL && !process.env.DATABASE_URL && !process.env.POSTGRES_PRISMA_URL) {
+    faltantes.push('POSTGRES_URL (o DATABASE_URL)');
+  }
+  if (faltantes.length) {
+    console.error('❌ Faltan variables de entorno obligatorias: ' + faltantes.join(', ') +
+      ' — configúralas en Vercel → Settings → Environment Variables y vuelve a desplegar.');
+    // No se corta el proceso (Vercel reintentaría infinitamente en cada
+    // request) — pero queda bien claro en los logs de deploy y de arranque.
+  }
+})();
+
 function makeAdminToken() {
   const exp = Date.now() + 12 * 3600 * 1000; // 12 horas
   const payload = String(exp);

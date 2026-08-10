@@ -20,7 +20,14 @@ if (!connectionString) {
 // verificación a propósito con PGSSL_INSECURE=1 — nunca por defecto.
 const pool = new Pool({
   connectionString,
-  ssl: connectionString ? { rejectUnauthorized: process.env.PGSSL_INSECURE !== '1' } : undefined
+  ssl: connectionString ? { rejectUnauthorized: process.env.PGSSL_INSECURE !== '1' } : undefined,
+  // En serverless (Vercel) cada instancia de función puede terminar abriendo
+  // su propio pool — sin un "max" bajo, muchas instancias en paralelo pueden
+  // agotar las conexiones que el proveedor de Postgres permite en total.
+  // 5 es conservador; si el proyecto migra a un servidor persistente (un
+  // solo proceso, no muchas instancias), este número puede subir sin riesgo.
+  max: parseInt(process.env.PG_POOL_MAX || '5', 10),
+  idleTimeoutMillis: 10000
 });
 
 // Tagged template mínimo, compatible con el mismo patrón `sql\`SELECT ...${x}...\``
