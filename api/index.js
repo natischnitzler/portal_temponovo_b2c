@@ -1014,7 +1014,7 @@ async function getCategoriaMultMap() {
   return map;
 }
 function limpiarCacheCatalogoPrecios() {
-  Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k === 'categorias_display' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
+  Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k === 'categorias_display' || k === 'admin_stats' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
     .forEach(k => delete cache[k]);
 }
 
@@ -1116,8 +1116,9 @@ async function upsertSnapshotFilas(productos) {
   const proveedorIds = filas.map(f => f.proveedor_id);
   const costosOdoo = filas.map(f => f.costo_odoo);
   await sql`
-    INSERT INTO catalogo_productos AS t (sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo)
-    SELECT * FROM UNNEST(${skus}::text[], ${nombres}::text[], ${familias}::text[], ${subfamilias}::text[], ${stocks}::numeric[], ${proveedorIds}::int[], ${costosOdoo}::numeric[])
+    INSERT INTO catalogo_productos AS t (sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo, disponible)
+    SELECT sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo, (stock > 0)
+    FROM UNNEST(${skus}::text[], ${nombres}::text[], ${familias}::text[], ${subfamilias}::text[], ${stocks}::numeric[], ${proveedorIds}::int[], ${costosOdoo}::numeric[])
       AS x(sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo)
     ON CONFLICT (sku) DO UPDATE SET
       nombre = EXCLUDED.nombre,
@@ -1125,7 +1126,11 @@ async function upsertSnapshotFilas(productos) {
       subfamilia = EXCLUDED.subfamilia,
       stock = EXCLUDED.stock,
       proveedor_id = EXCLUDED.proveedor_id,
-      costo_odoo = EXCLUDED.costo_odoo`;
+      costo_odoo = EXCLUDED.costo_odoo,
+      -- Regla: sin stock, no disponible. Solo apaga (nunca reactiva solo —
+      -- si el admin lo desactivó a mano por otro motivo, con stock > 0 esto
+      -- no lo toca).
+      disponible = CASE WHEN EXCLUDED.stock <= 0 THEN false ELSE t.disponible END`;
   return filas.length;
 }
 
@@ -2605,6 +2610,14 @@ app.post('/api/admin/catalogo/sync-lote', requireAdmin, async (req, res) => {
 // SOLO contra Postgres (nunca contra Odoo en el momento), para que ande
 // rápido con catálogos de miles de productos. Los datos vienen del último
 // "Forzar recarga" (ver sincronizarSnapshotCatalogo).
+// Columnas por las que se puede ordenar — whitelist explícita (nunca
+// interpolar el nombre de columna que manda el cliente directo en el SQL).
+const CATALOGO_SORT_COLS = {
+  sku: 'sku', nombre: 'nombre', familia: 'familia', stock: 'stock',
+  precio_pvp: 'pvp_efectivo', iva_porcentaje: 'iva_porcentaje', disponible: 'disponible',
+  comision_pct: 'comision_vendedora_override', comision: 'comision_calc', ganancia: 'ganancia_vitrina'
+};
+
 app.get('/api/admin/catalogo/buscar', requireAdmin, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -2612,6 +2625,53 @@ app.get('/api/admin/catalogo/buscar', requireAdmin, async (req, res) => {
     const q = String(req.query.q || '').trim();
     const familia = String(req.query.familia || '').trim();
     const disponible = String(req.query.disponible || ''); // 'si' | 'no' | ''
+    const comisionMin = req.query.comisionMin !== undefined && req.query.comisionMin !== '' ? parseFloat(req.query.comisionMin) : null;
+    const comisionMax = req.query.comisionMax !== undefined && req.query.comisionMax !== '' ? parseFloat(req.query.comisionMax) : null;
+    const gananciaMin = req.query.gananciaMin !== undefined && req.query.gananciaMin !== '' ? parseFloat(req.query.gananciaMin) : null;
+    const gananciaMax = req.query.gananciaMax !== undefined && req.query.gananciaMax !== '' ? parseFloat(req.query.gananciaMax) : null;
+    const sortCol = CATALOGO_SORT_COLS[req.query.sort] || 'nombre';
+    const sortDir = req.query.dir === 'desc' ? 'DESC' : 'ASC';
+
+    // El cálculo de costo/PVP sugerido/ganancia/comisión se hace acá en SQL
+    // (antes se hacía en JS, después de traer la página) para poder
+    // filtrar y ordenar por columnas calculadas como "Ganancia $" —
+    // fórmula verificada a mano, debe coincidir con recalcularFila() en
+    // admin.html si se cambia acá.
+    const base = `
+      WITH base AS (
+        SELECT cp.sku, cp.nombre, cp.familia, cp.subfamilia, cp.stock,
+               cp.precio_pvp, cp.iva_porcentaje, cp.disponible,
+               cp.comision_vendedora_override, cp.costo_odoo, cp.costo, cp.updated_at,
+               COALESCE(cm.multiplicador, ${MULT_DEFAULT}) AS multiplicador
+        FROM catalogo_productos cp
+        LEFT JOIN categoria_multiplicador cm ON cm.familia = cp.familia
+      ),
+      calc AS (
+        SELECT b.*,
+          CASE WHEN b.costo_odoo > 0 THEN ROUND((b.costo_odoo / (1 + COALESCE(b.iva_porcentaje,19)/100.0))::numeric, 2) ELSE 0 END AS costo_calc
+        FROM base b
+      ),
+      calc2 AS (
+        SELECT c.*,
+          COALESCE(c.precio_pvp, CASE WHEN c.costo_calc > 0 THEN ROUND(c.costo_calc * c.multiplicador) ELSE 0 END) AS pvp_efectivo
+        FROM calc c
+      ),
+      calc3 AS (
+        SELECT c2.*,
+          CASE WHEN c2.pvp_efectivo > 0 THEN c2.pvp_efectivo - c2.costo_calc ELSE 0 END AS ganancia_bruta
+        FROM calc2 c2
+      ),
+      calc4 AS (
+        SELECT c3.*,
+          CASE WHEN c3.ganancia_bruta > 0 THEN ROUND(c3.ganancia_bruta * COALESCE(c3.comision_vendedora_override,0)/100.0, 2) ELSE 0 END AS comision_calc
+        FROM calc3 c3
+      ),
+      final AS (
+        SELECT c4.*,
+          CASE WHEN c4.ganancia_bruta > 0 THEN ROUND(c4.ganancia_bruta - c4.comision_calc - 2000, 2) ELSE 0 END AS ganancia_vitrina
+        FROM calc4 c4
+      )
+      SELECT * FROM final`;
 
     const cond = [];
     const params = [];
@@ -2622,42 +2682,36 @@ app.get('/api/admin/catalogo/buscar', requireAdmin, async (req, res) => {
     if (familia) { params.push(familia); cond.push(`familia = $${params.length}`); }
     if (disponible === 'si') cond.push('disponible = true');
     if (disponible === 'no') cond.push('disponible = false');
+    if (comisionMin != null) { params.push(comisionMin); cond.push(`comision_vendedora_override >= $${params.length}`); }
+    if (comisionMax != null) { params.push(comisionMax); cond.push(`comision_vendedora_override <= $${params.length}`); }
+    if (gananciaMin != null) { params.push(gananciaMin); cond.push(`ganancia_vitrina >= $${params.length}`); }
+    if (gananciaMax != null) { params.push(gananciaMax); cond.push(`ganancia_vitrina <= $${params.length}`); }
     const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
 
-    const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM catalogo_productos ${where}`, params);
+    const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM (${base}) x ${where}`, params);
     const total = countRows[0]?.total || 0;
 
     const limitIdx = params.length + 1, offsetIdx = params.length + 2;
     const { rows } = await pool.query(
-      `SELECT sku, nombre, familia, subfamilia, stock, precio_pvp, iva_porcentaje, disponible,
-              comision_vendedora_override, costo_odoo, costo, updated_at
-       FROM catalogo_productos ${where}
-       ORDER BY nombre ASC NULLS LAST, sku ASC
+      `SELECT * FROM (${base}) x ${where}
+       ORDER BY ${sortCol} ${sortDir} NULLS LAST, sku ASC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       [...params, pageSize, (page - 1) * pageSize]
     );
 
-    const multMap = await getCategoriaMultMap();
-    const productos = rows.map(r => {
-      const iva = r.iva_porcentaje != null ? parseFloat(r.iva_porcentaje) : 19;
-      const costoConIva = parseFloat(r.costo_odoo || 0);
-      const costo = costoConIva > 0 ? Math.round((costoConIva / (1 + iva / 100)) * 100) / 100 : 0;
-      const multiplicador = multMap[r.familia] || MULT_DEFAULT;
-      const pvpSugerido = costo > 0 ? Math.round(costo * multiplicador) : 0;
-      const pvp = r.precio_pvp != null ? parseFloat(r.precio_pvp) : pvpSugerido;
-      const gananciaBruta = pvp > 0 ? pvp - costo : 0;
-      const comisionPct = r.comision_vendedora_override != null ? parseFloat(r.comision_vendedora_override) : 0;
-      const comisionVendedor = gananciaBruta > 0 ? Math.round(gananciaBruta * comisionPct / 100 * 100) / 100 : 0;
-      const gananciaVitrina = gananciaBruta > 0 ? Math.round((gananciaBruta - comisionVendedor - 2000) * 100) / 100 : 0;
-      return {
-        sku: r.sku, nombre: r.nombre, familia: r.familia, subfamilia: r.subfamilia, stock: r.stock,
-        precio_pvp: pvp || null, pvpSugerido, iva_porcentaje: iva, disponible: r.disponible,
-        comision_vendedora_override: r.comision_vendedora_override != null ? parseFloat(r.comision_vendedora_override) : 0,
-        costo: r.costo != null ? parseFloat(r.costo) : null, // pasa intacto — el PUT lo necesita para no pisarlo
-        costoCalculado: costo, // base de costo (desde Odoo, sin IVA) — para recalcular margen en el navegador
-        comisionVendedor, gananciaVitrina, updatedAt: r.updated_at
-      };
-    });
+    const productos = rows.map(r => ({
+      sku: r.sku, nombre: r.nombre, familia: r.familia, subfamilia: r.subfamilia, stock: r.stock,
+      precio_pvp: r.precio_pvp != null ? parseFloat(r.precio_pvp) : null,
+      pvpSugerido: Math.round(parseFloat(r.pvp_efectivo || 0)),
+      iva_porcentaje: r.iva_porcentaje != null ? parseFloat(r.iva_porcentaje) : 19,
+      disponible: r.disponible,
+      comision_vendedora_override: r.comision_vendedora_override != null ? parseFloat(r.comision_vendedora_override) : 0,
+      costo: r.costo != null ? parseFloat(r.costo) : null, // pasa intacto — el PUT lo necesita para no pisarlo
+      costoCalculado: parseFloat(r.costo_calc || 0), // base de costo — para recalcular margen en el navegador
+      comisionVendedor: parseFloat(r.comision_calc || 0),
+      gananciaVitrina: parseFloat(r.ganancia_vitrina || 0),
+      updatedAt: r.updated_at
+    }));
 
     res.json({ productos, total, page, pageSize, totalPaginas: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e) { console.error('❌ /api/admin/catalogo/buscar', e.message); res.status(500).json({ error: shortErr(e) }); }

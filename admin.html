@@ -68,6 +68,10 @@ input,select,textarea{font-family:var(--f2);}
 
 table{width:100%;border-collapse:collapse;font-size:13px;}
 th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);padding:8px 10px;border-bottom:1px solid var(--line);}
+.cp-th{cursor:pointer;user-select:none;white-space:nowrap;}
+.cp-th:hover{color:var(--hdr);}
+.cp-th.activo{color:var(--hdr);}
+.cp-th .arrow{font-size:9px;margin-left:3px;}
 td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top;}
 tr:last-child td{border-bottom:none;}
 .mono{font-family:var(--mono);}
@@ -213,7 +217,7 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Catálogo</div>
-          <div class="row" style="margin-bottom:12px">
+          <div class="row" style="margin-bottom:10px">
             <div class="fld" style="min-width:220px">
               <label class="fld-l">Buscar</label>
               <input class="fld-in" id="cp-buscar" placeholder="Código o nombre..."/>
@@ -232,13 +236,39 @@ tr:last-child td{border-bottom:none;}
             </div>
             <button class="btn" id="cat-forzar-recarga" title="Trae de nuevo nombre/categoría/stock desde Odoo — precios y disponibilidad que ya editaste NO se tocan">🔄 Sincronizar desde Odoo</button>
           </div>
+          <div class="row" style="margin-bottom:12px">
+            <div class="fld" style="min-width:100px">
+              <label class="fld-l">Comisión % mín</label>
+              <input class="fld-in" id="cp-comision-min" type="number" step="1" placeholder="0"/>
+            </div>
+            <div class="fld" style="min-width:100px">
+              <label class="fld-l">Comisión % máx</label>
+              <input class="fld-in" id="cp-comision-max" type="number" step="1" placeholder="100"/>
+            </div>
+            <div class="fld" style="min-width:120px">
+              <label class="fld-l">Ganancia $ mín</label>
+              <input class="fld-in" id="cp-ganancia-min" type="number" step="100" placeholder="sin mínimo"/>
+            </div>
+            <div class="fld" style="min-width:120px">
+              <label class="fld-l">Ganancia $ máx</label>
+              <input class="fld-in" id="cp-ganancia-max" type="number" step="100" placeholder="sin máximo"/>
+            </div>
+            <button class="btn btn-sm" id="cp-limpiar-filtros" style="align-self:flex-end">✕ Limpiar filtros</button>
+          </div>
           <div class="msg" id="cp-msg"></div>
           <div style="overflow-x:auto">
             <table id="cp-tabla" style="min-width:960px">
               <thead><tr>
-                <th>Código</th><th>Nombre</th><th>Categoría</th><th>Stock</th>
-                <th>PVP</th><th>IVA %</th><th>Disp.</th><th>Comisión %</th>
-                <th>Comisión $</th><th>Ganancia $</th>
+                <th data-sort="sku" class="cp-th">Código</th>
+                <th data-sort="nombre" class="cp-th">Nombre</th>
+                <th>Categoría</th>
+                <th data-sort="stock" class="cp-th">Stock</th>
+                <th data-sort="precio_pvp" class="cp-th">PVP</th>
+                <th data-sort="iva_porcentaje" class="cp-th">IVA %</th>
+                <th data-sort="disponible" class="cp-th">Disp.</th>
+                <th data-sort="comision_pct" class="cp-th">Comisión %</th>
+                <th data-sort="comision" class="cp-th">Comisión $</th>
+                <th data-sort="ganancia" class="cp-th">Ganancia $</th>
               </tr></thead>
               <tbody id="cp-tbody"><tr><td colspan="10" class="note" style="padding:16px">Cargando…</td></tr></tbody>
             </table>
@@ -252,6 +282,7 @@ tr:last-child td{border-bottom:none;}
             </div>
           </div>
         </div>
+
 
         <div class="card">
           <div class="card-h">Carga masiva por Excel (para cientos de cambios de una)</div>
@@ -718,7 +749,7 @@ async function loadCatalogoStats() {
   }
 }
 /* ── CATÁLOGO (tabla) ── */
-let CP_STATE = { page: 1, pageSize: 50, q: '', familia: '', disponible: '' };
+let CP_STATE = { page: 1, pageSize: 50, q: '', familia: '', disponible: '', sort: 'nombre', dir: 'asc', comisionMin: '', comisionMax: '', gananciaMin: '', gananciaMax: '' };
 let CP_ROWS = [];
 let CP_DEBOUNCE = null;
 
@@ -766,19 +797,30 @@ async function loadCatalogoTabla() {
   try {
     const qs = new URLSearchParams({
       page: CP_STATE.page, pageSize: CP_STATE.pageSize,
-      q: CP_STATE.q, familia: CP_STATE.familia, disponible: CP_STATE.disponible
+      q: CP_STATE.q, familia: CP_STATE.familia, disponible: CP_STATE.disponible,
+      sort: CP_STATE.sort, dir: CP_STATE.dir,
+      comisionMin: CP_STATE.comisionMin, comisionMax: CP_STATE.comisionMax,
+      gananciaMin: CP_STATE.gananciaMin, gananciaMax: CP_STATE.gananciaMax
     });
     const r = await api('/catalogo/buscar?' + qs.toString());
     CP_ROWS = r.productos || [];
+    const hayFiltros = CP_STATE.q || CP_STATE.familia || CP_STATE.disponible ||
+      CP_STATE.comisionMin !== '' || CP_STATE.comisionMax !== '' || CP_STATE.gananciaMin !== '' || CP_STATE.gananciaMax !== '';
     if (!CP_ROWS.length) {
-      const sinFiltros = !CP_STATE.q && !CP_STATE.familia && !CP_STATE.disponible;
       tbody.innerHTML = '<tr><td colspan="10" class="note" style="padding:16px">' +
-        (r.total === 0 && sinFiltros
+        (r.total === 0 && !hayFiltros
           ? 'Todavía no hay productos sincronizados — tocá "Sincronizar desde Odoo".'
           : 'Sin resultados para este filtro.') + '</td></tr>';
     } else {
       tbody.innerHTML = CP_ROWS.map(filaHtml).join('');
     }
+    document.querySelectorAll('.cp-th').forEach(th => {
+      th.classList.toggle('activo', th.dataset.sort === CP_STATE.sort);
+      th.querySelector('.arrow')?.remove();
+      if (th.dataset.sort === CP_STATE.sort) {
+        th.insertAdjacentHTML('beforeend', `<span class="arrow">${CP_STATE.dir === 'asc' ? '▲' : '▼'}</span>`);
+      }
+    });
     const desde = r.total ? (CP_STATE.page - 1) * CP_STATE.pageSize + 1 : 0;
     const hasta = Math.min(r.total, CP_STATE.page * CP_STATE.pageSize);
     $('cp-resumen-pag').textContent = r.total ? `${desde}–${hasta} de ${r.total}` : '';
@@ -838,6 +880,39 @@ $('cp-buscar').addEventListener('input', (e) => {
 });
 $('cp-familia').onchange = (e) => { CP_STATE.familia = e.target.value; CP_STATE.page = 1; loadCatalogoTabla(); };
 $('cp-disponible').onchange = (e) => { CP_STATE.disponible = e.target.value; CP_STATE.page = 1; loadCatalogoTabla(); };
+
+document.querySelectorAll('.cp-th').forEach(th => {
+  th.onclick = () => {
+    const col = th.dataset.sort;
+    if (CP_STATE.sort === col) CP_STATE.dir = CP_STATE.dir === 'asc' ? 'desc' : 'asc';
+    else { CP_STATE.sort = col; CP_STATE.dir = 'asc'; }
+    CP_STATE.page = 1;
+    loadCatalogoTabla();
+  };
+});
+
+let CP_RANGO_DEBOUNCE = null;
+function onCambioRango() {
+  clearTimeout(CP_RANGO_DEBOUNCE);
+  CP_RANGO_DEBOUNCE = setTimeout(() => {
+    CP_STATE.comisionMin = $('cp-comision-min').value;
+    CP_STATE.comisionMax = $('cp-comision-max').value;
+    CP_STATE.gananciaMin = $('cp-ganancia-min').value;
+    CP_STATE.gananciaMax = $('cp-ganancia-max').value;
+    CP_STATE.page = 1;
+    loadCatalogoTabla();
+  }, 400);
+}
+['cp-comision-min', 'cp-comision-max', 'cp-ganancia-min', 'cp-ganancia-max'].forEach(id => {
+  $(id).addEventListener('input', onCambioRango);
+});
+$('cp-limpiar-filtros').onclick = () => {
+  $('cp-buscar').value = ''; $('cp-familia').value = ''; $('cp-disponible').value = '';
+  $('cp-comision-min').value = ''; $('cp-comision-max').value = '';
+  $('cp-ganancia-min').value = ''; $('cp-ganancia-max').value = '';
+  CP_STATE = { ...CP_STATE, page: 1, q: '', familia: '', disponible: '', comisionMin: '', comisionMax: '', gananciaMin: '', gananciaMax: '' };
+  loadCatalogoTabla();
+};
 $('cp-prev').onclick = () => { if (CP_STATE.page > 1) { CP_STATE.page--; loadCatalogoTabla(); } };
 $('cp-next').onclick = () => { CP_STATE.page++; loadCatalogoTabla(); };
 
