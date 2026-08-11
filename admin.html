@@ -191,7 +191,7 @@ tr:last-child td{border-bottom:none;}
       <!-- PRODUCTOS (lista de precios global) -->
       <section class="section" id="sec-catalogo">
         <h2 class="page-t">Productos</h2>
-        <p class="page-s">Carga precios, costos y disponibilidad de tus productos por Excel. El sistema calcula márgenes automáticamente.</p>
+        <p class="page-s">Buscá, filtrá y editá precio, IVA, disponibilidad y comisión directo acá. El Excel queda para cambios masivos.</p>
 
         <div class="card">
           <div class="card-h">Resumen</div>
@@ -212,10 +212,51 @@ tr:last-child td{border-bottom:none;}
         </div>
 
         <div class="card">
-          <div class="card-h">Cargar precios y disponibilidad por Excel</div>
+          <div class="card-h">Catálogo</div>
+          <div class="row" style="margin-bottom:12px">
+            <div class="fld" style="min-width:220px">
+              <label class="fld-l">Buscar</label>
+              <input class="fld-in" id="cp-buscar" placeholder="Código o nombre..."/>
+            </div>
+            <div class="fld" style="min-width:160px">
+              <label class="fld-l">Categoría</label>
+              <select class="fld-select" id="cp-familia"><option value="">Todas</option></select>
+            </div>
+            <div class="fld" style="min-width:130px">
+              <label class="fld-l">Disponible</label>
+              <select class="fld-select" id="cp-disponible">
+                <option value="">Todos</option>
+                <option value="si">Sí</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <button class="btn" id="cat-forzar-recarga" title="Trae de nuevo nombre/categoría/stock desde Odoo — precios y disponibilidad que ya editaste NO se tocan">🔄 Sincronizar desde Odoo</button>
+          </div>
+          <div class="msg" id="cp-msg"></div>
+          <div style="overflow-x:auto">
+            <table id="cp-tabla" style="min-width:960px">
+              <thead><tr>
+                <th>Código</th><th>Nombre</th><th>Categoría</th><th>Stock</th>
+                <th>PVP</th><th>IVA %</th><th>Disp.</th><th>Comisión %</th>
+                <th>Comisión $</th><th>Ganancia $</th>
+              </tr></thead>
+              <tbody id="cp-tbody"><tr><td colspan="10" class="note" style="padding:16px">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="row" style="margin-top:12px; justify-content:space-between">
+            <div class="note" id="cp-resumen-pag"></div>
+            <div class="row" style="gap:8px; width:auto">
+              <button class="btn btn-sm" id="cp-prev">← Anterior</button>
+              <div class="note" id="cp-pagina" style="align-self:center; white-space:nowrap"></div>
+              <button class="btn btn-sm" id="cp-next">Siguiente →</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h">Carga masiva por Excel (para cientos de cambios de una)</div>
           <p class="note"><b>Columnas:</b> "Código" (obligatoria), "Precio", "Disponible", "Costo", "Precio PVP", "IVA", "Comisión" (todas opcionales, vacío = no se modifica).</p>
           <div class="row" style="margin-top:10px; gap:8px">
-            <button class="btn" id="cat-forzar-recarga">🔄 Forzar recarga del catálogo</button>
             <button class="btn" id="cat-descargar">📥 Descargar base (todos los productos)</button>
             <button class="btn dark" id="cat-subir">📤 Subir Excel actualizado</button>
           </div>
@@ -452,7 +493,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
-  if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); }
+  if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); loadFamiliasFiltro(); loadCatalogoTabla(); }
 });
 
 /* ── CATEGORÍAS JERÁRQUICAS (Familia → Subfamilias) ── */
@@ -672,18 +713,146 @@ async function loadCatalogoStats() {
     $('stat-margen').textContent = '—';
   }
 }
-let CAT_FILTRO_PROV = '', CAT_FILTRO_CATEGORIA = '';
-// Forzar recarga del catálogo (limpiar caché)
+/* ── CATÁLOGO (tabla) ── */
+let CP_STATE = { page: 1, pageSize: 50, q: '', familia: '', disponible: '' };
+let CP_ROWS = [];
+let CP_DEBOUNCE = null;
+
+async function loadFamiliasFiltro() {
+  try {
+    const familias = await api('/catalogo/familias');
+    const sel = $('cp-familia');
+    const actual = sel.value;
+    sel.innerHTML = '<option value="">Todas</option>' + familias.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
+    sel.value = actual;
+  } catch (e) { /* silencioso — el filtro simplemente queda con "Todas" */ }
+}
+
+// Recalcula comisión $ y ganancia $ en el navegador con la MISMA fórmula que
+// usa /api/admin/catalogo/buscar en el servidor — así la tabla se actualiza
+// al toque al editar, sin esperar otro viaje al servidor. Si el cálculo del
+// backend cambia, hay que actualizar esto también.
+function recalcularFila(p) {
+  const pvp = p.precio_pvp != null ? parseFloat(p.precio_pvp) : p.pvpSugerido;
+  const gananciaBruta = pvp > 0 ? pvp - (p.costoCalculado || 0) : 0;
+  const comisionPct = parseFloat(p.comision_vendedora_override) || 0;
+  p.comisionVendedor = gananciaBruta > 0 ? Math.round(gananciaBruta * comisionPct / 100 * 100) / 100 : 0;
+  p.gananciaVitrina = gananciaBruta > 0 ? Math.round((gananciaBruta - p.comisionVendedor - 2000) * 100) / 100 : 0;
+}
+
+function filaHtml(p) {
+  const cat = [p.familia, p.subfamilia].filter(Boolean).join(' / ');
+  return `<tr data-sku="${esc(p.sku)}">
+    <td style="font-size:11.5px">${esc(p.sku)}</td>
+    <td>${esc(p.nombre || '')}</td>
+    <td class="note">${esc(cat) || '—'}</td>
+    <td class="note">${p.stock ?? 0}</td>
+    <td><input class="fld-in" type="number" step="1" data-field="precio_pvp" value="${p.precio_pvp ?? ''}" placeholder="${p.pvpSugerido || 0}" style="width:90px; height:32px; padding:0 6px"/></td>
+    <td><input class="fld-in" type="number" step="0.1" data-field="iva_porcentaje" value="${p.iva_porcentaje ?? 19}" style="width:60px; height:32px; padding:0 6px"/></td>
+    <td style="text-align:center"><input type="checkbox" data-field="disponible" ${p.disponible ? 'checked' : ''}/></td>
+    <td><input class="fld-in" type="number" step="1" data-field="comision_vendedora_override" value="${p.comision_vendedora_override ?? 0}" style="width:65px; height:32px; padding:0 6px"/></td>
+    <td class="cp-comision note">${fmt(p.comisionVendedor)}</td>
+    <td class="cp-ganancia note">${fmt(p.gananciaVitrina)}</td>
+  </tr>`;
+}
+
+async function loadCatalogoTabla() {
+  const tbody = $('cp-tbody');
+  tbody.innerHTML = '<tr><td colspan="10" class="note" style="padding:16px">Cargando…</td></tr>';
+  try {
+    const qs = new URLSearchParams({
+      page: CP_STATE.page, pageSize: CP_STATE.pageSize,
+      q: CP_STATE.q, familia: CP_STATE.familia, disponible: CP_STATE.disponible
+    });
+    const r = await api('/catalogo/buscar?' + qs.toString());
+    CP_ROWS = r.productos || [];
+    if (!CP_ROWS.length) {
+      const sinFiltros = !CP_STATE.q && !CP_STATE.familia && !CP_STATE.disponible;
+      tbody.innerHTML = '<tr><td colspan="10" class="note" style="padding:16px">' +
+        (r.total === 0 && sinFiltros
+          ? 'Todavía no hay productos sincronizados — tocá "Sincronizar desde Odoo".'
+          : 'Sin resultados para este filtro.') + '</td></tr>';
+    } else {
+      tbody.innerHTML = CP_ROWS.map(filaHtml).join('');
+    }
+    const desde = r.total ? (CP_STATE.page - 1) * CP_STATE.pageSize + 1 : 0;
+    const hasta = Math.min(r.total, CP_STATE.page * CP_STATE.pageSize);
+    $('cp-resumen-pag').textContent = r.total ? `${desde}–${hasta} de ${r.total}` : '';
+    $('cp-pagina').textContent = `Página ${r.page} de ${r.totalPaginas}`;
+    $('cp-prev').disabled = r.page <= 1;
+    $('cp-next').disabled = r.page >= r.totalPaginas;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="10" class="note" style="padding:16px; color:var(--red)">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+// Guarda UNA celda, pero manda la FILA COMPLETA — el PUT existente
+// sobreescribe todos los campos editables juntos, no solo el que cambió.
+async function guardarFila(sku, field, value) {
+  const p = CP_ROWS.find(x => x.sku === sku);
+  if (!p) return;
+  const tr = $('cp-tbody').querySelector('tr[data-sku="' + CSS.escape(sku) + '"]');
+  if (field === 'disponible') p.disponible = value;
+  else p[field] = value === '' ? null : parseFloat(value);
+
+  const body = {
+    disponible: p.disponible,
+    costo: p.costo, // no se edita en esta tabla — se reenvía intacto (viene del Excel/carga anterior)
+    precio_pvp: p.precio_pvp,
+    iva_porcentaje: p.iva_porcentaje,
+    comision_vendedora_override: p.comision_vendedora_override
+  };
+  if (tr) tr.style.opacity = '0.5';
+  try {
+    await api('/catalogo/' + encodeURIComponent(sku), { method: 'PUT', body: JSON.stringify(body) });
+    recalcularFila(p);
+    if (tr) {
+      tr.querySelector('.cp-comision').textContent = fmt(p.comisionVendedor);
+      tr.querySelector('.cp-ganancia').textContent = fmt(p.gananciaVitrina);
+      tr.style.opacity = '1';
+      tr.style.background = '#eef7ee';
+      setTimeout(() => { tr.style.background = ''; }, 700);
+    }
+  } catch (e) {
+    if (tr) tr.style.opacity = '1';
+    showMsg('cp-msg', 'No se pudo guardar ' + sku + ': ' + e.message, false);
+  }
+}
+
+$('cp-tbody').addEventListener('change', (e) => {
+  const field = e.target.dataset.field;
+  if (!field) return;
+  const tr = e.target.closest('tr');
+  const sku = tr && tr.dataset.sku;
+  if (!sku) return;
+  guardarFila(sku, field, e.target.type === 'checkbox' ? e.target.checked : e.target.value);
+});
+$('cp-buscar').addEventListener('input', (e) => {
+  clearTimeout(CP_DEBOUNCE);
+  const valor = e.target.value;
+  CP_DEBOUNCE = setTimeout(() => { CP_STATE.q = valor.trim(); CP_STATE.page = 1; loadCatalogoTabla(); }, 400);
+});
+$('cp-familia').onchange = (e) => { CP_STATE.familia = e.target.value; CP_STATE.page = 1; loadCatalogoTabla(); };
+$('cp-disponible').onchange = (e) => { CP_STATE.disponible = e.target.value; CP_STATE.page = 1; loadCatalogoTabla(); };
+$('cp-prev').onclick = () => { if (CP_STATE.page > 1) { CP_STATE.page--; loadCatalogoTabla(); } };
+$('cp-next').onclick = () => { CP_STATE.page++; loadCatalogoTabla(); };
+
+// "Sincronizar desde Odoo" = trae nombre/categoría/stock de nuevo y refresca
+// la tabla. Con catálogos grandes puede tardar — ver nota en el backend.
 $('cat-forzar-recarga').onclick = async () => {
   $('cat-forzar-recarga').disabled = true;
+  const textoOriginal = $('cat-forzar-recarga').textContent;
+  $('cat-forzar-recarga').textContent = '⏳ Sincronizando…';
   try {
-    await api('/catalogo/forzar-recarga', { method: 'POST' });
-    showMsg('cat-excel-msg', '✓ Catálogo recargado. Ahora descarga el Excel.', true);
+    const r = await api('/catalogo/forzar-recarga', { method: 'POST' });
+    showMsg('cp-msg', '✓ ' + (r.mensaje || 'Catálogo recargado.'), true);
     loadCatalogoStats();
-  } catch (e) { showMsg('cat-excel-msg', 'Error: ' + e.message, false); }
+    await loadFamiliasFiltro();
+    await loadCatalogoTabla();
+  } catch (e) { showMsg('cp-msg', 'Error: ' + e.message, false); }
   $('cat-forzar-recarga').disabled = false;
+  $('cat-forzar-recarga').textContent = textoOriginal;
 };
-// Tabla removida - todo por Excel (mejor performance)
 $('cat-descargar').onclick = async () => {
   try {
     const todos = await api('/catalogo/excel-descargar');

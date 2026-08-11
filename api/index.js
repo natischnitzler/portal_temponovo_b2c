@@ -340,6 +340,28 @@ function ensureDb() {
     await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS precio_pvp NUMERIC DEFAULT NULL`;
     await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC DEFAULT 19`;
     await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS comision_vendedora_override NUMERIC DEFAULT NULL`;
+    // ── ESPEJO DEL CATÁLOGO DE ODOO (para la tabla del admin) ──────────
+    // nombre/familia/subfamilia/stock/proveedor_id NO son editables por el
+    // admin — son una copia de lo que hay en Odoo, actualizada por
+    // sincronizarSnapshotCatalogo() (ver "Forzar recarga del catálogo").
+    // Sin esto, buscar/filtrar/paginar un catálogo de miles de productos
+    // obligaría a traer TODO de Odoo por XML-RPC en cada tecla que el admin
+    // escriba en el buscador — con 15.000+ productos eso es justamente lo
+    // que venía dando 504 (ver historial). Con esto, la tabla del admin
+    // consulta solo Postgres, que sí aguanta buscar/paginar sin problema.
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS nombre TEXT DEFAULT ''`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS familia TEXT DEFAULT ''`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS subfamilia TEXT DEFAULT ''`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS stock NUMERIC DEFAULT 0`;
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS proveedor_id INTEGER`;
+    // Costo con IVA tal cual viene de Odoo (list_price) — se usa para
+    // calcular margen/ganancia en la tabla del admin sin pedirle nada a
+    // Odoo en el momento. Es DISTINTO de la columna "costo" (esa es un
+    // override manual del admin que hoy el cálculo de excel-descargar no
+    // llega a usar — se deja igual que estaba, no es parte de este cambio).
+    await sql`ALTER TABLE catalogo_productos ADD COLUMN IF NOT EXISTS costo_odoo NUMERIC DEFAULT NULL`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_catalogo_familia ON catalogo_productos (familia)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_catalogo_disponible ON catalogo_productos (disponible)`;
 
     await sql`CREATE TABLE IF NOT EXISTS categoria_multiplicador (
       familia TEXT PRIMARY KEY,
@@ -995,6 +1017,61 @@ function limpiarCacheCatalogoPrecios() {
   Object.keys(cache).filter(k => k === 'catalogo_precios' || k === 'categoria_mult' || k === 'categorias_display' || k.startsWith('productos') || k.startsWith('cat_') || k.startsWith('pub_'))
     .forEach(k => delete cache[k]);
 }
+
+// ── ESPEJO DEL CATÁLOGO EN POSTGRES (Admin → Productos, tabla en pantalla) ──
+// Copia sku/nombre/familia/subfamilia/stock/proveedor desde Odoo hacia
+// catalogo_productos, para que la tabla del admin pueda buscar y paginar
+// sin pedirle nada a Odoo en el momento. NO toca precio/costo/precio_pvp/
+// iva_porcentaje/disponible/comision_vendedora_override — esas las edita el
+// admin a mano y no se deben pisar con cada sincronización.
+// Aviso: con catálogos muy grandes (miles de productos) esto puede tardar
+// bastante — cada tanda de 200 productos son varios viajes de ida y vuelta
+// a Odoo por XML-RPC. Si en producción esto llega a cortarse por timeout
+// (504), la solución es partirlo en tandas más chicas disparadas desde el
+// navegador en vez de una sola llamada — quedó pendiente probarlo con el
+// volumen real antes de confiar en que corre entero de una.
+async function sincronizarSnapshotCatalogo() {
+  const todos = await productosClienteMulti();
+  if (!todos.length) return { ok: false, sincronizados: 0, motivo: 'Odoo no devolvió productos (revisa credenciales/conexión de los proveedores)' };
+
+  const filas = todos
+    .map(p => {
+      const { fam, sub } = famSub(p);
+      return {
+        sku: (p.sku || '').trim().toUpperCase(),
+        nombre: p.nombre || '',
+        familia: fam || '',
+        subfamilia: sub || '',
+        stock: Math.round(p.stock || 0),
+        proveedor_id: p.proveedorId || null,
+        costo_odoo: parseFloat(p.precio || 0) || null
+      };
+    })
+    .filter(f => f.sku);
+  if (!filas.length) return { ok: false, sincronizados: 0, motivo: 'Ningún producto tenía código (SKU) reconocible' };
+
+  // Mismo patrón de batch UPSERT con UNNEST que ya usa /catalogo/excel.
+  const skus = filas.map(f => f.sku);
+  const nombres = filas.map(f => f.nombre);
+  const familias = filas.map(f => f.familia);
+  const subfamilias = filas.map(f => f.subfamilia);
+  const stocks = filas.map(f => f.stock);
+  const proveedorIds = filas.map(f => f.proveedor_id);
+  const costosOdoo = filas.map(f => f.costo_odoo);
+  await sql`
+    INSERT INTO catalogo_productos AS t (sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo)
+    SELECT * FROM UNNEST(${skus}::text[], ${nombres}::text[], ${familias}::text[], ${subfamilias}::text[], ${stocks}::numeric[], ${proveedorIds}::int[], ${costosOdoo}::numeric[])
+      AS x(sku, nombre, familia, subfamilia, stock, proveedor_id, costo_odoo)
+    ON CONFLICT (sku) DO UPDATE SET
+      nombre = EXCLUDED.nombre,
+      familia = EXCLUDED.familia,
+      subfamilia = EXCLUDED.subfamilia,
+      stock = EXCLUDED.stock,
+      proveedor_id = EXCLUDED.proveedor_id,
+      costo_odoo = EXCLUDED.costo_odoo`;
+  return { ok: true, sincronizados: filas.length };
+}
+
 // Catálogo con precio de venta y disponibilidad YA resueltos (precio fijo >
 // multiplicador de su categoría > default). soloDisponibles=false es solo
 // para el panel de Admin, que necesita ver también lo que está apagado.
@@ -2201,16 +2278,26 @@ app.get('/api/admin/vendedoras', requireAdmin, async (_req, res) => {
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   try {
     const hit = cacheGet('admin_stats'); if (hit) return res.json(hit);
-    const prods = await catalogoConPrecioGlobal(false);
-    const cats = [...new Set(prods.map(p => famOf(p)).filter(Boolean))];
-    const margenes = prods
-      .filter(p => p.costo > 0 && p.precio && p.precio > 0)
-      .map(p => ((p.precio - p.costo) / p.costo) * 100);
-    const margenPromedio = margenes.length ? margenes.reduce((a, b) => a + b, 0) / margenes.length : 0;
+    // Lee del snapshot en Postgres (ver sincronizarSnapshotCatalogo), no en
+    // vivo de Odoo — mismo motivo que /catalogo/buscar: con catálogos
+    // grandes, ir a Odoo acá es lento y puede terminar en 504.
+    const { rows } = await sql`SELECT familia, precio_pvp, iva_porcentaje, costo_odoo FROM catalogo_productos`;
+    const multMap = await getCategoriaMultMap();
+    const cats = new Set();
+    let sumaMargen = 0, cantMargen = 0;
+    rows.forEach(r => {
+      if (r.familia) cats.add(r.familia);
+      const iva = r.iva_porcentaje != null ? parseFloat(r.iva_porcentaje) : 19;
+      const costoConIva = parseFloat(r.costo_odoo || 0);
+      const costo = costoConIva > 0 ? costoConIva / (1 + iva / 100) : 0;
+      const multiplicador = multMap[r.familia] || MULT_DEFAULT;
+      const pvp = r.precio_pvp != null ? parseFloat(r.precio_pvp) : (costo > 0 ? costo * multiplicador : 0);
+      if (costo > 0 && pvp > 0) { sumaMargen += ((pvp - costo) / costo) * 100; cantMargen++; }
+    });
     const resultado = {
-      categorias_totales: cats.length,
-      productos_totales: prods.length,
-      margen_promedio: parseFloat(margenPromedio.toFixed(2))
+      categorias_totales: cats.size,
+      productos_totales: rows.length,
+      margen_promedio: cantMargen ? parseFloat((sumaMargen / cantMargen).toFixed(2)) : 0
     };
     cacheSet('admin_stats', resultado, 5 * 60 * 1000);
     res.json(resultado);
@@ -2408,7 +2495,81 @@ app.post('/api/admin/catalogo/forzar-recarga', requireAdmin, async (_req, res) =
   try {
     limpiarCacheCatalogoPrecios();
     Object.keys(cache).filter(k => k.startsWith('productos_')).forEach(k => delete cache[k]);
-    res.json({ ok: true, mensaje: 'Catálogo recargado, caché limpiado' });
+    const sync = await sincronizarSnapshotCatalogo();
+    if (!sync.ok) return res.json({ ok: true, mensaje: 'Caché limpiado, pero la sincronización con Postgres falló: ' + sync.motivo });
+    res.json({ ok: true, mensaje: 'Catálogo recargado: ' + sync.sincronizados + ' producto(s) sincronizado(s).' });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// GET /api/admin/catalogo/buscar — tabla del admin: busca/filtra/pagina
+// SOLO contra Postgres (nunca contra Odoo en el momento), para que ande
+// rápido con catálogos de miles de productos. Los datos vienen del último
+// "Forzar recarga" (ver sincronizarSnapshotCatalogo).
+app.get('/api/admin/catalogo/buscar', requireAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize) || 50));
+    const q = String(req.query.q || '').trim();
+    const familia = String(req.query.familia || '').trim();
+    const disponible = String(req.query.disponible || ''); // 'si' | 'no' | ''
+
+    const cond = [];
+    const params = [];
+    if (q) {
+      params.push('%' + q.replace(/[%_]/g, '\\$&') + '%');
+      cond.push(`(sku ILIKE $${params.length} OR nombre ILIKE $${params.length})`);
+    }
+    if (familia) { params.push(familia); cond.push(`familia = $${params.length}`); }
+    if (disponible === 'si') cond.push('disponible = true');
+    if (disponible === 'no') cond.push('disponible = false');
+    const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+
+    const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM catalogo_productos ${where}`, params);
+    const total = countRows[0]?.total || 0;
+
+    const limitIdx = params.length + 1, offsetIdx = params.length + 2;
+    const { rows } = await pool.query(
+      `SELECT sku, nombre, familia, subfamilia, stock, precio_pvp, iva_porcentaje, disponible,
+              comision_vendedora_override, costo_odoo, costo, updated_at
+       FROM catalogo_productos ${where}
+       ORDER BY nombre ASC NULLS LAST, sku ASC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      [...params, pageSize, (page - 1) * pageSize]
+    );
+
+    const multMap = await getCategoriaMultMap();
+    const productos = rows.map(r => {
+      const iva = r.iva_porcentaje != null ? parseFloat(r.iva_porcentaje) : 19;
+      const costoConIva = parseFloat(r.costo_odoo || 0);
+      const costo = costoConIva > 0 ? Math.round((costoConIva / (1 + iva / 100)) * 100) / 100 : 0;
+      const multiplicador = multMap[r.familia] || MULT_DEFAULT;
+      const pvpSugerido = costo > 0 ? Math.round(costo * multiplicador) : 0;
+      const pvp = r.precio_pvp != null ? parseFloat(r.precio_pvp) : pvpSugerido;
+      const gananciaBruta = pvp > 0 ? pvp - costo : 0;
+      const comisionPct = r.comision_vendedora_override != null ? parseFloat(r.comision_vendedora_override) : 0;
+      const comisionVendedor = gananciaBruta > 0 ? Math.round(gananciaBruta * comisionPct / 100 * 100) / 100 : 0;
+      const gananciaVitrina = gananciaBruta > 0 ? Math.round((gananciaBruta - comisionVendedor - 2000) * 100) / 100 : 0;
+      return {
+        sku: r.sku, nombre: r.nombre, familia: r.familia, subfamilia: r.subfamilia, stock: r.stock,
+        precio_pvp: pvp || null, pvpSugerido, iva_porcentaje: iva, disponible: r.disponible,
+        comision_vendedora_override: r.comision_vendedora_override != null ? parseFloat(r.comision_vendedora_override) : 0,
+        costo: r.costo != null ? parseFloat(r.costo) : null, // pasa intacto — el PUT lo necesita para no pisarlo
+        costoCalculado: costo, // base de costo (desde Odoo, sin IVA) — para recalcular margen en el navegador
+        comisionVendedor, gananciaVitrina, updatedAt: r.updated_at
+      };
+    });
+
+    res.json({ productos, total, page, pageSize, totalPaginas: Math.max(1, Math.ceil(total / pageSize)) });
+  } catch (e) { console.error('❌ /api/admin/catalogo/buscar', e.message); res.status(500).json({ error: shortErr(e) }); }
+});
+
+// GET /api/admin/catalogo/familias — lista de familias presentes en el
+// snapshot, para el filtro de la tabla (evita mandar un <select> con 200
+// categorías si el catálogo real solo usa 15).
+app.get('/api/admin/catalogo/familias', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await sql`SELECT DISTINCT familia FROM catalogo_productos WHERE familia IS NOT NULL AND familia <> '' ORDER BY familia`;
+    res.json(rows.map(r => r.familia));
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
 });
 
@@ -2600,7 +2761,7 @@ app.post('/api/admin/catalogo/excel', requireAdmin, async (req, res) => {
     const ivas = limpias.map(f => f.iva_porcentaje);
     const comisiones = limpias.map(f => f.comision_vendedora_override);
     await sql`
-      INSERT INTO catalogo_productos AS t (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override, updated_at)
+      INSERT INTO catalogo_productos AS t (sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override)
       SELECT * FROM UNNEST(${skus}::text[], ${precios}::numeric[], ${disponibles}::boolean[], ${costos}::numeric[], ${precios_pvp}::numeric[], ${ivas}::numeric[], ${comisiones}::numeric[]) AS x(sku, precio, disponible, costo, precio_pvp, iva_porcentaje, comision_vendedora_override)
       ON CONFLICT (sku) DO UPDATE SET
         precio = EXCLUDED.precio,
