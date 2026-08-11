@@ -42,6 +42,9 @@ input,select,textarea{font-family:var(--f2);}
 .nav-item{display:flex;align-items:center;gap:10px;padding:12px 22px;font-size:13px;letter-spacing:.04em;color:var(--hdr-tx);opacity:.68;border:none;background:none;text-align:left;width:100%;}
 .nav-item.active{opacity:1;background:rgba(255,255,255,.08);border-left:3px solid var(--hdr-tx);padding-left:19px;}
 .sidebar-foot{margin-top:auto;padding:0 22px;}
+.btn-config{display:block;width:100%;text-align:left;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--hdr-tx);opacity:.55;background:none;border:none;padding:8px 0;border-top:1px solid rgba(255,255,255,.12);margin-top:6px;cursor:pointer;}
+.btn-config:hover{opacity:.9;}
+.btn-config.active{opacity:1;color:var(--amber);}
 .btn-logout{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--hdr-tx);opacity:.65;background:none;border:none;padding:8px 0;}
 .main{flex:1;overflow-y:auto;height:100vh;}
 .wrap{max-width:1080px;margin:0 auto;padding:32px 28px 60px;}
@@ -138,10 +141,10 @@ tr:last-child td{border-bottom:none;}
     <div class="sidebar-title">Admin</div>
     <button class="nav-item active" data-sec="vendedoras">👤 Vendedoras</button>
     <button class="nav-item" data-sec="catalogo">🏷 Productos</button>
-    <button class="nav-item" data-sec="productos">🏭 Proveedores</button>
     <button class="nav-item" data-sec="ventas">🧾 Ventas</button>
     <button class="nav-item" data-sec="reporte">📊 Reporte</button>
     <div class="sidebar-foot">
+      <button class="btn-config" id="nav-proveedores" data-sec="productos" title="Proveedores — configuración de conexión a Odoo">⚙ Proveedores</button>
       <button class="btn-logout" id="btn-logout">Cerrar sesión</button>
     </div>
   </nav>
@@ -419,7 +422,7 @@ tr:last-child td{border-bottom:none;}
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
-            <button class="btn" id="vt-compacto">Vista compacta</button>
+            <button class="btn" id="vt-expandir-todo">Expandir todo</button>
             <button class="btn dark" id="vt-consolidar">Reintentar todas las fallidas</button>
           </div>
           <div class="msg" id="vt-msg"></div>
@@ -521,15 +524,16 @@ function openApp() {
 if (TOKEN) openApp();
 
 /* ── NAV ── */
-document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === btn));
+function abrirSeccion(btn) {
+  document.querySelectorAll('.nav-item, .btn-config').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   $('sec-' + btn.dataset.sec).classList.add('active');
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
   if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); loadFamiliasFiltro(); loadCatalogoTabla(); }
   if (btn.dataset.sec === 'ventas') loadVentas();
-});
+}
+document.querySelectorAll('.nav-item, .btn-config').forEach(btn => btn.onclick = () => abrirSeccion(btn));
 
 /* ── CATEGORÍAS JERÁRQUICAS (Familia → Subfamilias) ── */
 let CATEGORIAS_JERARQUICO = [];
@@ -1033,17 +1037,15 @@ $('cat-excel-input').onchange = async (e) => {
 
 /* ── VENTAS ── */
 $('vt-buscar').onclick = loadVentas;
-let VT_COMPACT = localStorage.getItem('tn_admin_vt_compact') === '1';
-function applyVtCompact() {
-  $('vt-list').classList.toggle('compact', VT_COMPACT);
-  $('vt-compacto').textContent = VT_COMPACT ? 'Vista expandida' : 'Vista compacta';
-}
-$('vt-compacto').onclick = () => {
-  VT_COMPACT = !VT_COMPACT;
-  localStorage.setItem('tn_admin_vt_compact', VT_COMPACT ? '1' : '0');
-  applyVtCompact();
+let VT_TODO_EXPANDIDO = false;
+$('vt-expandir-todo').onclick = () => {
+  VT_TODO_EXPANDIDO = !VT_TODO_EXPANDIDO;
+  $('vt-list').querySelectorAll('.grupo-head').forEach(head => {
+    head.nextElementSibling.style.display = VT_TODO_EXPANDIDO ? '' : 'none';
+    head.classList.toggle('open', VT_TODO_EXPANDIDO);
+  });
+  $('vt-expandir-todo').textContent = VT_TODO_EXPANDIDO ? 'Colapsar todo' : 'Expandir todo';
 };
-applyVtCompact();
 async function loadVentas() {
   const estado = $('vt-estado').value;
   const seguimiento = $('vt-seguimiento').value;
@@ -1142,9 +1144,11 @@ function renderVentas(ventas) {
       </div>
     </div>`;
   }).join('');
-  // Cada tarjeta arranca colapsada — clic en el header muestra/oculta el
-  // detalle, para no llenar la página de tablas cuando hay muchas ventas.
+  // Cada tarjeta arranca colapsada — salvo la de errores/sin enviar, que
+  // arranca abierta porque es la que necesita atención del admin.
   $('vt-list').querySelectorAll('.grupo-head').forEach(head => {
+    const esErrores = head.querySelector('.gh-name')?.textContent.includes('Sin enviar');
+    if (esErrores) { head.nextElementSibling.style.display = ''; head.classList.add('open'); }
     head.onclick = () => {
       const body = head.nextElementSibling;
       const abrir = body.style.display === 'none';
@@ -1152,6 +1156,8 @@ function renderVentas(ventas) {
       head.classList.toggle('open', abrir);
     };
   });
+  VT_TODO_EXPANDIDO = false;
+  $('vt-expandir-todo').textContent = 'Expandir todo';
   $('vt-list').querySelectorAll('[data-seg]').forEach(sel => sel.onchange = async () => {
     const prev = sel.dataset.prev || sel.value;
     sel.disabled = true;
