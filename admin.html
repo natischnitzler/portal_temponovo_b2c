@@ -469,7 +469,10 @@ $('login-btn').onclick = async () => {
   $('login-btn').disabled = false;
 };
 $('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('login-btn').click(); });
+let CERRANDO_SESION = false; // evita reloads en cadena si varios requests fallan casi juntos (ver openApp)
 function logout() {
+  if (CERRANDO_SESION) return;
+  CERRANDO_SESION = true;
   localStorage.removeItem('tn_admin_token');
   // Recarga en limpio en vez de solo esconder #app con CSS: así no importa
   // en qué estado haya quedado la pantalla (un selector con datos a medio
