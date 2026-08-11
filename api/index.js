@@ -1018,39 +1018,96 @@ function limpiarCacheCatalogoPrecios() {
     .forEach(k => delete cache[k]);
 }
 
-// ── ESPEJO DEL CATÁLOGO EN POSTGRES (Admin → Productos, tabla en pantalla) ──
-// Copia sku/nombre/familia/subfamilia/stock/proveedor desde Odoo hacia
-// catalogo_productos, para que la tabla del admin pueda buscar y paginar
-// sin pedirle nada a Odoo en el momento. NO toca precio/costo/precio_pvp/
-// iva_porcentaje/disponible/comision_vendedora_override — esas las edita el
-// admin a mano y no se deben pisar con cada sincronización.
-// Aviso: con catálogos muy grandes (miles de productos) esto puede tardar
-// bastante — cada tanda de 200 productos son varios viajes de ida y vuelta
-// a Odoo por XML-RPC. Si en producción esto llega a cortarse por timeout
-// (504), la solución es partirlo en tandas más chicas disparadas desde el
-// navegador en vez de una sola llamada — quedó pendiente probarlo con el
-// volumen real antes de confiar en que corre entero de una.
-async function sincronizarSnapshotCatalogo() {
-  const todos = await productosClienteMulti();
-  if (!todos.length) return { ok: false, sincronizados: 0, motivo: 'Odoo no devolvió productos (revisa credenciales/conexión de los proveedores)' };
+// ── SINCRONIZACIÓN POR TANDAS (Admin → Productos) ──────────────────────
+// Traer TODO el catálogo de un proveedor en un solo request no funciona con
+// catálogos grandes: una función serverless tiene un límite de tiempo (en
+// plan Hobby de Vercel, unos pocos segundos) y con miles de productos por
+// XML-RPC eso se corta con error 500 antes de terminar — y como el guardado
+// pasaba recién al final, no quedaba NADA guardado. La solución: pedir de a
+// tandas chicas (ver sync-lote más abajo), así cada request individual dura
+// segundos sin importar cuántos miles de productos haya en total.
 
-  const filas = todos
-    .map(p => {
-      const { fam, sub } = famSub(p);
-      return {
-        sku: (p.sku || '').trim().toUpperCase(),
-        nombre: p.nombre || '',
-        familia: fam || '',
-        subfamilia: sub || '',
-        stock: Math.round(p.stock || 0),
-        proveedor_id: p.proveedorId || null,
-        costo_odoo: parseFloat(p.precio || 0) || null
-      };
-    })
-    .filter(f => f.sku);
-  if (!filas.length) return { ok: false, sincronizados: 0, motivo: 'Ningún producto tenía código (SKU) reconocible' };
+// Cuenta cuántos productos matchea un proveedor en Odoo — un solo llamado
+// rápido (search_count), sin traer los IDs ni los datos.
+async function contarProductosProveedor(proveedor) {
+  if (proveedor.tipo !== 'odoo') return 0;
+  const conn = connFor(proveedor);
+  const key = 'prov_' + proveedor.id;
+  const domain = [['sale_ok', '=', true], ['active', '=', true]];
+  const categoriasFiltro = proveedor.categorias_filtro || [];
+  if (categoriasFiltro.length) {
+    const categIds = await xmlrpcCallFor(conn, key, 'product.category', 'search', [[['complete_name', 'in', categoriasFiltro]]]);
+    if (categIds.length) domain.push(['categ_id', 'in', categIds]);
+  }
+  return await xmlrpcCallFor(conn, key, 'product.product', 'search_count', [domain]);
+}
 
-  // Mismo patrón de batch UPSERT con UNNEST que ya usa /catalogo/excel.
+// Trae y procesa UNA tanda acotada (offset/limit) de productos de un
+// proveedor — mismo procesamiento que fetchProductosProveedor, pero sin la
+// lista de precios (get_products_price): esa es la llamada que más tarda y
+// la que está fallando en los logs (XML-RPC fault), y el snapshot del admin
+// no la necesita — usa el costo base (list_price) directo.
+async function fetchLoteProductosProveedor(proveedor, offset, limit) {
+  if (proveedor.tipo !== 'odoo') return [];
+  const conn = connFor(proveedor);
+  const key = 'prov_' + proveedor.id;
+  const domain = [['sale_ok', '=', true], ['active', '=', true]];
+  const categoriasFiltro = proveedor.categorias_filtro || [];
+  if (categoriasFiltro.length) {
+    const categIds = await xmlrpcCallFor(conn, key, 'product.category', 'search', [[['complete_name', 'in', categoriasFiltro]]]);
+    if (categIds.length) domain.push(['categ_id', 'in', categIds]);
+  }
+  const prodIds = await xmlrpcCallFor(conn, key, 'product.product', 'search', [domain, offset, limit]);
+  if (!prodIds.length) return [];
+
+  const prods = await xmlrpcCallFor(conn, key, 'product.product', 'read', [prodIds, [
+    'id', 'default_code', 'name', 'list_price', 'categ_id', 'qty_available'
+  ]]);
+
+  const tmplIds = [...new Set(prods.map(p => Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id))];
+  let joyeriaMap = {};
+  if (tmplIds.length) {
+    try {
+      const extra = await xmlrpcCallFor(conn, key, 'product.template', 'read', [tmplIds, ['id', 'metal_type', 'rock_type']]);
+      extra.forEach(t => { joyeriaMap[t.id] = t; });
+    } catch (e) { /* este proveedor no tiene esos campos — normal, se ignora */ }
+  }
+  const nombreDe = v => Array.isArray(v) ? (v[1] || '') : (v || '');
+
+  return prods.map(p => {
+    const tmplId = Array.isArray(p.product_tmpl_id) ? p.product_tmpl_id[0] : p.product_tmpl_id;
+    const joy = joyeriaMap[tmplId] || {};
+    return {
+      proveedorId: proveedor.id,
+      sku: p.default_code || '',
+      nombre: p.name || '',
+      precio: parseFloat(p.list_price || 0),
+      categoria: Array.isArray(p.categ_id) ? p.categ_id[1] : '',
+      metal: nombreDe(joy.metal_type),
+      piedra: nombreDe(joy.rock_type),
+      stock: parseFloat(p.qty_available || 0)
+    };
+  });
+}
+
+// UPSERT compartido del snapshot — solo pisa las columnas informativas
+// (nombre/familia/subfamilia/stock/proveedor/costo), nunca los campos que
+// edita el admin a mano (precio_pvp, disponible, comisión, etc.)
+async function upsertSnapshotFilas(productos) {
+  const filas = productos.map(p => {
+    const { fam, sub } = famSub(p);
+    return {
+      sku: (p.sku || '').trim().toUpperCase(),
+      nombre: p.nombre || '',
+      familia: fam || '',
+      subfamilia: sub || '',
+      stock: Math.round(p.stock || 0),
+      proveedor_id: p.proveedorId || null,
+      costo_odoo: parseFloat(p.precio || 0) || null
+    };
+  }).filter(f => f.sku);
+  if (!filas.length) return 0;
+
   const skus = filas.map(f => f.sku);
   const nombres = filas.map(f => f.nombre);
   const familias = filas.map(f => f.familia);
@@ -1069,7 +1126,7 @@ async function sincronizarSnapshotCatalogo() {
       stock = EXCLUDED.stock,
       proveedor_id = EXCLUDED.proveedor_id,
       costo_odoo = EXCLUDED.costo_odoo`;
-  return { ok: true, sincronizados: filas.length };
+  return filas.length;
 }
 
 // Catálogo con precio de venta y disponibilidad YA resueltos (precio fijo >
@@ -2491,14 +2548,57 @@ app.post('/api/admin/proveedores/:id/cerrar-venta', requireAdmin, async (req, re
 // proveedor+nombre (mismo diseño, ej. distintas tallas de un anillo).
 // Descarga optimizada para Excel: obtiene catálogo con timeout corto
 // Forzar recarga completa del catálogo (limpiar todas las cachés)
+// Solo limpia caché — rápido, no le pide nada a Odoo. La sincronización de
+// verdad la maneja el navegador llamando a sync-info + sync-lote (ver
+// abajo), en tandas, porque traer todo de una se corta por timeout con
+// catálogos grandes.
 app.post('/api/admin/catalogo/forzar-recarga', requireAdmin, async (_req, res) => {
   try {
     limpiarCacheCatalogoPrecios();
     Object.keys(cache).filter(k => k.startsWith('productos_')).forEach(k => delete cache[k]);
-    const sync = await sincronizarSnapshotCatalogo();
-    if (!sync.ok) return res.json({ ok: true, mensaje: 'Caché limpiado, pero la sincronización con Postgres falló: ' + sync.motivo });
-    res.json({ ok: true, mensaje: 'Catálogo recargado: ' + sync.sincronizados + ' producto(s) sincronizado(s).' });
+    res.json({ ok: true, mensaje: 'Caché limpiado.' });
   } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// GET /api/admin/catalogo/sync-info — proveedores activos + cuántos
+// productos tiene cada uno en Odoo, para que el navegador sepa cuántas
+// tandas pedir (y pueda mostrar una barra de progreso real).
+app.get('/api/admin/catalogo/sync-info', requireAdmin, async (_req, res) => {
+  try {
+    const proveedores = (await getActiveProveedores()).filter(p => p.tipo === 'odoo');
+    const info = [];
+    for (const p of proveedores) {
+      try {
+        const total = await contarProductosProveedor(p);
+        info.push({ codigo: p.codigo, nombre: p.nombre, total });
+      } catch (e) {
+        info.push({ codigo: p.codigo, nombre: p.nombre, total: 0, error: shortErr(e) });
+      }
+    }
+    res.json({ proveedores: info });
+  } catch (e) { res.status(500).json({ error: shortErr(e) }); }
+});
+
+// POST /api/admin/catalogo/sync-lote — trae y guarda UNA tanda acotada de
+// UN proveedor (body: { proveedorCodigo, offset, limit }). El navegador la
+// llama repetidas veces con offset creciente hasta "terminado: true" — cada
+// llamada individual dura pocos segundos sin importar el tamaño total del
+// catálogo, así que nunca choca con el límite de tiempo de la función.
+app.post('/api/admin/catalogo/sync-lote', requireAdmin, async (req, res) => {
+  try {
+    const proveedorCodigo = req.body?.proveedorCodigo;
+    const offset = Math.max(0, parseInt(req.body?.offset) || 0);
+    const limit = Math.min(500, Math.max(1, parseInt(req.body?.limit) || 300));
+    if (!proveedorCodigo) return res.status(400).json({ error: 'Falta proveedorCodigo' });
+
+    const proveedores = await getActiveProveedores();
+    const proveedor = proveedores.find(p => p.codigo === proveedorCodigo);
+    if (!proveedor) return res.status(404).json({ error: 'Proveedor no encontrado o inactivo: ' + proveedorCodigo });
+
+    const lote = await fetchLoteProductosProveedor(proveedor, offset, limit);
+    const procesados = await upsertSnapshotFilas(lote);
+    res.json({ ok: true, procesados, traidos: lote.length, terminado: lote.length < limit });
+  } catch (e) { console.error('❌ /catalogo/sync-lote', e.message); res.status(500).json({ error: shortErr(e) }); }
 });
 
 // GET /api/admin/catalogo/buscar — tabla del admin: busca/filtra/pagina

@@ -841,21 +841,66 @@ $('cp-disponible').onchange = (e) => { CP_STATE.disponible = e.target.value; CP_
 $('cp-prev').onclick = () => { if (CP_STATE.page > 1) { CP_STATE.page--; loadCatalogoTabla(); } };
 $('cp-next').onclick = () => { CP_STATE.page++; loadCatalogoTabla(); };
 
-// "Sincronizar desde Odoo" = trae nombre/categoría/stock de nuevo y refresca
-// la tabla. Con catálogos grandes puede tardar — ver nota en el backend.
+// "Sincronizar desde Odoo" = trae nombre/categoría/stock de nuevo, EN
+// TANDAS (no todo de una — con catálogos de miles de productos, un solo
+// pedido se corta por el límite de tiempo de la función serverless antes
+// de terminar, y como el guardado pasaba al final, no quedaba nada
+// guardado). Acá se pide de a 300 productos por vez, por proveedor, hasta
+// terminar — cada pedido individual dura segundos sin importar el total.
+const SYNC_LOTE_SIZE = 300;
 $('cat-forzar-recarga').onclick = async () => {
-  $('cat-forzar-recarga').disabled = true;
-  const textoOriginal = $('cat-forzar-recarga').textContent;
-  $('cat-forzar-recarga').textContent = '⏳ Sincronizando…';
+  const boton = $('cat-forzar-recarga');
+  const textoOriginal = boton.textContent;
+  boton.disabled = true;
   try {
-    const r = await api('/catalogo/forzar-recarga', { method: 'POST' });
-    showMsg('cp-msg', '✓ ' + (r.mensaje || 'Catálogo recargado.'), true);
+    await api('/catalogo/forzar-recarga', { method: 'POST' }); // limpia caché, rápido
+    boton.textContent = '⏳ Calculando…';
+    const info = await api('/catalogo/sync-info');
+    const proveedores = info.proveedores || [];
+    if (!proveedores.length) {
+      showMsg('cp-msg', 'No hay proveedores activos tipo Odoo para sincronizar.', false);
+      boton.disabled = false; boton.textContent = textoOriginal;
+      return;
+    }
+    const totalGeneral = proveedores.reduce((a, p) => a + (p.total || 0), 0);
+    let hechoGeneral = 0;
+    let sincronizados = 0;
+    const errores = [];
+
+    for (const prov of proveedores) {
+      if (prov.error) { errores.push(prov.codigo + ': ' + prov.error); continue; }
+      let offset = 0;
+      let terminado = prov.total === 0;
+      while (!terminado) {
+        boton.textContent = `⏳ ${prov.codigo} — ${Math.min(offset + SYNC_LOTE_SIZE, prov.total)}/${prov.total}`;
+        showMsg('cp-msg', `Sincronizando… ${hechoGeneral}/${totalGeneral} productos en total.`, true);
+        try {
+          const r = await api('/catalogo/sync-lote', {
+            method: 'POST',
+            body: JSON.stringify({ proveedorCodigo: prov.codigo, offset, limit: SYNC_LOTE_SIZE })
+          });
+          sincronizados += r.procesados || 0;
+          hechoGeneral += r.traidos || 0;
+          terminado = r.terminado;
+          offset += SYNC_LOTE_SIZE;
+        } catch (e) {
+          errores.push(prov.codigo + ' (offset ' + offset + '): ' + e.message);
+          terminado = true; // no reintenta solo — para no quedar en loop si algo está mal
+        }
+      }
+    }
+
+    if (errores.length) {
+      showMsg('cp-msg', `✓ ${sincronizados} producto(s) sincronizado(s), con errores en: ${errores.join(' · ')}`, false);
+    } else {
+      showMsg('cp-msg', `✓ ${sincronizados} producto(s) sincronizado(s).`, true);
+    }
     loadCatalogoStats();
     await loadFamiliasFiltro();
     await loadCatalogoTabla();
   } catch (e) { showMsg('cp-msg', 'Error: ' + e.message, false); }
-  $('cat-forzar-recarga').disabled = false;
-  $('cat-forzar-recarga').textContent = textoOriginal;
+  boton.disabled = false;
+  boton.textContent = textoOriginal;
 };
 $('cat-descargar').onclick = async () => {
   try {
