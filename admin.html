@@ -497,6 +497,7 @@ document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => {
   if (btn.dataset.sec === 'reporte') loadReporte();
   if (btn.dataset.sec === 'productos') { loadProductoInfo(); loadProveedores(); }
   if (btn.dataset.sec === 'catalogo') { loadCatalogoStats(); loadFamiliasFiltro(); loadCatalogoTabla(); }
+  if (btn.dataset.sec === 'ventas') loadVentas();
 });
 
 /* ── CATEGORÍAS JERÁRQUICAS (Familia → Subfamilias) ── */
@@ -941,7 +942,6 @@ async function loadVentas() {
     renderVentas(ventas);
   } catch (e) { $('vt-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
-loadVentas();
 const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_transito: 'En tránsito', entregado: 'Entregado' };
 
 // Varias ventas de distintas vendedoras (o de la misma) pueden terminar
@@ -1281,7 +1281,6 @@ async function loadProductoInfo() {
     };
   } catch (e) { box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
-loadProductoInfo();
 
 $('pi-plantilla').onclick = () => {
   const rows = [
