@@ -482,7 +482,6 @@ tr:last-child td{border-bottom:none;}
 <script>
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('tn_admin_token') || '';
-let CATEGORIAS = [];
 let CATEGORIAS_SEL = new Set();
 let LOGOS = {};
 
@@ -627,7 +626,10 @@ async function loadVendedoras() {
   } catch (e) { $('v-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
 // Fila expandible para editar las categorías de una vendedora ya creada
-// (al crearla se eligen una vez; acá se pueden cambiar después).
+// (al crearla se eligen una vez; acá se pueden cambiar después). Mismo
+// picker jerárquico Familia→Subfamilia que "crear vendedora nueva", con
+// su propio estado local (independiente de CATEGORIAS_SEL del formulario
+// de creación, para no mezclar ambos si están abiertos a la vez).
 function toggleCategoriasEdit(id) {
   const row = document.querySelector('[data-cats-row="' + id + '"]');
   if (!row) return;
@@ -637,18 +639,54 @@ function toggleCategoriasEdit(id) {
   const v = VENDEDORAS.find(x => x.id == id);
   const sel = new Set(v.categorias || []);
   const cell = row.children[1];
-  cell.innerHTML = `
-    <div class="chip-list">${CATEGORIAS.map(c => `<label class="chk ${sel.has(c)?'on':''}" data-cat="${esc(c)}"><input type="checkbox" ${sel.has(c)?'checked':''}/> ${esc(c)}</label>`).join('') || '<span class="note">No se pudo leer el catálogo de Odoo.</span>'}</div>
-    <div class="row" style="margin-top:8px"><button class="btn btn-sm dark" data-cats-guardar="${id}">Guardar categorías</button></div>`;
-  cell.querySelectorAll('.chk').forEach(chk => {
-    chk.onclick = e => {
+
+  function pintarSeleccionadas() {
+    const box = cell.querySelector('.cats-edit-sel');
+    if (!sel.size) { box.innerHTML = '<span class="note">Ninguna seleccionada (venderá todas)</span>'; return; }
+    box.innerHTML = [...sel].map(c => {
+      const [fam, sub] = c.split('/');
+      return `<span class="chip">${esc(sub || fam)} <button style="margin-left:4px;cursor:pointer" data-quitar="${esc(c)}">✕</button></span>`;
+    }).join('');
+    box.querySelectorAll('[data-quitar]').forEach(b => b.onclick = () => { sel.delete(b.dataset.quitar); pintarSeleccionadas(); pintarSubfamilias(cell.querySelector('.cats-edit-familia').value); });
+  }
+  function pintarSubfamilias(familia) {
+    const box = cell.querySelector('.cats-edit-subfamilias');
+    if (!familia) { box.innerHTML = '<span class="note">Selecciona una familia arriba</span>'; return; }
+    const fam = CATEGORIAS_JERARQUICO.find(c => c.familia === familia);
+    if (!fam || !fam.subfamilias.length) { box.innerHTML = '<span class="note">Sin subfamilias</span>'; return; }
+    box.innerHTML = fam.subfamilias.map(sub => {
+      const key = familia + '/' + sub;
+      return `<label class="chk ${sel.has(key)?'on':''}" data-subcat="${esc(key)}"><input type="checkbox" ${sel.has(key)?'checked':''}/> ${esc(sub)}</label>`;
+    }).join('');
+    box.querySelectorAll('.chk').forEach(chk => chk.onclick = e => {
       e.preventDefault();
-      const cat = chk.dataset.cat;
-      if (sel.has(cat)) sel.delete(cat); else sel.add(cat);
-      chk.classList.toggle('on', sel.has(cat));
-      chk.querySelector('input').checked = sel.has(cat);
-    };
-  });
+      const key = chk.dataset.subcat;
+      if (sel.has(key)) sel.delete(key); else sel.add(key);
+      chk.classList.toggle('on', sel.has(key));
+      chk.querySelector('input').checked = sel.has(key);
+      pintarSeleccionadas();
+    });
+  }
+
+  if (!CATEGORIAS_JERARQUICO.length) {
+    cell.innerHTML = '<span class="note">⚠ No hay categorías sincronizadas todavía — andá a Productos y tocá "Sincronizar desde Odoo" primero.</span>';
+    row.style.display = '';
+    return;
+  }
+
+  cell.innerHTML = `
+    <select class="fld-select cats-edit-familia" style="max-width:240px">
+      <option value="">-- Selecciona familia --</option>
+      ${CATEGORIAS_JERARQUICO.map(c => `<option value="${esc(c.familia)}">${esc(c.familia)}</option>`).join('')}
+    </select>
+    <div class="chip-list cats-edit-subfamilias" style="margin-top:8px"><span class="note">Selecciona una familia arriba</span></div>
+    <p class="note" style="margin-top:8px">Seleccionadas:</p>
+    <div class="chip-list cats-edit-sel"></div>
+    <div class="row" style="margin-top:8px"><button class="btn btn-sm dark" data-cats-guardar="${id}">Guardar categorías</button></div>`;
+
+  cell.querySelector('.cats-edit-familia').onchange = e => pintarSubfamilias(e.target.value);
+  pintarSeleccionadas();
+
   cell.querySelector('[data-cats-guardar]').onclick = async () => {
     try {
       await api('/vendedoras/' + id, { method: 'PUT', body: JSON.stringify({ categorias: [...sel] }) });

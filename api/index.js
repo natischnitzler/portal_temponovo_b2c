@@ -757,6 +757,18 @@ function famOf(p) {
   const esJoya = p && typeof p === 'object' && (p.metal || p.piedra);
   return esJoya ? parts[parts.length - 1] : parts[0];
 }
+// Compara la categoría de un producto contra la lista de categorías que
+// vende una vendedora/cliente (vendedora.categorias). Esa lista se guarda
+// como "Familia/Subfamilia" (ver CATEGORIAS_SEL en admin.html) — comparar
+// solo contra la familia (como se hacía antes con
+// `categorias.includes(famOf(p))`) nunca podía dar match, así que
+// cualquier vendedora con categorías restringidas a nivel subfamilia se
+// quedaba con la vitrina vacía y el PDF sin productos.
+function productoEnCategorias(categorias, p) {
+  if (!categorias || !categorias.length) return true; // vacío = vende todo
+  const { fam, sub } = famSub(p);
+  return categorias.includes(fam + '/' + sub) || categorias.includes(fam);
+}
 // familia + subfamilia — mismo criterio que famOf, espejo del famSub() del
 // frontend (agrupa igual que los pills de la vitrina, para los catálogos PDF).
 function famSub(p) {
@@ -1162,25 +1174,7 @@ app.get('/api/productos', async (req, res) => {
 
     let prods = await catalogoConPrecioGlobal(true);
     const categorias = v.categorias || [];
-
-    if (categorias.length) {
-      // Soporta dos formatos:
-      // 1. "Familia" (legacy) - solo familia
-      // 2. "Familia/Subfamilia" (nuevo) - familia + subfamilia
-      prods = prods.filter(p => {
-        const { fam, sub } = famSub(p);
-        return categorias.some(cat => {
-          if (cat.includes('/')) {
-            // Formato nuevo: "Familia/Subfamilia"
-            const [famFilter, subFilter] = cat.split('/').map(s => s.trim());
-            return fam === famFilter && sub === subFilter;
-          } else {
-            // Formato legacy: solo "Familia"
-            return fam === cat;
-          }
-        });
-      });
-    }
+    prods = prods.filter(p => productoEnCategorias(categorias, p));
 
     // Agregar flag si tiene foto (para filtro "solo con foto")
     prods = prods.map(p => ({
@@ -1748,7 +1742,7 @@ app.get('/api/catalogo-pdf', async (req, res) => {
 
     let prods = await catalogoConPrecioGlobal(true);
     const categorias = v.categorias || [];
-    if (categorias.length) prods = prods.filter(p => categorias.includes(famOf(p)));
+    prods = prods.filter(p => productoEnCategorias(categorias, p));
     prods = prods.filter(p => {
       if (p.stock <= 0) return false;
       const fs = famSub(p);
@@ -2060,7 +2054,7 @@ app.get('/api/public/:slug/productos', async (req, res) => {
     // pública con ?favoritos=1, filtrada a solo esos productos.
     const favoritos = new Set(cfg.favoritos || []);
     let prods = await catalogoConPrecioGlobal(true);
-    if ((c.categorias || []).length) prods = prods.filter(p => c.categorias.includes(famOf(p)));
+    prods = prods.filter(p => productoEnCategorias(c.categorias, p));
     let result = prods
       .filter(p => p.stock > 0)
       .filter(p => !hFams.has(famOf(p)))
@@ -2297,12 +2291,14 @@ app.get('/api/admin/categorias', requireAdmin, async (req, res) => {
 app.get('/api/admin/categorias-jerarquico', requireAdmin, async (_req, res) => {
   try {
     const hit = cacheGet('categorias_jerarquico'); if (hit) return res.json(hit);
-    const prods = await catalogoConPrecioGlobal(false);
+    // Lee del snapshot en Postgres (mismo que alimenta Admin → Productos),
+    // no en vivo de Odoo — evita que este selector dependa de una llamada
+    // XML-RPC que puede fallar o tardar con catálogos grandes.
+    const { rows } = await sql`SELECT DISTINCT familia, subfamilia FROM catalogo_productos WHERE familia IS NOT NULL AND familia <> ''`;
     const catMap = new Map();
-    prods.forEach(p => {
-      const { fam, sub } = famSub(p);
-      if (!catMap.has(fam)) catMap.set(fam, new Set());
-      if (sub) catMap.get(fam).add(sub);
+    rows.forEach(r => {
+      if (!catMap.has(r.familia)) catMap.set(r.familia, new Set());
+      if (r.subfamilia) catMap.get(r.familia).add(r.subfamilia);
     });
     const resultado = Array.from(catMap.entries()).map(([fam, subs]) => ({
       familia: fam,
