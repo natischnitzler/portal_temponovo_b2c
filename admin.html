@@ -83,26 +83,33 @@ tr:last-child td{border-bottom:none;}
 .b-warn{background:var(--amber-light);color:var(--amber);}
 .b-off{background:var(--red-light);color:var(--red);}
 .b-mute{background:var(--line);color:var(--steel);}
-#vt-list.compact td{padding:4px 8px;font-size:12px;}
-#vt-list.compact th{padding:4px 8px;}
-#vt-list.compact .note{display:none;}
-#vt-list.compact .seg-select{display:none;}
-#vt-list.compact .grupo-head{padding:8px 14px;}
 .b-recibido{background:#eef1f4;color:#4a5a6b;}
 .b-preparando{background:var(--amber-light);color:var(--amber);}
 .b-en_transito{background:#e3ecf5;color:#3d5a80;}
 .b-entregado{background:var(--green-light);color:var(--green);}
 .seg-select{height:30px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-size:11.5px;padding:0 8px;}
 .seg-select:focus{border-color:var(--hdr);}
-.grupo-odoo{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden;background:var(--white);}
-.grupo-head{background:var(--paper);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;}
-.grupo-head .gh-left{display:flex;align-items:center;gap:10px;}
-.grupo-head .gh-arrow{display:inline-block;transition:transform .15s;color:var(--steel);font-size:11px;}
-.grupo-head.open .gh-arrow{transform:rotate(90deg);}
-.grupo-head .gh-name{font-family:var(--mono);font-size:14.5px;font-weight:600;}
-.grupo-head .gh-meta{font-size:11.5px;color:var(--steel);display:flex;gap:14px;flex-wrap:wrap;}
-.grupo-body{overflow-x:auto;}
-.grupo-body table{margin:0;min-width:760px;}
+/* Ventas — tabla resumen (una fila por venta de Odoo) + panel de detalle */
+.vt-layout{display:grid;grid-template-columns:1fr 400px;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--white);}
+.vt-tabla-head{display:grid;grid-template-columns:75px 100px 1fr 110px 100px;gap:10px;padding:9px 16px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--steel);border-bottom:1px solid var(--line);background:var(--paper);}
+.vt-row{display:grid;grid-template-columns:75px 100px 1fr 110px 100px;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;}
+.vt-row:last-child{border-bottom:none;}
+.vt-row:hover{background:var(--paper);}
+.vt-row.selected{background:#f1efe9;}
+.vt-row.err{background:var(--red-light);}
+.vt-row.err:hover, .vt-row.err.selected{background:#f5dedc;}
+.vt-panel{background:var(--paper);border-left:1px solid var(--line);padding:18px;max-height:70vh;overflow-y:auto;}
+.vt-panel-vacio{color:var(--steel);font-size:13px;padding:40px 10px;text-align:center;}
+.vt-panel h3{font-family:var(--mono);font-size:16px;margin:0 0 2px;}
+.vt-panel .total-grande{font-family:var(--mono);font-size:19px;margin:8px 0 14px;}
+.vt-pedido{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12.5px;}
+.vt-pedido .row1{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
+.vt-pedido .row1 b{font-size:13.5px;}
+.vt-pedido .fila-mini{display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px;}
+.vt-pedido .fila-mini:first-of-type{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);}
+.vt-pedido .acciones{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.vt-pedido .seg-select{font-family:var(--f2);font-size:11px;border:1px solid var(--line);border-radius:5px;padding:4px 6px;background:var(--white);}
+@media (max-width:900px){ .vt-layout{grid-template-columns:1fr;} .vt-panel{border-left:none;border-top:1px solid var(--line);max-height:none;} }
 .empty{text-align:center;padding:34px 12px;color:var(--steel);font-size:13px;}
 .chip-list{display:flex;gap:6px;flex-wrap:wrap;}
 .chk{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--paper);cursor:pointer;}
@@ -422,7 +429,6 @@ tr:last-child td{border-bottom:none;}
               </select>
             </div>
             <button class="btn" id="vt-buscar">Buscar</button>
-            <button class="btn" id="vt-expandir-todo">Expandir todo</button>
             <button class="btn dark" id="vt-consolidar">Reintentar todas las fallidas</button>
           </div>
           <div class="msg" id="vt-msg"></div>
@@ -430,7 +436,15 @@ tr:last-child td{border-bottom:none;}
 
         <div class="card">
           <div class="card-h">Resultado</div>
-          <div id="vt-list"><div class="empty">Buscando…</div></div>
+          <div class="vt-layout">
+            <div>
+              <div class="vt-tabla-head"><div>Fecha</div><div>N° venta</div><div>Resumen</div><div>Total</div><div>Estado</div></div>
+              <div id="vt-tabla-body"><div class="empty">Buscando…</div></div>
+            </div>
+            <div class="vt-panel" id="vt-panel">
+              <div class="vt-panel-vacio">Elegí una venta de la lista para ver el detalle.</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1037,15 +1051,6 @@ $('cat-excel-input').onchange = async (e) => {
 
 /* ── VENTAS ── */
 $('vt-buscar').onclick = loadVentas;
-let VT_TODO_EXPANDIDO = false;
-$('vt-expandir-todo').onclick = () => {
-  VT_TODO_EXPANDIDO = !VT_TODO_EXPANDIDO;
-  $('vt-list').querySelectorAll('.grupo-head').forEach(head => {
-    head.nextElementSibling.style.display = VT_TODO_EXPANDIDO ? '' : 'none';
-    head.classList.toggle('open', VT_TODO_EXPANDIDO);
-  });
-  $('vt-expandir-todo').textContent = VT_TODO_EXPANDIDO ? 'Colapsar todo' : 'Expandir todo';
-};
 async function loadVentas() {
   const estado = $('vt-estado').value;
   const seguimiento = $('vt-seguimiento').value;
@@ -1062,7 +1067,7 @@ async function loadVentas() {
     const q = params.length ? '?' + params.join('&') : '';
     const ventas = await api('/ventas' + q);
     renderVentas(ventas);
-  } catch (e) { $('vt-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+  } catch (e) { $('vt-tabla-body').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
 }
 const SEGUIMIENTO_LABEL = { recibido: 'Recibido', preparando: 'Preparando', en_transito: 'En tránsito', entregado: 'Entregado' };
 
@@ -1086,79 +1091,94 @@ function agruparPorOdoo(ventas) {
   });
   return arr;
 }
+let VT_GRUPOS = [];
+let VT_SELECCIONADO = null;
+
 function renderVentas(ventas) {
-  if (!ventas.length) { $('vt-list').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>'; return; }
-  const grupos = agruparPorOdoo(ventas);
-  $('vt-list').innerHTML = grupos.map(g => {
+  if (!ventas.length) {
+    $('vt-tabla-body').innerHTML = '<div class="empty">No hay ventas para ese filtro.</div>';
+    $('vt-panel').innerHTML = '<div class="vt-panel-vacio">No hay ventas para ese filtro.</div>';
+    VT_GRUPOS = []; VT_SELECCIONADO = null;
+    return;
+  }
+  VT_GRUPOS = agruparPorOdoo(ventas);
+
+  $('vt-tabla-body').innerHTML = VT_GRUPOS.map(g => {
     const total = g.ventas.reduce((s, v) => s + (parseFloat(v.total) || 0), 0);
     const vendedorasUnicas = [...new Set(g.ventas.map(v => v.vendedora_nombre))];
-    return `<div class="grupo-odoo">
-      <div class="grupo-head">
-        <div class="gh-left">
-          <span class="gh-arrow">▸</span>
-          ${g.key === 'sin_odoo'
-            ? '<span class="gh-name" style="color:var(--red)">⚠ Sin enviar, con error o canceladas</span>'
-            : `<span class="gh-name">${esc(g.odoo_venta_nombre || '(sin nombre)')}</span>`}
-        </div>
-        <div class="gh-meta">
-          <span>${g.ventas.length} venta${g.ventas.length===1?'':'s'} de cliente${g.ventas.length===1?'':'s'}</span>
-          <span>${vendedorasUnicas.length} vendedora${vendedorasUnicas.length===1?'':'s'}: ${esc(vendedorasUnicas.join(', '))}</span>
-          <span class="mono">${fmt(total)}</span>
-        </div>
-      </div>
-      <div class="grupo-body" style="display:none">
-        <table><thead><tr><th>Fecha</th><th>N° venta</th><th>Vendedora</th><th>Proveedor</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th>Total</th><th>Envío</th><th>Seguimiento</th><th></th></tr></thead><tbody>
-        ${g.ventas.map(v => `<tr>
-          <td class="mono">${new Date(v.created_at).toLocaleDateString('es-CL')}</td>
-          <td class="mono">${esc(v.numero_venta)}${v.otros_proveedores_mismo_pedido ? '<div class="note" title="Este pedido tiene otro envío, a otro proveedor, con el mismo número">↔ pedido con más de un proveedor</div>' : ''}</td>
-          <td>${esc(v.vendedora_nombre)} <span class="note mono">(${esc(v.vendedora_codigo)})</span></td>
-          <td>${esc(v.proveedor_nombre || 'Temponovo')}</td>
-          <td>${esc(v.nombre_venta || '—')}</td>
-          <td>${(v.productos||[]).map(p => esc(p.sku) + ' ×' + p.quantity).join(', ')}</td>
-          <td>
-            <span class="badge ${v.entrega==='retiro'?'b-warn':'b-ok'}">${v.entrega==='retiro'?'Retiro':'Despacho'}</span>
-            ${v.entrega!=='retiro' && (v.direccion||v.comuna) ? `<div class="note" style="margin-top:4px;max-width:220px">${esc([v.direccion,v.comuna].filter(Boolean).join(' — '))}</div>` : ''}
-          </td>
-          <td class="mono">${fmt(v.total)}</td>
-          <td>
-            <span class="badge ${v.estado==='enviada'?'b-ok':v.estado==='cancelada'?'b-mute':'b-off'}">${v.estado==='enviada'?'Enviada':v.estado==='cancelada'?'Cancelada':'Con error'}</span>
-            ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
-            ${v.estado==='cancelada' && v.error_msg ? `<div class="note" style="margin-top:4px;max-width:220px">${esc(v.error_msg)}</div>` : ''}
-          </td>
-          <td>
-            <span class="badge b-${v.seguimiento||'recibido'}" style="margin-bottom:6px;display:inline-block">${SEGUIMIENTO_LABEL[v.seguimiento]||'Recibido'}</span>
-            <select class="seg-select" data-seg="${v.id}">
-              <option value="recibido" ${v.seguimiento==='recibido'?'selected':''}>Recibido</option>
-              <option value="preparando" ${v.seguimiento==='preparando'?'selected':''}>Preparando</option>
-              <option value="en_transito" ${v.seguimiento==='en_transito'?'selected':''}>En tránsito</option>
-              <option value="entregado" ${v.seguimiento==='entregado'?'selected':''}>Entregado</option>
-            </select>
-          </td>
-          <td>
-            ${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}
-            ${v.estado==='error' ? `<button class="btn btn-sm danger" data-cancelar="${v.id}">Cancelar</button>` : ''}
-            ${v.estado==='enviada' ? `<button class="btn btn-sm danger" data-forzar="${v.id}" title="Úsalo solo si esta venta en realidad NO llegó a Odoo (ej. cayó en una venta cancelada)">Reenviar (forzar)</button>` : ''}
-          </td>
-        </tr>`).join('')}
-        </tbody></table>
-      </div>
+    const conError = g.ventas.filter(v => v.estado === 'error').length;
+    const esGrupoErrores = g.key === 'sin_odoo';
+    const fecha = new Date(g.ventas[0].created_at).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
+    return `<div class="vt-row ${esGrupoErrores || conError ? 'err' : ''}" data-grupo="${g.key}">
+      <div class="mono">${fecha}</div>
+      <div class="mono">${esGrupoErrores ? '⚠' : esc(g.odoo_venta_nombre || '—')}</div>
+      <div>${g.ventas.length} pedido${g.ventas.length===1?'':'s'} · ${esc(vendedorasUnicas.join(', '))}</div>
+      <div class="mono">${fmt(total)}</div>
+      <div>${esGrupoErrores ? `<span class="badge b-off">${g.ventas.length} con error</span>`
+        : conError ? `<span class="badge b-off">${conError} con error</span>`
+        : `<span class="badge b-ok">Ok</span>`}</div>
     </div>`;
   }).join('');
-  // Cada tarjeta arranca colapsada — salvo la de errores/sin enviar, que
-  // arranca abierta porque es la que necesita atención del admin.
-  $('vt-list').querySelectorAll('.grupo-head').forEach(head => {
-    const esErrores = head.querySelector('.gh-name')?.textContent.includes('Sin enviar');
-    if (esErrores) { head.nextElementSibling.style.display = ''; head.classList.add('open'); }
-    head.onclick = () => {
-      const body = head.nextElementSibling;
-      const abrir = body.style.display === 'none';
-      body.style.display = abrir ? '' : 'none';
-      head.classList.toggle('open', abrir);
-    };
+
+  $('vt-tabla-body').querySelectorAll('.vt-row').forEach(row => {
+    row.onclick = () => seleccionarGrupoVenta(row.dataset.grupo);
   });
-  VT_TODO_EXPANDIDO = false;
-  $('vt-expandir-todo').textContent = 'Expandir todo';
-  $('vt-list').querySelectorAll('[data-seg]').forEach(sel => sel.onchange = async () => {
+
+  // Selecciona sola la de errores si hay, si no la primera — para que
+  // lo que necesita atención quede a la vista sin tener que buscarlo.
+  const grupoErrores = VT_GRUPOS.find(g => g.key === 'sin_odoo' && g.ventas.length);
+  const preferido = grupoErrores || VT_GRUPOS[0];
+  seleccionarGrupoVenta(preferido.key);
+}
+
+function seleccionarGrupoVenta(key) {
+  VT_SELECCIONADO = key;
+  $('vt-tabla-body').querySelectorAll('.vt-row').forEach(row => row.classList.toggle('selected', row.dataset.grupo === key));
+  const g = VT_GRUPOS.find(x => x.key === key);
+  if (!g) { $('vt-panel').innerHTML = '<div class="vt-panel-vacio">Elegí una venta de la lista para ver el detalle.</div>'; return; }
+
+  const total = g.ventas.reduce((s, v) => s + (parseFloat(v.total) || 0), 0);
+  const titulo = g.key === 'sin_odoo' ? '⚠ Sin enviar, con error o canceladas' : (g.odoo_venta_nombre || '(sin nombre)');
+
+  $('vt-panel').innerHTML = `
+    <h3 style="${g.key === 'sin_odoo' ? 'color:var(--red)' : ''}">${esc(titulo)}</h3>
+    <div class="note">${g.ventas.length} pedido${g.ventas.length===1?'':'s'} de cliente${g.ventas.length===1?'':'s'}</div>
+    <div class="total-grande">${fmt(total)}</div>
+    ${g.ventas.map(v => `<div class="vt-pedido">
+      <div class="row1">
+        <b>${esc(v.nombre_venta || '—')}</b>
+        <span class="mono">${fmt(v.total)}</span>
+      </div>
+      <div class="note">${new Date(v.created_at).toLocaleDateString('es-CL')} · ${esc(v.vendedora_nombre)} <span class="mono">(${esc(v.vendedora_codigo)})</span> · ${esc(v.proveedor_nombre || 'Temponovo')}</div>
+      <div class="note" style="margin-top:4px">${(v.productos||[]).map(p => esc(p.sku) + ' ×' + p.quantity).join(', ')}</div>
+      ${v.otros_proveedores_mismo_pedido ? '<div class="note" style="color:var(--amber)">↔ este pedido tiene otro envío, a otro proveedor, con el mismo número</div>' : ''}
+
+      <div class="fila-mini">
+        <span class="badge ${v.entrega==='retiro'?'b-warn':'b-ok'}">${v.entrega==='retiro'?'Retiro':'Despacho'}</span>
+        <span class="badge ${v.estado==='enviada'?'b-ok':v.estado==='cancelada'?'b-mute':'b-off'}">${v.estado==='enviada'?'Enviada':v.estado==='cancelada'?'Cancelada':'Con error'}</span>
+      </div>
+      ${v.entrega!=='retiro' && (v.direccion||v.comuna) ? `<div class="note" style="margin-top:4px">${esc([v.direccion,v.comuna].filter(Boolean).join(' — '))}</div>` : ''}
+      ${v.estado==='error' && v.error_msg ? `<div class="note" style="margin-top:4px;color:var(--red)">${esc(v.error_msg)}</div>` : ''}
+      ${v.estado==='cancelada' && v.error_msg ? `<div class="note" style="margin-top:4px">${esc(v.error_msg)}</div>` : ''}
+
+      <div class="fila-mini">
+        <span class="badge b-${v.seguimiento||'recibido'}">${SEGUIMIENTO_LABEL[v.seguimiento]||'Recibido'}</span>
+        <select class="seg-select" data-seg="${v.id}">
+          <option value="recibido" ${v.seguimiento==='recibido'?'selected':''}>Recibido</option>
+          <option value="preparando" ${v.seguimiento==='preparando'?'selected':''}>Preparando</option>
+          <option value="en_transito" ${v.seguimiento==='en_transito'?'selected':''}>En tránsito</option>
+          <option value="entregado" ${v.seguimiento==='entregado'?'selected':''}>Entregado</option>
+        </select>
+      </div>
+      <div class="acciones">
+        ${v.estado==='error' ? `<button class="btn btn-sm dark" data-reintentar="${v.id}">Reintentar</button>` : ''}
+        ${v.estado==='error' ? `<button class="btn btn-sm danger" data-cancelar="${v.id}">Cancelar</button>` : ''}
+        ${v.estado==='enviada' ? `<button class="btn btn-sm danger" data-forzar="${v.id}" title="Úsalo solo si esta venta en realidad NO llegó a Odoo (ej. cayó en una venta cancelada)">Reenviar (forzar)</button>` : ''}
+      </div>
+    </div>`).join('')}
+  `;
+
+  $('vt-panel').querySelectorAll('[data-seg]').forEach(sel => sel.onchange = async () => {
     const prev = sel.dataset.prev || sel.value;
     sel.disabled = true;
     try {
@@ -1169,12 +1189,12 @@ function renderVentas(ventas) {
     } catch (e) { alert(e.message); sel.value = prev; }
     sel.disabled = false; sel.dataset.prev = sel.value;
   });
-  $('vt-list').querySelectorAll('[data-reintentar]').forEach(b => b.onclick = async () => {
+  $('vt-panel').querySelectorAll('[data-reintentar]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Enviando…';
     try { await api('/ventas/' + b.dataset.reintentar + '/reintentar', { method: 'POST' }); loadVentas(); }
     catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Reintentar'; }
   });
-  $('vt-list').querySelectorAll('[data-cancelar]').forEach(b => b.onclick = async () => {
+  $('vt-panel').querySelectorAll('[data-cancelar]').forEach(b => b.onclick = async () => {
     const motivoRaw = prompt('¿Por qué cancelas esta venta? (opcional, queda como nota)');
     if (motivoRaw === null) return;
     const motivo = motivoRaw.trim();
@@ -1183,7 +1203,7 @@ function renderVentas(ventas) {
     try { await api('/ventas/' + b.dataset.cancelar + '/cancelar', { method: 'POST', body: JSON.stringify({ motivo }) }); loadVentas(); }
     catch (e) { alert(e.message); b.disabled = false; b.textContent = 'Cancelar'; }
   });
-  $('vt-list').querySelectorAll('[data-forzar]').forEach(b => b.onclick = async () => {
+  $('vt-panel').querySelectorAll('[data-forzar]').forEach(b => b.onclick = async () => {
     if (!confirm('Esto vuelve a mandar estos productos a Odoo (nueva venta o la que esté abierta), aunque esta fila ya figura como "Enviada". Úsalo solo si estás segura de que en realidad NO llegó (por ejemplo, quedó en una venta cancelada). ¿Continuar?')) return;
     b.disabled = true; b.textContent = 'Enviando…';
     try { await api('/ventas/' + b.dataset.forzar + '/reintentar?force=1', { method: 'POST' }); loadVentas(); }
