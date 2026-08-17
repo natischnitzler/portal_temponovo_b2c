@@ -1642,19 +1642,26 @@ async function generarCatalogoPDF(prods, vendedora, familia, subfamilia) {
     porProveedor.get(p.proveedorId).push(p);
   });
   const imgPorId = {};
+  const promesas = [];
   for (const [proveedorId, items] of porProveedor) {
-    const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
-    if (!proveedor || proveedor.tipo !== 'odoo') continue;
-    const conn = connFor(proveedor);
-    const ids = items.map(p => p.id);
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
-      try {
-        const imgs = await xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [chunk, ['id', 'image_256']]);
-        imgs.forEach(r => { if (r.image_256) imgPorId[proveedorId + '::' + r.id] = r.image_256; });
-      } catch (e) { console.warn('⚠ catalogo-pdf imágenes ' + proveedorId + ':', e.message); }
-    }
+    promesas.push((async () => {
+      const proveedor = await getProveedorActivo(proveedorId).catch(() => null);
+      if (!proveedor || proveedor.tipo !== 'odoo') return;
+      const conn = connFor(proveedor);
+      const ids = items.map(p => p.id);
+      const chunkPromises = [];
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        chunkPromises.push(
+          xmlrpcCallFor(conn, 'prov_' + proveedorId, 'product.product', 'read', [chunk, ['id', 'image_256']])
+            .then(imgs => imgs.forEach(r => { if (r.image_256) imgPorId[proveedorId + '::' + r.id] = r.image_256; }))
+            .catch(e => console.warn('⚠ catalogo-pdf imágenes ' + proveedorId + ':', e.message))
+        );
+      }
+      await Promise.all(chunkPromises);
+    })());
   }
+  await Promise.all(promesas);
 
   const MM = 2.8346;
   const PAGE_W = 210 * MM, PAGE_H = 297 * MM, mg = 8 * MM;
@@ -1758,7 +1765,8 @@ app.get('/api/catalogo-pdf', async (req, res) => {
       hdr: cfg.hdr || '#191b1e', f1: cfg.f1 || 'Marcellus', f2: cfg.f2 || 'Jost'
     }, familia, subfamilia);
     const slug = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const nombreArchivo = 'catalogo-' + slug(familia) + (subfamilia ? '-' + slug(subfamilia) : '') + '.pdf';
+    const tiendaSlug = slug(cfg.nombre || v.nombre);
+    const nombreArchivo = tiendaSlug + '-catalogo-' + slug(familia) + (subfamilia ? '-' + slug(subfamilia) : '') + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo}"`);
     res.send(buffer);
