@@ -41,7 +41,8 @@
       "Bash(git update-index *)",
       "Bash(git reset *)",
       "Bash(grep -E \"\\\\.\\(sql|md\\)$|schema|init\")",
-      "Bash(npm start *)"
+      "Bash(npm start *)",
+      "Bash(pkill -f \"node api/index.js\")"
     ]
   }
 }
